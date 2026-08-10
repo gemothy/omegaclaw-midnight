@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
 """Measure whether the agent loop is doing useful work or spinning on reads.
 
-The failure this exists to catch: the agent burns nearly every turn re-reading
-lists that were truncated before it could act on them, never reaching the steps
-of its procedure that change the world. Measured on the unfixed harness:
-
-    mcity-threads 316, mcity-agents 212, mcity-work 28, mcity-eat 4,
-    mcity-trade 0  ->  93% of skill calls were redundant reads,
-    while the agent was starving holding 10,764 meme_coin.
+The failure this exists to catch: the agent burns turns re-reading lists that
+were truncated before it could act on them, never reaching the steps of its
+procedure that change the world.
 
 Read skills are not free: each one spends a turn. A healthy loop keeps the read
 ratio well under 100% and actually reaches its acting skills.
+
+Counting caveat, learned the hard way. An earlier version of this script scanned
+the whole log for `(mcity-...`, which also matched skill REGISTRATION and the
+SKILLS catalogue echoed into every prompt. That inflated the counts by orders of
+magnitude and produced a "93% redundant reads" figure that was an artefact, not a
+measurement. Only lines matching _DECISION_RE - the model's actual chosen actions
+- are counted now. Treat any pre-correction figure quoted elsewhere as void.
 
     python3 scripts/measure_loop_health.py --since 40m
     python3 scripts/measure_loop_health.py --since 1h --json
@@ -25,6 +28,9 @@ import json
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+from dockerlogs import read_window
 
 # Skills that only observe. Everything else changes the world or communicates.
 READ_SKILLS = (
@@ -50,19 +56,14 @@ _DECISION_RE = re.compile(r"\(RESPONSE: \((?!RESULTS:)(.*)$")
 
 
 def _logs(container, since, timeout):
-    try:
-        proc = subprocess.run(
-            ["docker", "logs", "--since", since, container],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        )
-    except FileNotFoundError:
-        return None, "docker not found on PATH"
-    except subprocess.TimeoutExpired:
-        return None, f"docker logs timed out after {timeout}s"
-    if proc.returncode != 0:
-        detail = (proc.stderr or "").strip().splitlines()
-        return None, detail[0] if detail else f"container {container!r} unavailable"
-    return (proc.stdout or "") + (proc.stderr or ""), None
+    """Windowed logs via our own clock.
+
+    `docker logs --since` is evaluated against the DAEMON's clock, which on this
+    host runs four hours behind the container, so it returned zero lines while
+    the agent logged every second - silently turning this measurement into
+    "0 skill calls". See scripts/dockerlogs.py.
+    """
+    return read_window(container, since, timeout=timeout)
 
 
 def measure(text):
