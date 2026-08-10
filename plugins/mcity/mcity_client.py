@@ -46,6 +46,7 @@ import atexit
 import functools
 import json
 import logging
+import os
 import re
 import socket
 import ssl
@@ -76,6 +77,19 @@ except ImportError:
         from src.config import config_get_by_key as _config_get_by_key
     except ImportError:  # offline unit tests: fall back to the defaults
         _config_get_by_key = None
+
+# Sibling modules of this plugin, imported absolutely by contract: src/plugin.py
+# appends the plugin directory to sys.path and loads mcity_client as a TOP-LEVEL
+# module, so there is no package for a relative import to resolve against
+# (docs/ARCHITECTURE-memory.md, "Module layout and import rules"). Grounded
+# memory is an enhancement: if it cannot even be imported the plugin keeps
+# serving, ungrounded and loudly marked store=degraded, instead of dying here.
+try:
+    from mcity_projection import Budgeter, Candidate, TurnState
+    from mcity_store import AgentObservation, make_store
+except Exception as e:  # noqa: BLE001 - a broken sibling must not kill the plugin
+    logger.error(f"mcity grounded-memory modules unavailable, degrading: {e}")
+    Budgeter = Candidate = TurnState = AgentObservation = make_store = None
 
 
 # --------------------------------------------------------------------------
@@ -109,6 +123,17 @@ MAX_RECONNECTS = 3                 # CONSECUTIVE failures, reset by any success
 RECONNECT_COOLDOWN_SECONDS = 900.0 # after a burst of failures, not a permanent stop
 ECHO_MEMORY = 32
 ECHO_MIN_OVERLAP = 24
+DEFAULT_MEMORY_BACKEND = "postgres"  # mcity_store backend: postgres | memory
+DEFAULT_PG_HOST = "127.0.0.1"
+DEFAULT_PG_PORT = 5433             # the dedicated pgvector container, NOT 5432
+DEFAULT_PG_DBNAME = "omegaclaw"
+DEFAULT_PG_USER = "omegaclaw"
+SPEAK_COOLDOWN_MS = 600_000        # candidates(): no re-greeting inside 10 min
+STORE_RETRY_SECONDS = 60.0         # rest a failing store between attempts, so a
+                                   # dead database costs one bounded attempt per
+                                   # window instead of one per skill call
+PROJECTION_FOOTER_RESERVE = 128    # rule-4 footers outrank the Budgeter's cap
+                                   # (measured overflow <= 96 chars per source)
 
 UNTRUSTED_OPEN = "<<MC_UNTRUSTED "
 UNTRUSTED_CLOSE = " MC_UNTRUSTED>>"
@@ -182,6 +207,12 @@ _last_mutation_at = 0.0     # monotonic
 _action_count = 0
 _inbound = deque(maxlen=ECHO_MEMORY)   # normalised text read out of the world
 _started = False
+_store_lock = threading.Lock()  # roster store init/rest state; never nested
+                                # inside _lock, and store calls never hold it
+_store = None                   # RosterStore | None once _store_ready is set
+_store_degraded = False         # the configured backend was lost or replaced
+_store_ready = False            # one-shot guard for _roster_store()
+_store_retry_at = 0.0           # monotonic; store calls are skipped until then
 
 
 # --------------------------------------------------------------------------
@@ -712,6 +743,223 @@ def _is_echo(text):
 
 
 # --------------------------------------------------------------------------
+# grounded memory: roster store + ranked projection
+# --------------------------------------------------------------------------
+# docs/ARCHITECTURE-memory.md is the binding contract. The store grounds the
+# roster ("who have I not spoken to" - a filter/sort problem, never a vector
+# one), the Budgeter replaces positional truncation with relevance-ranked
+# projection under an explicit budget, and every store touch degrades loudly
+# (store=degraded) instead of raising into the agent loop.
+
+def _store_settings(backend):
+    """The make_store() configuration for the resolved backend. The password
+    travels straight from the resolved config into the store; it is never
+    logged and never appears in a result (_redact could not catch it: it does
+    not look like a world token)."""
+    return {
+        "backend": backend,
+        "host": _c("pg_host", DEFAULT_PG_HOST),
+        "port": _c("pg_port", DEFAULT_PG_PORT),
+        "dbname": _c("pg_dbname", DEFAULT_PG_DBNAME),
+        "user": _c("pg_user", DEFAULT_PG_USER),
+        "password": _c("pg_password", ""),
+        # Store calls must be as bounded as world API calls (ARCHITECTURE-
+        # memory.md, "Degradation"): reuse the HTTP budget for the store's
+        # connect and per-statement timeouts.
+        "timeout": float(_c("http_timeout", DEFAULT_HTTP_TIMEOUT)),
+    }
+
+
+def _roster_store():
+    """The roster store, built lazily and exactly once. Never raises: memory
+    infrastructure is an enhancement and must never become a new way for the
+    agent to die. An unusable configured backend is logged once and replaced
+    by the bounded in-memory fallback, reported as store=degraded - falling
+    back on a failed health() probe is this caller's decision by contract
+    (mcity_store.make_store docstring), and it is never silent."""
+    global _store, _store_degraded, _store_ready
+    if _store_ready:
+        return _store
+    with _store_lock:
+        if _store_ready:
+            return _store
+        backend = (_text(_c("memory_backend", DEFAULT_MEMORY_BACKEND)).lower()
+                   or DEFAULT_MEMORY_BACKEND)
+        store = None
+        degraded = False
+        if make_store is not None:
+            try:
+                built = make_store(_store_settings(backend))
+                # health() never raises and is bounded by the store's own
+                # connect/statement timeouts.
+                if built.health():
+                    store = built
+                else:
+                    logger.error(f"mcity roster store ({backend}) is unreachable")
+            except Exception as e:  # noqa: BLE001 - init must never escape
+                logger.error(f"mcity roster store ({backend}) could not be built: {e}")
+            if store is None and backend != "memory":
+                try:
+                    store = make_store({"backend": "memory"})
+                    degraded = True
+                    logger.error(
+                        "mcity roster store degraded: serving from the bounded "
+                        "in-memory fallback; spoke counts reset at restart and "
+                        "every affected result will carry store=degraded")
+                except Exception as e:  # noqa: BLE001 - stay alive regardless
+                    logger.error(f"mcity in-memory roster fallback failed: {e}")
+        _store = store
+        _store_degraded = degraded or store is None
+        _store_ready = True
+    return _store
+
+
+def _store_call(op, default=None):
+    """Run one roster-store operation; returns (value, ok) and never raises.
+    Each attempt is bounded by the store's own timeouts, and after a failure
+    the store rests for STORE_RETRY_SECONDS so a dead database cannot charge
+    that bound to every subsequent skill call. The turn that hit the failure
+    renders without roster ranking and is marked store=degraded."""
+    global _store_retry_at
+    store = _roster_store()
+    if store is None:
+        return default, False
+    with _store_lock:
+        resting = time.monotonic() < _store_retry_at
+    if resting:
+        return default, False
+    try:
+        value = op(store)
+    except Exception as e:  # noqa: BLE001 - never into the agent loop
+        with _store_lock:
+            _store_retry_at = time.monotonic() + STORE_RETRY_SECONDS
+        logger.warning("mcity roster store call failed, resting the store for "
+                       f"{int(STORE_RETRY_SECONDS)}s: {e}")
+        return default, False
+    with _store_lock:
+        _store_retry_at = 0.0
+    return value, True
+
+
+def _degraded(*oks):
+    """True when this turn's grounding is not trustworthy: the grounded-memory
+    modules are missing, the configured backend fell back at init, or any
+    store call inside the current skill failed."""
+    return _store_degraded or make_store is None or not all(oks)
+
+
+def _stamp_degraded(result):
+    """Append store=degraded to the head line of an already-built result (for
+    lines assembled by shared code such as _submit)."""
+    head, sep, tail = result.partition("\n")
+    return head + " store=degraded" + sep + tail
+
+
+def _yn(value):
+    """Flag-ish wire value -> yes|no, None when the world did not state it."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (int, float)):
+        return "yes" if value != 0 else "no"
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in ("true", "1", "yes", "y", "on"):
+            return "yes"
+        if word in ("false", "0", "no", "n", "off"):
+            return "no"
+    return None
+
+
+class _ScoredSource:
+    """Pre-scored skill rows behind the ContextSource protocol: the skill owns
+    the ranking, the Budgeter owns what fits and the rule-4 drop footer."""
+
+    weight = 1.0
+
+    def __init__(self, name, ranking, rows):
+        self.name = name
+        self._ranking = ranking
+        self._rows = rows           # [(text, score)], any order
+
+    def candidates(self, turn):
+        return [Candidate(text=text, score=score, source=self.name)
+                for text, score in self._rows]
+
+    def summary_for_dropped(self, shown, total):
+        return f"[{self.name}: {shown} of {total} shown, ranked by {self._ranking}]"
+
+
+def _project(head, name, ranking, rows):
+    """Rank-and-fit `rows` ((text, score) pairs) under the explicit budget:
+    `max_result_chars` minus the head line already emitted and minus
+    PROJECTION_FOOTER_RESERVE. Rule-4 footers outrank the Budgeter's own cap
+    and may overrun the budget it was given; the reserve absorbs that, so the
+    final result stays inside `max_result_chars` and `_cap()` never truncates
+    a projected result - silent truncation is the original defect."""
+    if Budgeter is None:            # siblings unimportable: the legacy join,
+        return "\n".join(text for text, _score in rows)  # bounded by _cap()
+    limit = int(_c("max_result_chars", DEFAULT_MAX_RESULT_CHARS))
+    budget = max(0, limit - len(head) - 1 - PROJECTION_FOOTER_RESERVE)
+    source = _ScoredSource(name, ranking, rows)
+    return Budgeter().render([source], TurnState(now_ms=_now_ms()), budget)
+
+
+def _parse_agent(item):
+    """The wire fields of one /agents entry, gathered in one place."""
+    return {
+        "id": _text(_get(item, "agentId", "id")),
+        "name": _get(item, "name", "displayName"),
+        "status": _get(item, "status"),
+        "open": _get(item, "isOpenToTalk"),
+        "talking": _get(item, "isTalkingToYou"),
+        "can_speak": _get(item, "canSpeak"),
+        "same_map": _get(item, "isOnSameMap"),
+        "dist": _get(item, "distance", "dist"),
+        "profession": _get(item, "profession"),
+    }
+
+
+def _agent_observation(entry, now_ms):
+    """One parsed /agents row -> the store's FULL observation schema. Mapping
+    every field is half of the grounding fix: the old renderer kept only
+    id/name/dist, so `status` never reached the model although the prompt
+    filters on it, and isTalkingToYou - someone already addressing us - was
+    thrown away (docs/ARCHITECTURE-memory.md, "Observation schema")."""
+    name = entry["name"]
+    status = entry["status"]
+    profession = entry["profession"]
+    return AgentObservation(
+        agent_id=entry["id"],
+        name=name if isinstance(name, str) else None,
+        status=status if isinstance(status, str) else None,
+        is_open_to_talk=entry["open"],
+        is_talking_to_you=entry["talking"],
+        can_speak=entry["can_speak"],
+        is_on_same_map=entry["same_map"],
+        dist=entry["dist"],
+        profession=profession if isinstance(profession, str) else None,
+        observed_at_ms=now_ms,
+    )
+
+
+def _agent_row(entry, spoke_count):
+    """One roster row. `status` and the open/talking indicators are mandatory:
+    the system prompt says to speak to an agent whose status is idle, which
+    the model can only follow if the row actually carries them."""
+    status = entry["status"]
+    return _row((
+        ("id", _plain(entry["id"])),
+        ("name", _plain(entry["name"])),
+        ("status", _plain(status) if _text(status) else "unknown"),
+        ("open", _yn(entry["open"])),
+        ("talking", "yes" if _yn(entry["talking"]) == "yes" else None),
+        ("dist", _plain(entry["dist"])),
+        ("prof", _plain(entry["profession"])),
+        ("spoke", spoke_count),
+    ))
+
+
+# --------------------------------------------------------------------------
 # lease management
 # --------------------------------------------------------------------------
 
@@ -1054,6 +1302,32 @@ def _resolve_config(gateway_url, agent_id, mode):
         name for name in (_norm_arg(entry) for entry in merchants) if name
     )
     cfg["trade_max_quantity"] = int(_number(_config("mcityTradeMaxQuantity", 0), 0, 0, 1_000_000))
+
+    # Roster store (docs/ARCHITECTURE-memory.md). The PG_* keys reach the
+    # environment as OMEGACLAW_PG_* through config_get_by_key's OMEGACLAW_<key>
+    # lookup, matching docker-compose.yml and Autotests/test_mcity_store.py.
+    backend = _text(_config("mcityMemoryBackend", DEFAULT_MEMORY_BACKEND)).lower()
+    if backend not in ("postgres", "memory"):
+        if backend:
+            logger.warning(f"Unknown mcityMemoryBackend {backend!r}, "
+                           f"falling back to {DEFAULT_MEMORY_BACKEND}")
+        backend = DEFAULT_MEMORY_BACKEND
+    cfg["memory_backend"] = backend
+    cfg["pg_host"] = _text(_config("PG_HOST", DEFAULT_PG_HOST)) or DEFAULT_PG_HOST
+    cfg["pg_port"] = int(_number(_config("PG_PORT", DEFAULT_PG_PORT),
+                                 DEFAULT_PG_PORT, 1, 65535))
+    # Both spellings are honoured: OMEGACLAW_PG_DB is what docker-compose.yml
+    # and docs/reference-grounded-memory.md use, OMEGACLAW_PG_DBNAME is what
+    # Autotests/test_mcity_store.py uses. They default to the same database.
+    cfg["pg_dbname"] = (_text(_config("PG_DB", ""))
+                        or _text(_config("PG_DBNAME", ""))
+                        or DEFAULT_PG_DBNAME)
+    cfg["pg_user"] = _text(_config("PG_USER", DEFAULT_PG_USER)) or DEFAULT_PG_USER
+    # The password deliberately bypasses _config: config_get_by_key logs every
+    # value it resolves, and no credential may ever reach a log line. It still
+    # arrives through the environment, as OMEGACLAW_PG_PASSWORD, exactly like
+    # the other OMEGACLAW_PG_* keys resolved above.
+    cfg["pg_password"] = os.environ.get("OMEGACLAW_PG_PASSWORD", "")
     return cfg
 
 
@@ -1222,6 +1496,9 @@ def status():
     pairs.append(("gateway", _gateway_state))
     if _skills_state == "degraded":
         pairs.append(("skills", "degraded"))
+    if _degraded():
+        # Reported, never probed: status must not pay a store init to answer.
+        pairs.append(("store", "degraded"))
     if detail:
         pairs.append(("detail", detail))
     if not _started:
@@ -1304,19 +1581,58 @@ def agents():
     items = _find_list(payload, "agents")
     if items is None:
         return _line("AGENTS", "OK", (), _flatten(payload))
-    rows = []
+
+    now = _now_ms()
+    roster = []
     for item in items:
         if not isinstance(item, dict):
             continue
-        name = _get(item, "name", "displayName")
-        if isinstance(name, str):
-            _remember_inbound(name)
-        rows.append(_row((
-            ("id", _plain(_get(item, "agentId", "id"))),
-            ("name", _plain(name)),
-            ("dist", _plain(_get(item, "distance"))),
-        )))
-    return _line("AGENTS", "OK", (("count", len(items)),), rows or ["- none"])
+        entry = _parse_agent(item)
+        if isinstance(entry["name"], str):
+            _remember_inbound(entry["name"])
+        roster.append(entry)
+
+    # Ground every observation BEFORE rendering anything: the store keeps all
+    # the fields, so nothing shown or dropped below is lost to the roster.
+    upsert_ok = rank_ok = True
+    ranked = []
+    if roster and AgentObservation is not None:
+        observed = [_agent_observation(entry, now)
+                    for entry in roster if entry["id"]]
+        if observed:
+            _unused, upsert_ok = _store_call(
+                lambda store: store.upsert_agents(observed))
+        ranked, rank_ok = _store_call(
+            lambda store: store.candidates(now_ms=now,
+                                           cooldown_ms=SPEAK_COOLDOWN_MS,
+                                           limit=len(roster)),
+            default=[])
+
+    # Ranked greeting candidates first (talking, then unspoken-oldest-nearest:
+    # the anti-greeting-loop order), then everyone else. When the store failed
+    # this turn the ranked list is empty and the whole roster degrades to
+    # observation order - still talking-first, because that flag arrives in
+    # the live payload rather than the store, then nearest-first.
+    by_id = {entry["id"]: entry for entry in roster if entry["id"]}
+    spoke = {row.agent_id: row.spoke_count for row in ranked}
+    ranked_ids = [row.agent_id for row in ranked if row.agent_id in by_id]
+    ranked_set = set(ranked_ids)
+    rest = [entry for entry in roster if entry["id"] not in ranked_set]
+    rest.sort(key=lambda entry: (
+        _yn(entry["talking"]) != "yes",
+        _number(entry["dist"], float("inf"), 0.0, float("inf"))))
+    ordered = [by_id[agent_id] for agent_id in ranked_ids] + rest
+
+    total = len(ordered) or 1
+    rows = [(_agent_row(entry, spoke.get(entry["id"])), (total - index) / total)
+            for index, entry in enumerate(ordered)]
+
+    pairs = [("count", len(items))]
+    if _degraded(upsert_ok, rank_ok):
+        pairs.append(("store", "degraded"))
+    head = _line("AGENTS", "OK", pairs)
+    body = _project(head, "roster", "talking-then-unspoken-then-nearest", rows)
+    return _line("AGENTS", "OK", pairs, body.splitlines() if body else ["- none"])
 
 
 @_guard("NAVIGATION")
@@ -1431,25 +1747,64 @@ def threads(_ignored=None):
     items = _find_list(payload, "threads")
     if items is None:
         return _line("THREADS", "OK", (), _flatten(payload))
+
+    own_id = _c("agent_id", "")
     rows = []
+    links = []
+    index = 0
     for item in items:
         if not isinstance(item, dict):
             continue
+        thread_id = _get(item, "threadId", "id")
         participants = _get(item, "participants", "participantIds", "with")
+        others = []
         if isinstance(participants, (list, tuple)):
+            others = [str(part).strip() for part in participants
+                      if isinstance(part, str) and part.strip()
+                      and part.strip() != own_id]
             participants = ", ".join(str(part) for part in participants[:MAX_LIST_ITEMS])
         preview = _get(item, "messageBody", "lastMessageBody", "preview",
                        "lastMessage", "lastMessagePreview")
+        sender = _get(item, "lastMessageSenderId", "lastSenderAgentId",
+                      "lastSenderId", "senderAgentId")
         if isinstance(preview, dict):
+            if sender is None:
+                sender = _get(preview, "senderAgentId", "agentId", "fromAgentId")
             preview = preview.get("text")
         if isinstance(preview, str):
             _remember_inbound(preview)
-        rows.append(_row((
-            ("thread", _plain(_get(item, "threadId", "id"))),
+        # mine=no is a person waiting on our reply; the ranking exists so that
+        # those threads are the ones that survive the budget, exactly like the
+        # ACTION REQUIRED imperative inside mcity-thread.
+        mine = None
+        if own_id and isinstance(sender, str) and sender.strip():
+            mine = "yes" if sender.strip() == own_id else "no"
+        band = 1.0 if mine == "no" else (0.3 if mine == "yes" else 0.6)
+        rows.append((_row((
+            ("thread", _plain(thread_id)),
             ("with", _clean(participants) if participants else None),
+            ("mine", mine),
             ("last", _clean(preview) if isinstance(preview, str) and preview else None),
-        )))
-    return _line("THREADS", "OK", (("count", len(items)),), rows or ["- none"])
+        )), band - min(index, 400) * 0.0005))
+        index += 1
+        if (AgentObservation is not None and isinstance(thread_id, str)
+                and thread_id.strip() and len(others) == 1
+                and ID_RE.match(others[0])):
+            # A threads listing is what reveals which thread belongs to which
+            # agent (mcity_store.AgentObservation docstring): record the link.
+            links.append(AgentObservation(agent_id=others[0],
+                                          thread_id=thread_id.strip()))
+
+    link_ok = True
+    if links:
+        _unused, link_ok = _store_call(lambda store: store.upsert_agents(links))
+
+    pairs = [("count", len(items))]
+    if _degraded(link_ok):
+        pairs.append(("store", "degraded"))
+    head = _line("THREADS", "OK", pairs)
+    body = _project(head, "threads", "waiting-first", rows)
+    return _line("THREADS", "OK", pairs, body.splitlines() if body else ["- none"])
 
 
 @_guard("THREAD")
@@ -1928,6 +2283,8 @@ def harvest(arg=None):
 
 @_guard("SPEAK")
 def speak(arg=None):
+    sent = {}
+
     def build():
         parts = _split(arg, 2)
         if parts is None or not ID_RE.match(parts[0]):
@@ -1939,10 +2296,23 @@ def speak(arg=None):
         if _is_echo(text):
             return None, _failed("SPEAK", "bad_args",
                                  "do not repeat text written by another agent")
+        sent["agent_id"], sent["text"] = parts[0], text
         # The text is NOT sanitised beyond the whitespace collapse of
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
         return {"kind": "speak", "targetAgentId": parts[0], "text": text}, None
-    return _mutate("SPEAK", build)
+
+    result = _mutate("SPEAK", build)
+    if sent and result.startswith("MCITY-SPEAK-OK") \
+            and "outcome=delivered" in result.partition("\n")[0]:
+        # Ground the delivery: spoke_count is the anti-greeting-loop counter
+        # that candidates() ranks on. A store failure must never fail a speak
+        # that already happened; it only marks the turn as ungrounded.
+        _unused, spoken_ok = _store_call(
+            lambda store: store.mark_spoken(sent["agent_id"], _now_ms(),
+                                            sent["text"]))
+        if _degraded(spoken_ok):
+            result = _stamp_degraded(result)
+    return result
 
 
 @_guard("TRADE")
