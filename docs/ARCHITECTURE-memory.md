@@ -22,6 +22,23 @@ information by string position rather than relevance.
 Fix: replace positional truncation with **relevance-ranked projection under an
 explicit budget**, backed by a queryable store.
 
+## Module layout and import rules
+
+`src/plugin.py:addLocationToPath` does `sys.path.append(<plugin dir>)`, so
+`mcity_client` is imported as a **top-level module, not a package**. Therefore:
+
+- Sibling modules must be imported **absolutely** (`from mcity_store import ...`).
+  Relative imports (`from .store import ...`) will fail.
+- The plugin directory is appended *last* on `sys.path`, so a generic top-level name
+  is silently shadowed by any installed package of the same name. All modules are
+  namespaced to avoid this:
+
+```
+plugins/mcity/mcity_client.py       # existing, integration point
+plugins/mcity/mcity_projection.py   # Candidate / ContextSource / Budgeter
+plugins/mcity/mcity_store/          # RosterStore + backends
+```
+
 ## Interfaces
 
 ### 1. `RosterStore` — structured world state

@@ -1,0 +1,83 @@
+# Midnight City agent stack: grounded-memory Postgres + the OmegaClaw agent.
+#
+# This is the packaged equivalent of ~/bin/omegaclaw-memory-up and
+# ~/bin/omegaclaw-midnight-up. Either path works; compose is the one to hand to
+# someone adopting this as a framework.
+#
+#   cp .env.example .env      # then fill in secrets, chmod 600
+#   docker compose up -d
+#
+# Secrets are read from .env (git-ignored, never baked into the image).
+
+services:
+  postgres:
+    # pgvector, not plain postgres: the semantic layer shares this instance and
+    # stock postgres:16-alpine has no `vector` extension.
+    image: pgvector/pgvector:pg16
+    container_name: omegaclaw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${OMEGACLAW_PG_DB:-omegaclaw}
+      POSTGRES_USER: ${OMEGACLAW_PG_USER:-omegaclaw}
+      POSTGRES_PASSWORD: ${OMEGACLAW_PG_PASSWORD:?set OMEGACLAW_PG_PASSWORD in .env}
+    ports:
+      # Loopback-only. Do not expose this to the network.
+      - "127.0.0.1:${OMEGACLAW_PG_PORT:-5433}:5432"
+    volumes:
+      - omegaclaw-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${OMEGACLAW_PG_USER:-omegaclaw} -d ${OMEGACLAW_PG_DB:-omegaclaw}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: {max-size: "20m", max-file: "3"}
+
+  omegaclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: omegaclaw-midnight:latest
+    container_name: omegaclaw
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Host networking: the agent reaches the world gateway and the local LLM on
+    # loopback. tty/stdin are REQUIRED - without a TTY nginx cannot open
+    # /dev/stderr as www-data and the container crash-loops with [emerg].
+    network_mode: host
+    tty: true
+    stdin_open: true
+    init: true
+    security_opt:
+      - "no-new-privileges:true"
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /var/tmp:size=64m,mode=1777
+      - /run:size=16m,mode=755
+    volumes:
+      - omegaclaw-memory:/PeTTa/repos/OmegaClaw-Core/memory
+    env_file:
+      # Optional so a fresh clone fails with the actionable "set MCITY_AGENT_ID
+      # in .env" message below, rather than an opaque "env file not found".
+      - path: .env
+        required: false
+    command:
+      - "commchannel=telegram"
+      - "provider=OpenAIAPI"
+      - "embeddingprovider=Local"
+      - "model=${OMEGACLAW_MODEL:-nvidia/Qwen3.6-35B-A3B-NVFP4}"
+      - "openaiapi_url=${OMEGACLAW_LLM_URL:-http://localhost:8000/v1/}"
+      - "mcityMode=${MCITY_MODE:-control}"
+      - "mcityAgentId=${MCITY_AGENT_ID:?set MCITY_AGENT_ID in .env}"
+      - "securityPolicyPath=/PeTTa/repos/OmegaClaw-Core/profile/policy.yaml"
+      - "TG_POLL_TIMEOUT=20"
+    logging:
+      driver: json-file
+      options: {max-size: "50m", max-file: "3"}
+
+volumes:
+  omegaclaw-pgdata:
+  omegaclaw-memory:
