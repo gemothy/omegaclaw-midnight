@@ -39,6 +39,15 @@ ACT_SKILLS = (
 
 _SKILL_RE = re.compile(r"\((mcity-[a-z-]+|send)\b")
 
+# Only the model's chosen actions count. A naive scan over the whole log also
+# matches skill REGISTRATION (`add-skill mcity-...`) and the SKILLS catalogue
+# echoed in every prompt, which a restart injects by the hundred - that inflated
+# a 6-minute window to 7,266 "reads". The agent's decisions appear as
+#   ... | loop | (RESPONSE: ((mcity-threads) (mcity-agents)))
+# whereas skill RESULTS come back as `(RESPONSE: (RESULTS:`, which is not a
+# decision and must not be counted either.
+_DECISION_RE = re.compile(r"\(RESPONSE: \((?!RESULTS:)(.*)$")
+
 
 def _logs(container, since, timeout):
     try:
@@ -57,7 +66,10 @@ def _logs(container, since, timeout):
 
 
 def measure(text):
-    counts = collections.Counter(_SKILL_RE.findall(text))
+    decisions = "\n".join(m.group(1) for m in
+                          (_DECISION_RE.search(line) for line in text.splitlines())
+                          if m)
+    counts = collections.Counter(_SKILL_RE.findall(decisions))
     reads = sum(counts[s] for s in READ_SKILLS)
     acts = sum(counts[s] for s in ACT_SKILLS)
     total = reads + acts
