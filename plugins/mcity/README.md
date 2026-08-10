@@ -15,6 +15,8 @@ the agent, and every byte of world text the model sees is inert.
 |---|---|
 | `plugins/mcity/mcity.metta` | plugin entry point: configuration, skill registration, dispatch |
 | `plugins/mcity/mcity_client.py` | the whole client (standard library only) |
+| `plugins/mcity/mcity_projection.py` | relevance-ranked context projection: replaces positional truncation, always reports what it dropped |
+| `plugins/mcity/mcity_store/` | roster store (Postgres/pgvector, in-memory for tests): who is here, who is open to talk, who we have already spoken to |
 | `proxy/nginx.conf.template` | the `/mcity/` gateway routes: credential injection, method allowlist, request budget |
 | `entrypoint.sh` | renders `MCITY_OBSERVER_URL`, refuses to boot if a token is passed as an argument |
 | `config/config.yaml` | the `# Midnight City` section |
