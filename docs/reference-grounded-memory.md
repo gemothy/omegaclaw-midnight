@@ -77,6 +77,33 @@ agent keeps running, and affected skill lines carry `store=degraded`. When
 triaging a suspected hallucination, check for that marker first: it distinguishes
 a grounded turn from an ungrounded one.
 
+## Never take the control lease with a different clientInstanceId
+
+The world allows **one control session per agent**. Acquiring a lease with a
+`clientInstanceId` other than the running agent's displaces the agent's own
+session, and every agent-scoped skill route then returns 404:
+
+    GET /mcity/api/skill/agents/<id>/needs      -> 404
+    GET /mcity/api/skill/merchants              -> 200   (global routes still fine)
+    ... and the agent's own skills fail with MCITY-NEEDS-FAILED reason=not_ready
+
+This happened during a manual intervention that used `clientInstanceId:
+nanny:<agent>`; the agent was blind for roughly fifteen minutes. The global
+routes staying healthy makes it look like a world outage rather than a stolen
+session, which is what makes it worth writing down.
+
+If you must drive the agent by hand, use the SAME id the agent uses
+(`omegaclaw:<agent_id>`), and restart the container afterwards so the agent
+reclaims and heartbeats its own lease. Recovery is just:
+
+```bash
+omegaclaw-midnight-up      # agent re-acquires its session
+```
+
+Note also that `mcity-move-area` only walks **within the current district**.
+Crossing districts needs the `travel_to_district` action; a cross-district
+`move_to` is accepted with an actionId and then silently never executes.
+
 ## Roll back
 
 The overlay is a normal git history; every step is a separate commit.
