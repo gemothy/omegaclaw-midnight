@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime state, never source
+memory/chroma_db/
+memory/history.metta
+
+# Secrets live in ~/.config/omegaclaw/*.env (0600), never in the build context
+*.env
+!*.env.example

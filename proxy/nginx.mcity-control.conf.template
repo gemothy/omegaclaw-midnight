@@ -1,0 +1,72 @@
+# Midnight City direct-control routes.
+#
+# Rendered into /opt/nginx/mcity-control.conf by proxy/nginx.sh ONLY when
+# entrypoint.sh resolved mcityMode=control with a non-empty mcityAgentId and a
+# non-empty MCITY_API_TOKEN. In every other case that file is a comment and the
+# `location /mcity/ { return 403; }` rule in nginx.conf.template answers here.
+#
+# The file is included inside the `server` block, so it may only contain
+# `location` blocks. It contains the master token in clear text after envsubst
+# and is written 0600 www-data, like nginx.conf itself.
+
+# -- class 2: lease acquisition, master token injected, POST only -------------
+# The plugin takes exactly one lease at load time and one more after an outage,
+# so the bucket is deliberately far tighter than the heartbeat's.
+location = /mcity/api/local-control/session {
+    limit_except POST { deny all; }
+    limit_req zone=mcity_session burst=1 nodelay;
+    proxy_pass ${MCITY_OBSERVER_URL}api/local-control/session;
+    proxy_set_header Authorization "Bearer ${MCITY_API_TOKEN}";
+    proxy_set_header Host $proxy_host;
+    proxy_set_header Content-Type $content_type;
+    proxy_ssl_server_name on;
+    proxy_ssl_protocols TLSv1.2 TLSv1.3;
+    proxy_http_version 1.1;
+    proxy_read_timeout 20s;
+}
+
+# -- class 3: lease-token routes. Authorization is NOT set here: the
+# per-session lease token supplied by the plugin must pass through. A caller
+# without that token (which lives only in the plugin's memory) gets nothing.
+location = /mcity/api/local-control/session/heartbeat {
+    limit_except POST { deny all; }
+    limit_req zone=mcity_beat burst=5 nodelay;
+    if ($http_authorization = "") { return 403; }
+    proxy_pass ${MCITY_OBSERVER_URL}api/local-control/session/heartbeat;
+    proxy_set_header Host $proxy_host;
+    proxy_set_header Content-Type $content_type;
+    proxy_ssl_server_name on;
+    proxy_ssl_protocols TLSv1.2 TLSv1.3;
+    proxy_http_version 1.1;
+    proxy_read_timeout 20s;
+}
+
+location = /mcity/api/local-control/session/release {
+    limit_except POST { deny all; }
+    limit_req zone=mcity_beat burst=2 nodelay;
+    if ($http_authorization = "") { return 403; }
+    proxy_pass ${MCITY_OBSERVER_URL}api/local-control/session/release;
+    proxy_set_header Host $proxy_host;
+    proxy_set_header Content-Type $content_type;
+    proxy_ssl_server_name on;
+    proxy_ssl_protocols TLSv1.2 TLSv1.3;
+    proxy_http_version 1.1;
+    proxy_read_timeout 20s;
+}
+
+location = /mcity/api/actions {
+    limit_except POST { deny all; }
+    limit_req zone=mcity_write burst=3 nodelay;
+    # No credential is injected here either: an action is only accepted by the
+    # world when it carries a live lease token, and that token never leaves the
+    # plugin's memory. Refuse unauthenticated submissions at the gateway rather
+    # than forwarding them to the shared world.
+    if ($http_authorization = "") { return 403; }
+    proxy_pass ${MCITY_OBSERVER_URL}api/actions;
+    proxy_set_header Host $proxy_host;
+    proxy_set_header Content-Type $content_type;
+    proxy_ssl_server_name on;
+    proxy_ssl_protocols TLSv1.2 TLSv1.3;
+    proxy_http_version 1.1;
+    proxy_read_timeout 20s;
+}
