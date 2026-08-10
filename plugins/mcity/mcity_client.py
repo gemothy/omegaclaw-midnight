@@ -1698,6 +1698,13 @@ def merchants():
         y = _plain(_get(position, "y"))
         pos = ",".join(part for part in (space, x, y) if part is not None) or None
         name = _get(item, "merchantName", "name")
+        # A ready-to-use argument string. `item` is what the agent HANDS OVER,
+        # which is the opposite of what it is usually reaching for, and naming
+        # the wanted item instead is the single most common trade failure:
+        #   (mcity-trade "to_go_food 50 Central Mart Outlet")
+        #   -> not enough to_go_food to trade: have 0, need 50
+        # Emitting the exact string to copy removes the inversion entirely, the
+        # same way copying an agent id verbatim makes mcity-speak reliable.
         rows.append(_row((
             ("name", _merchant_label(name)),
             ("src", _plain(_get(item, "source"))),
@@ -1707,8 +1714,36 @@ def merchants():
             ("item", _plain(_get(item, "itemId"))),
             ("min", _plain(_get(item, "minQuantity"))),
             ("batch", _plain(_get(item, "batchMultiple"))),
+            ("cmd", _trade_cmd(item, name)),
         )))
     return _line("MERCHANTS", "OK", (("count", len(items)),), rows or ["- none"])
+
+
+def _trade_cmd(item, name):
+    """The exact mcity-trade argument for this merchant: what to hand over, at
+    the smallest legal quantity, then the merchant name copied verbatim.
+
+    Returns None when any part is missing, so a partial row never renders a
+    command that would fail."""
+    pay = _get(item, "itemId")
+    minimum = _get(item, "minQuantity")
+    batch = _get(item, "batchMultiple")
+    # _merchant_label, not _plain: names contain spaces so _plain quarantines
+    # them as untrusted, and a wrapped name is exactly what the agent must not
+    # echo back. See _merchant_label's own note on this failure.
+    label = _merchant_label(name)
+    if pay is None or label is None:
+        return None
+    try:
+        quantity = int(minimum if minimum is not None else 0)
+        step = int(batch) if batch else 0
+    except (TypeError, ValueError):
+        return None
+    if quantity <= 0:
+        return None
+    if step > 0 and quantity % step:
+        quantity += step - (quantity % step)     # round up to a legal batch
+    return f"{_plain(pay)} {quantity} {label}"
 
 
 @_guard("RECENT-EVENTS")
@@ -2395,4 +2430,21 @@ def trade(arg=None):
                 "merchantName": merchant,
                 "itemId": item_id,
                 "quantity": quantity}, None
-    return _mutate("TRADE", build)
+    result = _mutate("TRADE", build)
+    if "MCITY-TRADE-FAILED" not in (result or ""):
+        return result
+    # The world explains the inversion perfectly - "not enough to_go_food to
+    # trade: have 0, need 50" - but says it inside MC_UNTRUSTED markers the
+    # agent is correctly told never to obey, so it discounts the explanation
+    # and retries the same wrong argument. Restate it in TRUSTED harness text
+    # built from our own inventory read.
+    payload, error = _skill_read("TRADE", "inventory")
+    if error is not None or not isinstance(payload, dict):
+        return result
+    held = payload.get("inventory")
+    if not isinstance(held, dict):
+        return result
+    summary = " ".join(f"{k}={_plain(v)}" for k, v in sorted(held.items())) or "nothing"
+    return _out(f"{result}\nholding={summary}"
+                "\nnote=the first value is what you HAND OVER and must be an item "
+                "you already hold; copy the cmd= field from mcity-merchants")

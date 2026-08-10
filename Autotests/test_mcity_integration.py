@@ -477,3 +477,30 @@ def test_get_reads_nested_offer_terms():
     # Top level still takes precedence over both nested objects.
     assert mc._get({"itemId": "top", "trade": {"itemId": "nested"}},
                         "itemId") == "top"
+
+
+def test_trade_cmd_is_copy_ready():
+    """The agent must be able to lift cmd= verbatim into mcity-trade.
+
+    Two ways this silently breaks: naming the RECEIVED item instead of the one
+    handed over (the world then answers 'not enough to_go_food: have 0'), and
+    emitting the merchant name through _plain, which quarantines any name
+    containing spaces as untrusted and so cannot be echoed back."""
+    merchant = {
+        "name": "Central Fresh Fish Outlet",
+        "offer": {"acceptsItemId": "crystal", "acceptsQuantity": 50,
+                  "paysItemId": "fish", "paysQuantity": 1},
+        "trade": {"itemId": "crystal", "minQuantity": 50, "batchMultiple": 50},
+    }
+    cmd = mc._trade_cmd(merchant, merchant["name"])
+    assert cmd == "crystal 50 Central Fresh Fish Outlet"
+    assert "MC_UNTRUSTED" not in cmd          # must be echoable
+    assert not cmd.startswith("fish")         # never the received item
+
+    # Quantity rounds UP to a legal batch multiple.
+    m2 = dict(merchant, trade={"itemId": "crystal", "minQuantity": 30,
+                               "batchMultiple": 50})
+    assert mc._trade_cmd(m2, m2["name"]) == "crystal 50 Central Fresh Fish Outlet"
+
+    # A partial row renders no command rather than a broken one.
+    assert mc._trade_cmd({"name": "X", "trade": {}}, "X") is None
