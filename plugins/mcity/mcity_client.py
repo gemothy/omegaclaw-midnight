@@ -2260,7 +2260,31 @@ def work():
 
 @_guard("EAT")
 def eat():
-    return _mutate("EAT", lambda: ({"kind": "eat"}, None))
+    """Eat from inventory, and on failure state what is actually held.
+
+    The world's refusal arrives as prose inside MC_UNTRUSTED markers, which the
+    agent is correctly instructed never to obey. Observed consequence: it read
+    "not enough edible food to eat", discounted it as untrusted world text,
+    trusted its own stale history saying it had bought fish, and re-issued eat
+    eighteen times in ten minutes while starving.
+
+    So we restate the fact in TRUSTED harness text, derived from our own
+    inventory read rather than from anything the world said. `holding=` is
+    ground truth the agent may act on; the world's prose stays quarantined."""
+    result = _mutate("EAT", lambda: ({"kind": "eat"}, None))
+    if "MCITY-EAT-FAILED" not in (result or ""):
+        return result
+    payload, error = _skill_read("EAT", "inventory")
+    if error is not None or not isinstance(payload, dict):
+        return result
+    held = payload.get("inventory")
+    if not isinstance(held, dict):
+        return result
+    if held:
+        summary = " ".join(f"{name}={_plain(count)}" for name, count in sorted(held.items()))
+    else:
+        summary = "nothing"
+    return _out(f"{result}\nholding={summary}")
 
 
 @_guard("SLEEP")
