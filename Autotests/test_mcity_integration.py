@@ -449,3 +449,31 @@ def test_resolve_config_reads_the_omegaclaw_pg_environment(monkeypatch):
     assert cfg["pg_dbname"] == "omegaclaw"
     assert cfg["pg_user"] == "omegaclaw"
     assert cfg["pg_password"] == "test-secret-0001"  # straight from the env
+
+
+# ---------------------------------------------------------------------------
+# Regression: merchant offer terms must survive rendering
+# ---------------------------------------------------------------------------
+
+def test_get_reads_nested_offer_terms():
+    """The merchants endpoint nests what a merchant gives/takes under `offer`
+    and the payment terms under `trade`. Reading only `trade` blanked `gives`
+    and `for` on every row, so the agent could not tell which merchant sold
+    food nor that fish costs crystal - it starved holding 14,200 crystal."""
+    merchant = {
+        "name": "Central Fresh Fish Outlet",
+        "offer": {"acceptsItemId": "crystal", "acceptsQuantity": 50,
+                  "paysItemId": "fish", "paysQuantity": 1},
+        "trade": {"itemId": "crystal", "minQuantity": 50, "batchMultiple": 50},
+    }
+    assert mc._get(merchant, "paysItemId") == "fish"
+    assert mc._get(merchant, "paysQuantity") == 1
+    assert mc._get(merchant, "acceptsItemId") == "crystal"
+    assert mc._get(merchant, "acceptsQuantity") == 50
+    # `trade` still wins for the payment terms it owns.
+    assert mc._get(merchant, "itemId") == "crystal"
+    assert mc._get(merchant, "minQuantity") == 50
+    assert mc._get(merchant, "batchMultiple") == 50
+    # Top level still takes precedence over both nested objects.
+    assert mc._get({"itemId": "top", "trade": {"itemId": "nested"}},
+                        "itemId") == "top"

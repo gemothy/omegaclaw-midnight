@@ -608,17 +608,29 @@ def _find_list(payload, *keys):
 
 
 def _get(item, *names):
-    """First present, non-None field of a dict, also looking inside `trade`."""
+    """First present, non-None field of a dict, also looking inside the nested
+    `trade` and `offer` objects.
+
+    `offer` matters: the merchants endpoint nests what a merchant hands over and
+    what it takes in return under `offer`, while only the payment terms sit under
+    `trade`. Reading `trade` alone rendered every merchant row as
+
+        name=Central Fresh Fish Outlet gives=None None for=None None
+        item=crystal min=50 batch=50
+
+    so the agent could not tell which merchant sold FOOD, nor that fish costs
+    crystal. It starved holding 14,200 crystal, guessing meme_coin instead."""
     if not isinstance(item, dict):
         return None
     for name in names:
         if item.get(name) is not None:
             return item.get(name)
-    nested = item.get("trade")
-    if isinstance(nested, dict):
-        for name in names:
-            if nested.get(name) is not None:
-                return nested.get(name)
+    for key in ("trade", "offer"):
+        nested = item.get(key)
+        if isinstance(nested, dict):
+            for name in names:
+                if nested.get(name) is not None:
+                    return nested.get(name)
     return None
 
 
