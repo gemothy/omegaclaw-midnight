@@ -31,6 +31,7 @@ def _reset_module_state():
     mc._vitals_refreshing = False
     mc._ASLEEP.clear()
     mc._CAN_SPEAK.clear()
+    mc._AWAKE_PLACES.clear()
     mc._can_speak_at_ms = 0
     mc._dnd_streak = 0
     mc._last_self_probe_ms = 0
@@ -45,6 +46,7 @@ def _reset_module_state():
     mc._vitals_refreshing = False
     mc._ASLEEP.clear()
     mc._CAN_SPEAK.clear()
+    mc._AWAKE_PLACES.clear()
     mc._can_speak_at_ms = 0
     mc._dnd_streak = 0
     mc._last_self_probe_ms = 0

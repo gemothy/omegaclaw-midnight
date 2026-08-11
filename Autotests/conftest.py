@@ -76,6 +76,7 @@ def _reset_mcity_module_state():
                     "engaged": False}
     mc._ASLEEP.clear()
     mc._CAN_SPEAK.clear()
+    mc._AWAKE_PLACES.clear()
     mc._can_speak_at_ms = 0
     mc._dnd_streak = 0
     mc._last_self_probe_ms = 0

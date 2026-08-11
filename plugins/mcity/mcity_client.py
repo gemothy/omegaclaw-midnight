@@ -389,6 +389,9 @@ _DND_STREAK_HINT = 3           # refusals before we point out the pattern
 # The world's own canSpeak verdict per agent: {id: (bool, at_ms)}. Harvested
 # free from any mcity-agents read, since the field already rides along.
 _CAN_SPEAK = {}
+# spaceId -> (how many idle unengaged agents were seen there, when)
+_AWAKE_PLACES = {}
+_AWAKE_PLACES_TTL_MS = 120000
 _CAN_SPEAK_TTL_MS = 120000     # the city changes; do not trust an old verdict
 _CAN_SPEAK_REFRESH_MS = 45000  # min gap between roster reads made for this
 # Consecutive speaker-side refusals. The world has TWO distinct rejections:
@@ -1260,6 +1263,17 @@ def _note_can_speak(entry):
         action = entry.get("action")
         engaged = isinstance(action, dict) and bool(action)
         _CAN_SPEAK[agent_id] = (can and not engaged, _now_ms())
+        # Where the free people are. canSpeak is really "on the same map": every
+        # one of 52 same-map agents had it true and every one of 24 off-map
+        # agents had it false. So an idle, unengaged agent elsewhere is not
+        # unreachable, it is somewhere else - and the world says where. Standing
+        # in a room whose 52 occupants are permanently at crypto terminals is a
+        # location problem, not a conversation problem.
+        if not engaged and entry.get("status") == "idle":
+            where = entry.get("space")
+            if where:
+                seen, _at = _AWAKE_PLACES.get(where, (0, 0))
+                _AWAKE_PLACES[where] = (seen + 1, _now_ms())
         _prune(_CAN_SPEAK, _CAN_SPEAK_TTL_MS, lambda v: v[1])
     except Exception:      # noqa: BLE001 - grounding must never break a read
         pass
@@ -1307,6 +1321,9 @@ def _reachable_opener():
             _refresh_can_speak_if_unknown((), force=True)
             best = _fresh()
         if best is None:
+            go = _travel_to_people_command()
+            if go:
+                return go
             # Do not send it hunting for someone who is not there. A live roster
             # had zero of 285 agents both able to speak and free of an action.
             return ("Nobody in the city can receive a message right now, so "
@@ -1314,6 +1331,39 @@ def _reachable_opener():
                     "trade instead and try again later")
         return (f"Start a conversation with someone who can: "
                 f"cmd=mcity-speak {best} <your sentence>")
+    except Exception:      # noqa: BLE001 - a hint must never break a skill
+        return None
+
+
+def _travel_to_people_command():
+    """Where to go when nobody here can talk, as a copyable command.
+
+    Measured: all 52 agents on our map could be spoken to and every one was
+    engaged at a terminal, while all 24 idle agents were off-map and therefore
+    marked canSpeak false - 18 of them in one place. Nobody was unreachable; the
+    agent was simply standing in the wrong room. The world publishes their
+    spaceId, so this turns that into an instruction."""
+    try:
+        here = _VITALS.get("space")
+        now = _now_ms()
+        best, count = None, 0
+        for space, (seen, at) in _AWAKE_PLACES.items():
+            if space == here or (now - at) > _AWAKE_PLACES_TTL_MS:
+                continue
+            if seen > count:
+                best, count = space, seen
+        if not best or not ID_RE.match(best):
+            return None
+        payload, error = _skill_read("VITALS", "areas")
+        if error is None:
+            for item in (_find_list(payload, "areas") or []):
+                if isinstance(item, dict) and _text(_get(item, "areaId", "id")) == best:
+                    if _get(item, "moveAreaAvailable") is not False:
+                        return (f"Nobody here can talk, but {count} free agents are "
+                                f"at {best}. Go to them: cmd=mcity-move-area {best}")
+                    break
+        return (f"Nobody here can talk, but {count} free agents are at {best}. "
+                f"Go to them: cmd=mcity-travel-district {best}")
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return None
 
@@ -1396,6 +1446,8 @@ def _parse_agent(item):
         "talking": _get(item, "isTalkingToYou"),
         "can_speak": _get(item, "canSpeak"),
         "action": _get(item, "activeAction"),
+        "space": ((_get(item, "position") or {}).get("spaceId")
+                  if isinstance(_get(item, "position"), dict) else None),
         "same_map": _get(item, "isOnSameMap"),
         "dist": _get(item, "distance", "dist"),
         "profession": _get(item, "profession"),

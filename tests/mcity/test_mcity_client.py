@@ -1344,3 +1344,43 @@ def test_the_waiting_refresh_agrees_with_the_rendered_rows(control):
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
     mc._refresh_waiting_if_stale()
     assert mc._WAITING["ids"] == from_rows == ["agent-2"]
+
+
+def test_the_agent_is_sent_where_the_free_people_are(control):
+    """All 52 agents on our map could be spoken to and every one was engaged at a
+    terminal, while all 24 idle agents were off-map and so marked canSpeak false,
+    18 of them in one place. Nobody was unreachable - the agent was standing in
+    the wrong room."""
+    roster = {"agents": [
+        {"agentId": "user-agent-here", "name": "Here", "distance": 1,
+         "canSpeak": True, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active"},
+         "position": {"spaceId": "hacker-house-interior"}},
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+        {"agentId": "user-agent-away2", "name": "Away2", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
+    opener = mc._reachable_opener()
+    assert "2 free agents are at central" in opener
+    assert "cmd=mcity-" in opener and "central" in opener
+
+
+def test_no_travel_hint_when_the_free_people_are_already_here(control):
+    """Do not send the agent across the map to reach somebody in the room."""
+    roster = {"agents": [
+        {"agentId": "user-agent-here", "name": "Here", "distance": 2,
+         "canSpeak": True, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "hacker-house-interior"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
+    opener = mc._reachable_opener()
+    assert "cmd=mcity-speak user-agent-here" in opener, opener
+    assert "free agents are at" not in opener
