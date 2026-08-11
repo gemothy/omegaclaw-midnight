@@ -30,8 +30,16 @@ wakeupInterval: 15
 # Path to the logger configuration file
 # See https://docs.python.org/3/library/logging.config.html#configuration-file-format
 logConfigPath: ""
-# (internal) Path to the memory directory
-#memoryDirectory: "./"
+# (internal) Path to the memory directory.
+# Upstream leaves this at "./", the working directory. In this image that is
+# /PeTTa, owned by root while the agent runs as nobody, so two things broke
+# quietly: the workflow plugin failed to load every start ("make_directory
+# Permission denied"), and SAVE_PERMANENT_FILES_DIR - which the prompt tells the
+# agent it may save files to - pointed at a directory it cannot write.
+# This path is the volume mounted by bin/omegaclaw-midnight-up, so anything
+# saved here also survives a redeploy. config.yaml does not expand {REPO}, only
+# plugins.yaml does, so it is spelled out.
+memoryDirectory: "/PeTTa/repos/OmegaClaw-Core/memory"
 
 # Memory
 

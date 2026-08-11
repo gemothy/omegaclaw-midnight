@@ -832,3 +832,20 @@ def test_the_documented_cadence_matches_the_shipped_cadence():
         assert documented.group(1) == actual.group(1), (
             f"{key} is {actual.group(1)} in config.yaml but the reference says "
             f"{documented.group(1)}")
+
+
+def test_the_memory_directory_is_the_mounted_volume():
+    """Upstream's './' is /PeTTa in this image, owned by root while the agent
+    runs as nobody: the workflow plugin failed to load on every start, and
+    SAVE_PERMANENT_FILES_DIR - advertised to the agent in the prompt - pointed
+    somewhere unwritable. It must be the path the launcher mounts, so saved
+    files also survive a redeploy."""
+    import pathlib
+    import re
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    cfg = (repo / "config" / "config.yaml").read_text()
+    match = re.search(r'^memoryDirectory:\s*"([^"]+)"', cfg, re.M)
+    assert match, "memoryDirectory must be set explicitly, not left to the CWD"
+    launcher = (repo / "bin" / "omegaclaw-midnight-up").read_text()
+    assert f"{match.group(1)}" in launcher, (
+        "the memory directory must be the volume the launcher mounts")
