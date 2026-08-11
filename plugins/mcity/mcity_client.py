@@ -357,7 +357,8 @@ def _cap(text):
     return _cap_to(text, int(_c("max_result_chars", DEFAULT_MAX_RESULT_CHARS)))
 
 
-_VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None}
+_VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
+           "status": None}
 _VITALS_STALE_MS = 120000
 
 
@@ -375,10 +376,14 @@ def _harvest_vitals(payload):
         items = payload.get("inventory")
         if isinstance(hunger, dict) and hunger.get("state"):
             _VITALS["hunger"] = str(hunger.get("state"))
+            if hunger.get("value") is not None:
+                _VITALS["hunger"] = f"{hunger['state']}({hunger['value']})"
         if isinstance(agent, dict):
             position = agent.get("position")
             if isinstance(position, dict) and position.get("spaceId"):
                 _VITALS["space"] = str(position["spaceId"])
+            if agent.get("status"):
+                _VITALS["status"] = str(agent["status"])
         if isinstance(items, dict):
             _VITALS["items"] = " ".join(f"{k}={v}" for k, v in sorted(items.items()))
         if _VITALS["hunger"] or _VITALS["space"] or _VITALS["items"]:
@@ -402,6 +407,8 @@ def _vitals_line():
         parts.append(f"hunger={_VITALS['hunger']}")
     if _VITALS["space"]:
         parts.append(f"at={_VITALS['space']}")
+    if _VITALS["status"]:
+        parts.append(f"status={_VITALS['status']}")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
