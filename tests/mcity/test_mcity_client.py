@@ -2011,3 +2011,26 @@ def test_a_scan_that_found_people_still_names_them(control):
     _check(mc.agents())
     assert mc._REACHABLE["n"] == 1
     assert "user-agent-free" in (mc._reachable_opener() or "")
+
+
+def test_nobody_here_points_at_where_people_are(control):
+    """'Nobody can be reached' is true of HERE. It fired 22 times in a window
+    while 55 free agents stood in central, handing over cmd=mcity-work each time
+    - the one instruction that guarantees the agent never finds them."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [{"id": "central-plaza", "kind": "park",
+                        "moveAreaAvailable": True,
+                        "anchor": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert mc._REACHABLE["n"] == 0
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior", "hunger": "normal(9)"})
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    result = _check(mc.agents())
+    assert result.startswith("MCITY-AGENTS-FAILED reason=nobody_reachable")
+    assert "cmd=mcity-move-area central-plaza" in result.partition("\n")[0], result

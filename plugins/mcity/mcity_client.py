@@ -2367,12 +2367,16 @@ def agents():
             and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS
             and (_now_ms() - _last_roster_read_ms) < _ROSTER_RECHECK_MS):
         left = int((_ROSTER_RECHECK_MS - (_now_ms() - _last_roster_read_ms)) / 1000) + 1
+        # Route first. "Nobody can be reached" is true of HERE; it was firing 22
+        # times a window while 55 free agents stood in central, and handing over
+        # cmd=mcity-work each time - the one piece of advice that guarantees the
+        # agent never finds them.
         return _promote_command(
             _failed("AGENTS", "nobody_reachable",
-                    f"the roster said nobody can receive a message and it was "
-                    f"read moments ago; it is worth looking again in {left}s, not "
-                    "now"),
-            _next_action_command())
+                    f"the roster said nobody here can receive a message and it "
+                    f"was read moments ago; it is worth looking again in {left}s, "
+                    "not now"),
+            _travel_to_people_command() or _next_action_command())
     _last_roster_read_ms = _now_ms()
     payload, error = _skill_read("AGENTS", "agents")
     if error is not None:
