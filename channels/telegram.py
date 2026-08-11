@@ -210,6 +210,9 @@ def _poll_loop():
                     continue
 
                 state = _is_allowed_message(chat_id, user_id, text)
+                if state == "allow":
+                    # Opens the reply window: see _UNSOLICITED_QUIET_MS.
+                    globals()["_last_inbound_ms"] = int(time.time() * 1000)
                 display_name = _display_name(user, chat)
                 if state == "allow":
                     # An agent turn can take tens of seconds (LLM latency plus
@@ -342,6 +345,36 @@ _IDLE_REPORT_RE = re.compile(
     r")\W*$", re.I)
 
 
+# The mission allows send in exactly two situations: answering a message on the
+# turn it arrives, and reporting a confirmed world outcome. "Nobody wrote to me"
+# is not one of them, and the agent produced
+#   "I am currently in the hacker-house-interior, working on a task. My hunger is
+#    normal... No pending messages to reply to at the moment."
+# unprompted. That is not a bare idle phrase, so the phrase filter lets it past
+# and should - it is a real sentence. What makes it wrong is that nobody asked.
+#
+# So an UNSOLICITED send - one with no inbound message in the last quarter hour -
+# is allowed through at most once per quiet period. A conversation is unaffected:
+# any inbound message reopens the window immediately. This bounds phone flooding
+# without silencing the channel, which is the failure mode that matters more.
+_UNSOLICITED_QUIET_MS = 900000
+_last_inbound_ms = 0
+_last_unsolicited_ms = 0
+
+
+def is_unsolicited_flood(now_ms=None):
+    """True when nobody has written recently and we already spoke unprompted."""
+    now = int(now_ms if now_ms is not None else time.time() * 1000)
+    if now - _last_inbound_ms <= _UNSOLICITED_QUIET_MS:
+        return False                      # in a conversation: always allowed
+    return now - _last_unsolicited_ms <= _UNSOLICITED_QUIET_MS
+
+
+def note_unsolicited(now_ms=None):
+    globals()["_last_unsolicited_ms"] = int(
+        now_ms if now_ms is not None else time.time() * 1000)
+
+
 def is_idle_report(text):
     """True when the whole message says only that there is nothing to say."""
     return bool(_IDLE_REPORT_RE.match(str(text or "").strip()))
@@ -355,6 +388,12 @@ def send_message(text):
     if is_idle_report(text):
         logger.warning("telegram: suppressed an idle report: %r", text[:80])
         return
+    if is_unsolicited_flood():
+        logger.warning("telegram: suppressed an unsolicited message, nobody has "
+                       "written recently and we already spoke: %r", text[:80])
+        return
+    if int(time.time() * 1000) - _last_inbound_ms > _UNSOLICITED_QUIET_MS:
+        note_unsolicited()
 
     max_len = 3900
     chunks = []

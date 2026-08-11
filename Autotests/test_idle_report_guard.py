@@ -53,3 +53,41 @@ def test_the_guard_is_anchored_to_the_whole_message():
     saying nothing, not on the words themselves."""
     assert telegram.is_idle_report("standing by the crystal terminal, sold 12") is False
     assert telegram.is_idle_report("Standing by") is True
+
+
+# --------------------------------------------------------------------------
+# unsolicited messages
+# --------------------------------------------------------------------------
+
+def _reset_send_state(monkeypatch, inbound_ms=0, unsolicited_ms=0):
+    monkeypatch.setattr(telegram, "_last_inbound_ms", inbound_ms, raising=False)
+    monkeypatch.setattr(telegram, "_last_unsolicited_ms", unsolicited_ms, raising=False)
+
+
+def test_the_first_unsolicited_message_goes_out(monkeypatch):
+    """The channel must never be silenced: one proactive report is allowed."""
+    now = 10 * telegram._UNSOLICITED_QUIET_MS
+    _reset_send_state(monkeypatch)
+    assert telegram.is_unsolicited_flood(now) is False
+
+
+def test_a_second_unsolicited_message_is_held(monkeypatch):
+    """The agent sent an unprompted status report - where it was, its hunger, that
+    nobody had written. Fine once; a flood if every turn does it."""
+    now = 10 * telegram._UNSOLICITED_QUIET_MS
+    _reset_send_state(monkeypatch, unsolicited_ms=now - 1000)
+    assert telegram.is_unsolicited_flood(now) is True
+
+
+def test_an_inbound_message_reopens_the_channel_at_once(monkeypatch):
+    """A conversation is never throttled: replying is the whole point."""
+    now = 10 * telegram._UNSOLICITED_QUIET_MS
+    _reset_send_state(monkeypatch, inbound_ms=now - 500, unsolicited_ms=now - 1000)
+    assert telegram.is_unsolicited_flood(now) is False
+
+
+def test_the_hold_expires(monkeypatch):
+    now = 10 * telegram._UNSOLICITED_QUIET_MS
+    _reset_send_state(monkeypatch,
+                      unsolicited_ms=now - telegram._UNSOLICITED_QUIET_MS - 1)
+    assert telegram.is_unsolicited_flood(now) is False
