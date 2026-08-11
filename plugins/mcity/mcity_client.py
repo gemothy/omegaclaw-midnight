@@ -1966,8 +1966,24 @@ def threads(_ignored=None):
                       if isinstance(part, str) and part.strip()
                       and part.strip() != own_id]
             participants = ", ".join(str(part) for part in participants[:MAX_LIST_ITEMS])
-        preview = _get(item, "messageBody", "lastMessageBody", "preview",
-                       "lastMessage", "lastMessagePreview")
+        # The world names the two sides explicitly rather than shipping a
+        # participants list, so without this every row rendered as a bare
+        # "- thread=<id>" with no counterpart, no preview and no mine= flag. A
+        # person had been waiting on a reply for hours and the agent could not
+        # see the thread had anything in it.
+        if not others:
+            initiator = _get(item, "initiatorAgentId")
+            recipient = _get(item, "recipientAgentId")
+            for side in (initiator, recipient):
+                if isinstance(side, str) and side.strip() and side.strip() != own_id:
+                    others = [side.strip()]
+                    participants = side.strip()
+                    break
+        # latestMessagePreview is the name the world actually uses; the "last*"
+        # spellings below never matched anything, so no preview was ever shown.
+        preview = _get(item, "latestMessagePreview", "messageBody",
+                       "lastMessageBody", "preview", "lastMessage",
+                       "lastMessagePreview")
         sender = _get(item, "lastMessageSenderId", "lastSenderAgentId",
                       "lastSenderId", "senderAgentId")
         if isinstance(preview, dict):
@@ -1982,10 +1998,31 @@ def threads(_ignored=None):
         mine = None
         if own_id and isinstance(sender, str) and sender.strip():
             mine = "yes" if sender.strip() == own_id else "no"
+        if mine is None and own_id:
+            # No sender field exists in this world's payload. Two facts do:
+            # pendingRecipientAgentId names whoever owes a reply, and the two
+            # message counts say who has spoken. Either is enough to decide
+            # whether somebody is waiting on us - which is the whole point of
+            # the flag, and the reason a real question sat unanswered.
+            pending = _get(item, "pendingRecipientAgentId")
+            if isinstance(pending, str) and pending.strip():
+                mine = "no" if pending.strip() == own_id else "yes"
+            else:
+                recipient = _get(item, "recipientAgentId")
+                ours = _number(_get(item, "recipientMessageCount"), -1, 0, 10 ** 9)
+                theirs = _number(_get(item, "initiatorMessageCount"), -1, 0, 10 ** 9)
+                if (isinstance(recipient, str) and recipient.strip() == own_id
+                        and ours == 0 and theirs > 0):
+                    mine = "no"          # they opened it, we have never replied
         band = 1.0 if mine == "no" else (0.3 if mine == "yes" else 0.6)
         rows.append((_row((
             ("thread", _plain(thread_id)),
-            ("with", _clean(participants) if participants else None),
+            # An agent id is the one thing here that MUST be echoable: it is the
+            # first word of mcity-speak. Ids match ID_RE so _plain renders them
+            # bare; anything else stays quarantined. The message preview below
+            # is third-party text and is deliberately left wrapped.
+            ("with", (_plain(others[0]) if len(others) == 1 and ID_RE.match(others[0])
+                      else (_clean(participants) if participants else None))),
             ("mine", mine),
             ("last", _clean(preview) if isinstance(preview, str) and preview else None),
         )), band - min(index, 400) * 0.0005))

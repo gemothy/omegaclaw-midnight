@@ -682,3 +682,39 @@ def test_degraded_store_promotes_itself_back(monkeypatch):
     promoted = mc._roster_store()
     assert promoted.cfg["backend"] == "postgres"
     assert mc._store_degraded is False
+
+
+def test_thread_rows_carry_counterpart_preview_and_mine(monkeypatch):
+    """The world names the two sides and calls the preview latestMessagePreview.
+    None of those spellings were looked up, so every row rendered as a bare
+    "- thread=<id>" and a real question sat unanswered for hours because the
+    agent could not see the thread had anything in it."""
+    payload = {"threads": [{
+        "threadId": "t-1",
+        "initiatorAgentId": "user-agent-fergie",
+        "recipientAgentId": "user-agent-me",
+        "initiatorMessageCount": 1,
+        "recipientMessageCount": 0,
+        "pendingRecipientAgentId": None,
+        "latestMessagePreview": "what's the word in the district tonight?",
+    }]}
+    monkeypatch.setattr(mc, "_own_threads", lambda verb: (payload, None))
+    monkeypatch.setattr(mc, "_c", lambda k, d=None:
+                        "user-agent-me" if k == "agent_id" else (900 if k == "max_result_chars" else d))
+    out = mc.threads()
+    assert "with=user-agent-fergie" in out      # copy-ready for mcity-speak
+    assert "mine=no" in out                     # somebody is waiting on us
+    assert "district tonight" in out            # the preview reaches the model
+    assert "MC_UNTRUSTED" in out                # ...but stays quarantined
+
+
+def test_mine_flag_uses_pending_recipient_when_present(monkeypatch):
+    base = {"threadId": "t", "initiatorAgentId": "a", "recipientAgentId": "user-agent-me",
+            "initiatorMessageCount": 3, "recipientMessageCount": 2,
+            "latestMessagePreview": "hi"}
+    monkeypatch.setattr(mc, "_c", lambda k, d=None:
+                        "user-agent-me" if k == "agent_id" else (900 if k == "max_result_chars" else d))
+    for pending, want in (("user-agent-me", "mine=no"), ("a", "mine=yes")):
+        item = dict(base, pendingRecipientAgentId=pending)
+        monkeypatch.setattr(mc, "_own_threads", lambda v, i=item: ({"threads": [i]}, None))
+        assert want in mc.threads()
