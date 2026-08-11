@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Postgres + pgvector backing the OmegaClaw grounded-memory store.
+#
+# Deliberately a SEPARATE container from nexus-postgres (port 5432): that one holds
+# unrelated data and runs postgres:16-alpine, which has no `vector` extension.
+# Swapping its image to add pgvector would put existing data at risk for no benefit.
+#
+# Credentials live in ~/.config/omegaclaw/memory.env (0600) and are passed with
+# --env-file so they never appear in argv or shell history.
+set -euo pipefail
+
+ENV_FILE="${HOME}/.config/omegaclaw/memory.env"
+NAME="${OMEGACLAW_PG_NAME:-omegaclaw-postgres}"
+IMAGE="${OMEGACLAW_PG_IMAGE:-pgvector/pgvector:pg16}"
+VOLUME="${OMEGACLAW_PG_VOLUME:-omegaclaw-pgdata}"
+# The unix socket lives in its own volume so the agent container can mount it and
+# authenticate by peer instead of holding a password. entrypoint.sh runs the agent
+# under `env -i` precisely so no credential reaches a prompt-injectable process
+# with a shell skill; peer auth keeps that property - the kernel vouches for the
+# uid, so there is nothing to steal.
+SOCKET_VOLUME="${OMEGACLAW_PG_SOCKET_VOLUME:-omegaclaw-pgsocket}"
+# The unprivileged role the agent connects as - never the database owner.
+AGENT_ROLE="${OMEGACLAW_PG_AGENT_ROLE:-nobody}"
+# The TCP port is OFF by default. Once the agent authenticates over the socket
+# nothing needs it, and publishing it cost us real downtime: something else took
+# 127.0.0.1:5433, so `docker run` failed with "address already in use" (exit 255)
+# and the store sat degraded for fourteen hours. Set OMEGACLAW_PG_PUBLISH=1 to
+# expose it for host-side psql or tests.
+
+[[ -r "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }
+# shellcheck disable=SC1090
+set -a; . "$ENV_FILE"; set +a
+
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+docker run -d \
+  --name "$NAME" \
+  --restart unless-stopped \
+  --log-opt max-size=20m --log-opt max-file=3 \
+  ${OMEGACLAW_PG_PUBLISH:+--publish "127.0.0.1:${OMEGACLAW_PG_PORT}:5432"} \
+  --volume "${VOLUME}:/var/lib/postgresql/data" \
+  --volume "${SOCKET_VOLUME}:/var/run/postgresql" \
+  --env "POSTGRES_DB=${OMEGACLAW_PG_DB}" \
+  --env "POSTGRES_USER=${OMEGACLAW_PG_USER}" \
+  --env "POSTGRES_PASSWORD=${OMEGACLAW_PG_PASSWORD}" \
+  --health-cmd "pg_isready -U ${OMEGACLAW_PG_USER} -d ${OMEGACLAW_PG_DB}" \
+  --health-interval 10s --health-timeout 5s --health-retries 5 \
+  "$IMAGE" >/dev/null
+
+# Peer auth needs the OS user and the DB role to have the SAME name. The agent
+# container runs as root, so without a map postgres rejects it with
+#   provided user name (omegaclaw) and authenticated user name (root) do not match
+# Mapping is the right fix; inventing a "root" DB role is not. Idempotent, and
+# applied on every start so a fresh volume is configured the same way.
+until docker exec "$NAME" pg_isready >/dev/null 2>&1; do sleep 1; done
+docker exec "$NAME" sh -c '
+  D=/var/lib/postgresql/data
+  grep -q "^omegaclaw_map" $D/pg_ident.conf 2>/dev/null || printf "%s\n" \
+    "omegaclaw_map   root            '"${OMEGACLAW_PG_USER}"'" \
+    "omegaclaw_map   postgres        '"${OMEGACLAW_PG_USER}"'" >> $D/pg_ident.conf
+  # THE ENTRY THAT ACTUALLY MATTERS. entrypoint.sh runs the agent as
+  # `su nobody`, so its OS user and its DB role already share a name and plain
+  # peer auth accepted it. Adding map= to the hba line REPLACES that implicit
+  # name-equality rule, so introducing the map for root broke the one path that
+  # was working: "Peer authentication failed for user nobody" on every call.
+  # The identity entry restores it.
+  grep -q "omegaclaw_map   '"${AGENT_ROLE}"'            '"${AGENT_ROLE}"'" $D/pg_ident.conf 2>/dev/null || \
+    printf "%s\n" "omegaclaw_map   '"${AGENT_ROLE}"'          '"${AGENT_ROLE}"'" >> $D/pg_ident.conf
+  grep -q "map=omegaclaw_map" $D/pg_hba.conf || sed -i \
+    "s|^\(local  *all  *all  *\)peer$|\1peer map=omegaclaw_map|" $D/pg_hba.conf
+' >/dev/null 2>&1
+docker exec -u postgres "$NAME" pg_ctl reload -D /var/lib/postgresql/data >/dev/null 2>&1 || true
+
+# The agent connects as the unprivileged role `nobody`, never as the owner. It
+# runs as OS root, so the ident map above lets root request either name; this
+# grants `nobody` exactly what the roster needs and nothing else. Without the
+# role existing at all, every store call failed peer auth and the roster stayed
+# empty while the agent silently ran on the in-memory fallback.
+docker exec -u root "$NAME" psql -h /var/run/postgresql -U "$OMEGACLAW_PG_USER" \
+  -d "$OMEGACLAW_PG_DB" -v ON_ERROR_STOP=1 -q <<SQL >/dev/null 2>&1 || true
+DO \$\$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${AGENT_ROLE}') THEN
+    CREATE ROLE ${AGENT_ROLE} LOGIN;
+  END IF;
+END \$\$;
+GRANT CONNECT ON DATABASE ${OMEGACLAW_PG_DB} TO ${AGENT_ROLE};
+GRANT USAGE, CREATE ON SCHEMA public TO ${AGENT_ROLE};
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${AGENT_ROLE};
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${AGENT_ROLE};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${AGENT_ROLE};
+SQL
+
+echo "$NAME starting (socket=${SOCKET_VOLUME} image=$IMAGE volume=$VOLUME)"
+echo "wait:  until docker exec $NAME pg_isready -U ${OMEGACLAW_PG_USER} >/dev/null 2>&1; do sleep 1; done"

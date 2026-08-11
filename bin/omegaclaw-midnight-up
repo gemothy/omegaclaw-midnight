@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Launch OmegaClaw with the Midnight City direct-control plugin.
+#
+# Secrets live in ~/.config/omegaclaw/mcity.env (0600) and are passed with
+# --env-file so they never appear in argv or shell history. The plugin itself
+# refuses a token passed as an argument.
+#
+# Image built from ~/omegaclaw-midnight (see its Dockerfile).
+set -euo pipefail
+
+ENV_FILE="${HOME}/.config/omegaclaw/mcity.env"
+# Grounded-memory store. The agent reaches Postgres over a UNIX SOCKET with peer
+# auth and holds NO database password: entrypoint.sh runs it under `env -i` for
+# exactly that reason, and this agent has a shell skill while taking untrusted
+# input from a shared world. The kernel vouches for uid 65534 (nobody), and
+# pg_hba maps that uid to the least-privilege role of the same name - trying to
+# connect as any other role is refused.
+#
+# Port 5432, not 5433: 5433 is the host TCP mapping used by admin and tests. The
+# socket file inside the volume is .s.PGSQL.5432, the server's own port.
+PG_SOCKET_VOLUME="${OMEGACLAW_PG_SOCKET_VOLUME:-omegaclaw-pgsocket}"
+IMAGE="${OMEGACLAW_IMAGE:-omegaclaw-midnight:latest}"
+AGENT_ID="${MCITY_AGENT_ID:-user-agent-ow0v8z9lg4v5kyr}"
+MODE="${MCITY_MODE:-control}"
+LLM_URL="${OMEGACLAW_LLM_URL:-http://localhost:8000/v1/}"
+LLM_MODEL="${OMEGACLAW_MODEL:-nvidia/Qwen3.6-35B-A3B-NVFP4}"
+
+[[ -r "$ENV_FILE" ]] || { echo "missing $ENV_FILE" >&2; exit 1; }
+
+ENV_ARGS=(
+  --env-file "$ENV_FILE"
+  --volume "${PG_SOCKET_VOLUME}:/var/run/postgresql:ro"
+  --env "OMEGACLAW_PG_HOST=/var/run/postgresql"
+  --env "OMEGACLAW_PG_PORT=5432"
+  --env "OMEGACLAW_PG_DB=omegaclaw"
+  --env "OMEGACLAW_PG_USER=nobody"
+)
+
+# Telegram bot token is read from the env file if present there; keep it out of argv.
+grep -q '^TG_BOT_TOKEN=' "$ENV_FILE" || {
+  echo "note: TG_BOT_TOKEN not in $ENV_FILE - add it to enable Telegram" >&2
+}
+
+docker rm -f omegaclaw >/dev/null 2>&1 || true
+
+# -it is REQUIRED: without a TTY, nginx cannot open /dev/stderr as www-data
+# and the container crash-loops with [emerg] permission denied.
+docker run -d -it \
+  --name omegaclaw \
+  --restart unless-stopped \
+  --log-opt max-size=50m --log-opt max-file=3 \
+  --network host \
+  --security-opt no-new-privileges:true \
+  --init \
+  --tmpfs /tmp:size=64m,mode=1777 \
+  --tmpfs /var/tmp:size=64m,mode=1777 \
+  --tmpfs /run:size=16m,mode=755 \
+  --volume omegaclaw-memory:/PeTTa/repos/OmegaClaw-Core/memory \
+  "${ENV_ARGS[@]}" \
+  "$IMAGE" \
+  "commchannel=telegram" \
+  "provider=OpenAIAPI" \
+  "embeddingprovider=Local" \
+  "model=${LLM_MODEL}" \
+  "openaiapi_url=${LLM_URL}" \
+  "mcityMode=${MODE}" \
+  "mcityAgentId=${AGENT_ID}" \
+  "securityPolicyPath=/PeTTa/repos/OmegaClaw-Core/profile/policy.yaml" \
+  "TG_POLL_TIMEOUT=20" >/dev/null
+
+echo "omegaclaw started (image=$IMAGE mode=$MODE agent=$AGENT_ID)"
+echo "logs: docker logs -f omegaclaw"

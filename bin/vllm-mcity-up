@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Launch the vLLM backend that serves Midnight City agents (OmegaClaw talks to this).
+#
+# Model: nvidia/Qwen3.6-35B-A3B-NVFP4 - 35B total / ~3B active MoE, NVFP4 weights,
+# hybrid linear+full attention (only 10 of 40 layers keep a KV cache). ~22GB of
+# weights. This is the model ~/bin/omegaclaw-midnight-up already asks for by name.
+#
+# TOOL CALLING: this model emits XML-style calls
+#   <tool_call><function=NAME><parameter=KEY>value</parameter></function></tool_call>
+# per its chat template, so the parser is qwen3_xml - NOT hermes (hermes expects JSON
+# inside <tool_call>). Without --enable-auto-tool-choice the API rejects tool_choice
+# "auto" outright, and without --reasoning-parser the model's <think> chain-of-thought
+# lands in message.content and breaks OmegaClaw's parsing.
+#
+# THINKING IS OFF BY DEFAULT. This is a reasoning model, and in thinking mode a
+# 2-sentence in-character line cost 400+ tokens of silent deliberation and returned
+# content=None (it never got past <think> before hitting max_tokens). That makes it
+# effectively mute for conversation. The stock template thinks unless told not to;
+# --chat-template points at a copy with that default inverted, so callers get fast
+# replies and can still opt back in per request with:
+#   "chat_template_kwargs": {"enable_thinking": true}
+# Tool calling is unaffected either way (verified: 26 tokens, correct arguments).
+#
+# There is deliberately NO --reasoning-parser. vLLM's qwen3 reasoning parser keys off
+# the per-request enable_thinking kwarg, not off the template. With the template
+# defaulting to closed-<think>, the generated stream never contains a closing </think>,
+# so the parser filed every reply under "reasoning" and returned content=null - the
+# agent looked mute while producing perfectly good text. With thinking off by default
+# there is no reasoning to separate, so the parser is redundant here. Trade-off: if you
+# opt back into thinking per-request, raw <think> tags will appear in content.
+#
+# MEMORY DISCIPLINE - do not raise these casually. The DGX Spark GB10 has 119.69 GiB
+# of UNIFIED memory shared between CPU and GPU. --gpu-memory-utilization is a fraction
+# of that TOTAL, not of some separate VRAM pool. On 2026-08-09 this container ran at
+# 0.85 (101.7 GiB) serving the 122B and repeatedly triggered system-wide OOM cascades
+# that killed gnome-shell, NetworkManager, containerd and the whole desktop session.
+# 0.30 = 35.9 GiB, which leaves ~84 GiB for the OS and the nexus-* containers.
+set -euo pipefail
+
+NAME="${VLLM_NAME:-vllm-mcity}"
+IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:latest}"
+MODEL="${VLLM_MODEL:-nvidia/Qwen3.6-35B-A3B-NVFP4}"
+PORT="${VLLM_PORT:-8000}"
+GPU_UTIL="${VLLM_GPU_UTIL:-0.30}"
+MAX_LEN="${VLLM_MAX_LEN:-32768}"
+MAX_SEQS="${VLLM_MAX_SEQS:-8}"
+# Must stay >= the Mamba/GDN block size (2096) or the engine dies at KV-cache init with
+# "In Mamba cache align mode, block_size (2096) must be <= max_num_batched_tokens".
+# This model's hybrid linear-attention layers put vLLM in Mamba 'align' mode whenever
+# prefix caching is on, and the vLLM default of 2048 is just under the threshold.
+MAX_BATCHED="${VLLM_MAX_BATCHED:-4096}"
+# Hard cgroup backstop so a runaway allocation can never take the machine down again.
+MEM_LIMIT="${VLLM_MEM_LIMIT:-56g}"
+
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+docker run -d \
+  --name "$NAME" \
+  --restart unless-stopped \
+  --gpus all \
+  --memory "$MEM_LIMIT" \
+  --shm-size 8g \
+  --log-opt max-size=50m --log-opt max-file=3 \
+  --publish "${PORT}:8000" \
+  --volume /home/gomiex/models:/models \
+  --volume /home/gomiex/.cache/huggingface:/root/.cache/huggingface \
+  --env HF_HUB_OFFLINE=1 \
+  "$IMAGE" \
+  "$MODEL" \
+  --served-model-name "$MODEL" qwen3.6-35b \
+  --host 0.0.0.0 --port 8000 \
+  --gpu-memory-utilization "$GPU_UTIL" \
+  --max-model-len "$MAX_LEN" \
+  --max-num-seqs "$MAX_SEQS" \
+  --max-num-batched-tokens "$MAX_BATCHED" \
+  --chat-template /models/chat-templates/qwen3.6-35b-default-nothink.jinja \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_xml \
+  --kv-cache-dtype fp8 \
+  --enable-prefix-caching \
+  --enable-chunked-prefill \
+  --trust-remote-code >/dev/null
+
+echo "$NAME starting (model=$MODEL util=$GPU_UTIL port=$PORT mem-cap=$MEM_LIMIT)"
+echo "logs:   docker logs -f $NAME"
+echo "ready:  curl -s localhost:${PORT}/v1/models"
