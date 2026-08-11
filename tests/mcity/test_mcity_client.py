@@ -1069,7 +1069,7 @@ def test_the_speaker_side_refusal_is_named_as_such(control):
         result = mc.speak("user-agent-abc hello there")
     assert "note=" in result and "about YOU" in result
     assert "trying someone else will not help" in result
-    assert "mcity-exit-building" in result
+    assert "cmd=mcity-move-area" in result, "the hint must be copyable"
 
 
 def test_the_streak_resets_once_a_reply_lands(control):
@@ -1080,3 +1080,18 @@ def test_the_streak_resets_once_a_reply_lands(control):
     result = _check(mc.speak("user-agent-abc hello there"))
     assert "MCITY-SPEAK-OK" in result, result
     assert mc._dnd_streak == 0
+
+
+def test_the_escape_hint_carries_a_copyable_command(control):
+    """mcity-exit-building was the first suggestion and the world answered 'agent
+    is not inside a linked building'. A bare skill name is not enough: the agent
+    reliably copies a complete command and reliably fails to assemble one."""
+    seq = itertools.count()
+    control.on_action = lambda action: [
+        event(f"e{next(seq)}", "action_failed", actionKind="speak",
+              targetAgentId="user-agent-abc",
+              reason="speaker is in do not disturb mode")]
+    for _ in range(mc._DND_STREAK_HINT):
+        result = mc.speak("user-agent-abc hello there")
+    assert "cmd=mcity-move-area forest-worksite" in result, result
+    assert "mines-worksite" not in result, "moveAreaAvailable=false must be skipped"

@@ -1208,6 +1208,33 @@ def _can_be_reached(agent_id):
     return None
 
 
+def _escape_command():
+    """A ready-to-copy command for leaving the current activity.
+
+    mcity-exit-building was the first suggestion and the world answered "agent is
+    not inside a linked building", so a bare skill name is not enough - the agent
+    needs a destination it can copy. This is the cmd= pattern that already fixed
+    trading: the agent reliably copies a complete command verbatim and reliably
+    fails to assemble one from a listing."""
+    try:
+        payload, error = _skill_read("VITALS", "areas")
+        if error is not None:
+            return "Use mcity-areas to find somewhere to go, then mcity-move-area."
+        here = _VITALS.get("space")
+        for item in (_find_list(payload, "areas") or []):
+            if not isinstance(item, dict):
+                continue
+            area = _text(_get(item, "areaId", "id"))
+            if not area or area == here or not ID_RE.match(area):
+                continue
+            if _get(item, "moveAreaAvailable") is False:
+                continue
+            return f"Leave now with this exact line: cmd=mcity-move-area {area}"
+        return "Use mcity-areas to find somewhere to go, then mcity-move-area."
+    except Exception:      # noqa: BLE001 - a hint must never break a skill
+        return "Use mcity-areas to find somewhere to go, then mcity-move-area."
+
+
 def _refresh_can_speak_if_unknown(agent_ids):
     """One bounded roster read when a waiting counterpart's reachability is
     unknown.
@@ -2950,13 +2977,13 @@ def speak(arg=None):
             _dnd_streak += 1
             if _dnd_streak >= _DND_STREAK_HINT:
                 where = _VITALS.get("space") or "where you are"
+                move = _escape_command()
                 result = _out(
                     f"{result}\nnote={_dnd_streak} replies refused as speaker "
                     f"do-not-disturb while you were mid-action at {where}. This "
                     "is about YOU, not the person you are answering, so trying "
                     "someone else will not help. The world keeps starting this "
-                    "activity for you; you have not tried leaving. Consider "
-                    "mcity-exit-building or mcity-move-area, then reply")
+                    f"activity for you; leaving is what ends it. {move}")
                 return result
         elif "MCITY-SPEAK-OK" in (result or ""):
             _dnd_streak = 0
