@@ -642,6 +642,15 @@ def _vitals_line():
             route = _cached_route()
             if route:
                 parts.append(route)
+        else:
+            # Name somebody. Step five used to require an mcity-agents read and a
+            # row to be picked out of it; the agent read the roster and then went
+            # back to work instead, every window. This is the same move that
+            # retired the threads and roster polls: state the answer, delete the
+            # lookup.
+            who = _best_person_to_talk_to()
+            if who:
+                parts.append(f"talk-to={who}")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -1535,6 +1544,29 @@ def _promote_command(result, hint):
         return _out(head + sep + rest)
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return _out(result)
+
+
+def _best_person_to_talk_to():
+    """One reachable agent id, preferring somebody we have not spoken to.
+
+    Reads only cached state - vitals is appended to every result and must never
+    cost a request."""
+    try:
+        now = _now_ms()
+        best = None
+        for agent_id, (can, at) in _CAN_SPEAK.items():
+            if not can or (now - at) > _CAN_SPEAK_TTL_MS:
+                continue
+            if not _looks_speakable(agent_id):
+                continue
+            spoken = any(key[0] == agent_id for key in _SAID)
+            if best is None or (not spoken and best[1]):
+                best = (agent_id, spoken)
+                if not spoken:
+                    break
+        return best[0] if best else None
+    except Exception:      # noqa: BLE001 - vitals must never break a skill
+        return None
 
 
 def _cached_route():

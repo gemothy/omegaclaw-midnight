@@ -2179,3 +2179,37 @@ def test_work_keeps_its_once_a_minute_grace_when_nobody_is_reachable(control):
     mc._last_rich_nudge_ms = mc._now_ms()
     _check(mc.work())
     assert control.actions, "earning must stay available when there is nobody"
+
+
+def test_vitals_names_somebody_to_talk_to(control):
+    """Step five required an mcity-agents read and a row picked out of it; the
+    agent read the roster and went back to work instead, every window. Same move
+    that retired the threads and roster polls: state the answer, delete the
+    lookup."""
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "status": "idle", "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    line = mc._vitals_line()
+    assert "reachable=1" in line and "talk-to=user-agent-free" in line, line
+
+
+def test_somebody_new_is_preferred_over_somebody_already_spoken_to(control):
+    """An agent that greets the same person forever is a bot."""
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-old"] = (True, now)
+    mc._CAN_SPEAK["user-agent-new"] = (True, now)
+    mc._SAID[("user-agent-old", "hello there friend")] = now
+    assert mc._best_person_to_talk_to() == "user-agent-new"
+
+
+def test_naming_somebody_costs_no_request(control):
+    """vitals is appended to every single result."""
+    mc._CAN_SPEAK["user-agent-free"] = (True, mc._now_ms())
+    mc._REACHABLE.update({"n": 1, "at_ms": mc._now_ms()})
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    control.requests.clear()
+    for _ in range(5):
+        mc._vitals_line()
+    assert not control.requests
