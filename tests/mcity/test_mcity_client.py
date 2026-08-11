@@ -1874,3 +1874,31 @@ def test_suggestions_never_name_someone_the_harness_would_refuse(control):
     assert suggestion and "user-agent-free" in suggestion
     assert "user-agent-engaged" not in suggestion, \
         "never suggest somebody the next check will refuse"
+
+
+def test_vitals_says_how_many_people_can_be_reached(control):
+    """The agent called mcity-agents 36 times in four minutes and never spoke:
+    that was the only way to learn whether anyone was available. Repeat
+    suppression cannot help, because roster rows carry jittering distances and
+    statuses so no two bodies are byte-identical."""
+    roster = {"agents": [
+        {"agentId": "user-agent-free", "name": "Free", "distance": 2,
+         "canSpeak": True, "status": "idle", "activeAction": None},
+        {"agentId": "user-agent-engaged", "name": "Busy", "distance": 3,
+         "canSpeak": True, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active"}},
+        {"agentId": "nyx", "name": "NPC", "distance": 4,
+         "canSpeak": True, "status": "idle", "activeAction": None},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    line = mc._vitals_line()
+    assert "reachable=1" in line, line   # engaged excluded, non-agent id excluded
+
+
+def test_reachable_is_absent_rather_than_guessed(control):
+    """Never claim zero from a roster we have not read: that would tell the agent
+    to stop looking for people on no evidence."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    assert "reachable=" not in mc._vitals_line()

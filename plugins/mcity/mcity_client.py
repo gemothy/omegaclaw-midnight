@@ -415,6 +415,13 @@ _DND_STREAK_HINT = 3           # refusals before we point out the pattern
 # free from any mcity-agents read, since the field already rides along.
 _CAN_SPEAK = {}
 # spaceId -> (how many idle unengaged agents were seen there, when)
+# How many agents could receive a message at the last roster scan. The agent was
+# calling mcity-agents 36 times in four minutes and never speaking, because that
+# was the only way to find out whether anybody was available - the same reason it
+# used to poll mcity-threads before waiting= existed. Repeat suppression cannot
+# help here: roster rows carry distances and statuses that jitter, so no two
+# bodies are ever byte-identical.
+_REACHABLE = {"n": None, "at_ms": 0}
 _AWAKE_PLACES = {}
 _AWAKE_PLACES_TTL_MS = 120000
 _CAN_SPEAK_TTL_MS = 120000     # the city changes; do not trust an old verdict
@@ -453,6 +460,7 @@ def reset_runtime_state():
     the fixtures own and which have their own lifecycles."""
     for cache in (_CAN_SPEAK, _ASLEEP, _LAST_READ, _SAID, _AWAKE_PLACES, _inbound):
         cache.clear()
+    _REACHABLE.update({"n": None, "at_ms": 0})
     _WAITING.update({"at_ms": 0, "ids": []})
     _VITALS.clear()
     _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
@@ -607,6 +615,11 @@ def _vitals_line():
     if _now_ms() < _worksite_busy_until_ms:
         left = int((_worksite_busy_until_ms - _now_ms()) / 1000) + 1
         parts.append(f"work=paused({left}s)")
+    # reachable= removes the reason to poll the roster, exactly as waiting=
+    # removed the reason to poll the thread list.
+    if (_REACHABLE["n"] is not None
+            and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS):
+        parts.append(f"reachable={_REACHABLE['n']}")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -1592,9 +1605,15 @@ def _refresh_can_speak_if_unknown(agent_ids, force=False):
         try:
             payload, error = _skill_read("VITALS", "agents")
             if error is None:
-                for item in (_find_list(payload, "agents") or []):
-                    if isinstance(item, dict):
-                        _note_can_speak(_parse_agent(item))
+                entries = [_parse_agent(item)
+                           for item in (_find_list(payload, "agents") or [])
+                           if isinstance(item, dict)]
+                for entry in entries:
+                    _note_can_speak(entry)
+                if entries:
+                    _REACHABLE["n"] = sum(1 for e in entries if _entry_reachable(e)
+                                          and _looks_speakable(e["id"]))
+                    _REACHABLE["at_ms"] = _now_ms()
             _can_speak_at_ms = _now_ms()
         finally:
             with _lock:
@@ -2316,6 +2335,13 @@ def agents():
         if isinstance(entry["name"], str):
             _remember_inbound(entry["name"])
         roster.append(entry)
+    # Count here, in the skill the agent actually calls. The first version of
+    # this counted inside _speak_candidates, which only runs on a failed speak,
+    # so reachable= never appeared for a plain mcity-agents read - the exact call
+    # it exists to make unnecessary.
+    _REACHABLE["n"] = sum(1 for entry in roster
+                          if _entry_reachable(entry) and _looks_speakable(entry["id"]))
+    _REACHABLE["at_ms"] = _now_ms()
 
     # Ground every observation BEFORE rendering anything: the store keeps all
     # the fields, so nothing shown or dropped below is lost to the roster.
@@ -3565,6 +3591,9 @@ def _speak_candidates(limit=3):
     roster = [_parse_agent(item) for item in items if isinstance(item, dict)]
     for entry in roster:
         _note_can_speak(entry)
+    _REACHABLE["n"] = sum(1 for entry in roster
+                          if _entry_reachable(entry) and _looks_speakable(entry["id"]))
+    _REACHABLE["at_ms"] = _now_ms()
     reachable = {entry["id"]: entry for entry in roster if entry["id"]}
     if AgentObservation is not None:
         observed = [_agent_observation(entry, now) for entry in roster if entry["id"]]
