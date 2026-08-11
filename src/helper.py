@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import subprocess
@@ -155,10 +156,79 @@ def split_command_blocks(s):
         blocks.append("\n".join(cur).strip())
     return blocks
 
+def split_toplevel_groups(text):
+    """Split "(a ...) (b ...)" into its top-level groups, honouring quotes.
+
+    The model puts several commands on ONE line inside an extra paren wrapper:
+
+        ((send "No new user input. Checking status.") (mcity-threads))
+
+    split_command_blocks divides on NEWLINES, so all of that arrived as a single
+    command whose argument swallowed the rest of the line. One extra wrapper is
+    peeled, then the groups inside are separated. Returns [text] unchanged when
+    there is nothing to split, so well-formed single commands are untouched."""
+    t = (text or "").strip()
+    if not (t.startswith("((") and t.endswith("))")):
+        return [text]
+    inner = t[1:-1].strip()
+    groups, depth, start, in_str, esc = [], 0, None, False, False
+    for i, ch in enumerate(inner):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "(":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0 and start is not None:
+                groups.append(inner[start:i + 1])
+                start = None
+            elif depth < 0:
+                return [text]
+    # One group counts too: ((pin "x")) must peel to (pin "x"), otherwise the
+    # single remaining layer leaves "(pin" as the command name and the form is
+    # rejected just as surely as the multi-command case.
+    if depth or not groups:
+        return [text]
+    return groups
+
+
 def balance_parentheses(s):
     s = s.replace("_quote_", '"').replace("_newline_", "\n")
+    # Diagnostic AFTER the substitution: the model writes _quote_, not a literal
+    # quote, so checking before this line captured nothing while the same run
+    # produced 15 parse errors. Three repair attempts were made against forms
+    # INFERRED from the post-parse error text; this logs the real input.
+    if isinstance(s, str) and '\\"' in s:
+        try:
+            logging.getLogger("helper").info("RAW_MODEL_ARG %r", s[:400])
+        except Exception:
+            pass
+    # The model escapes the CLOSING quote of an argument, so the string never
+    # terminates and MeTTa rejects the whole form. Captured verbatim from the
+    # live agent:
+    #   ((send "No new user input. Checking status.\\") (mcity-threads))
+    #   ((pin "status: idle, no input\\"))
+    # An escaped quote immediately before a closing paren is always the intended
+    # terminator - a message does not end with a literal backslash-quote - so it
+    # is unescaped. Narrow on purpose: \\" anywhere else is left alone, which is
+    # what keeps `send "hello" world` and multi-line prose intact.
+    if isinstance(s, str):
+        s = re.sub(r'\\"(\s*\))', r'"\1', s)
     sexprs = []
-    for line in split_command_blocks(s):
+    lines = []
+    for _blk in split_command_blocks(s):
+        lines.extend(split_toplevel_groups(_blk))
+    for line in lines:
         line = line.strip()
         if not line:
             continue

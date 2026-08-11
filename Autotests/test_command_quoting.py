@@ -41,13 +41,42 @@ def test_inner_quotes_that_are_not_a_wrapper_survive():
     assert '**Mars**' in multi and '\\"Plain text version:\\"' in multi
 
 
-def test_trailing_debris_after_the_wrapper_is_dropped():
-    """The model often leaves an unbalanced paren or quote after the wrapper."""
-    for tail in ('\\""', '\\")"', '\\"))', '\\")")'):
-        got = helper.balance_parentheses(f'pin "\\"status: idle{tail}')
-        assert got == '((pin "status: idle"))', (tail, got)
+def test_only_observed_shapes_are_asserted():
+    """Deliberately empty of invented shapes.
+
+    An earlier version of this file asserted behaviour for inputs like
+    `pin "\\"status: idle\\")"`, reconstructed from the parser's ERROR OUTPUT
+    rather than from the model. Once the raw input was actually logged, the real
+    malformation turned out to be an escaped CLOSING quote plus several commands
+    on one line - see the two tests below, which use verbatim captures. Asserting
+    against reconstructed shapes is how three repair attempts were written for a
+    bug that was never happening in that form."""
 
 
 def test_strip_is_total_and_never_raises():
     for junk in ("", '"', '""', '\\"', '"\\""', None, 5):
         helper.strip_redundant_quotes(junk)
+
+
+def test_escaped_closing_quote_is_repaired():
+    """Captured verbatim from the live agent. The model escapes the CLOSING
+    quote, so the string never terminates and MeTTa rejects the whole form.
+    Three earlier repair attempts missed this because they were written against
+    shapes INFERRED from the post-parse error text rather than the real input."""
+    assert helper.balance_parentheses('((pin "status: idle, no input\\"))') \
+        == '((pin "status: idle, no input"))'
+
+
+def test_several_commands_on_one_line_are_split():
+    """The model puts several commands on one line inside an extra paren
+    wrapper. split_command_blocks divides on NEWLINES, so the whole line arrived
+    as one command whose argument swallowed the rest."""
+    got = helper.balance_parentheses(
+        '((send "No new user input. Checking Midnight City status.\\") (mcity-threads))')
+    assert got == '((send "No new user input. Checking Midnight City status.") (mcity-threads))'
+
+
+def test_single_command_keeps_working():
+    assert helper.split_toplevel_groups('(send "one")') == ['(send "one")']
+    assert helper.balance_parentheses('(send "one")') == '((send "one"))'
+    assert helper.balance_parentheses('mcity-eat') == '((mcity-eat))'
