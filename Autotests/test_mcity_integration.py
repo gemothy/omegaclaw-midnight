@@ -633,3 +633,20 @@ def test_speak_candidates_never_leak_quarantined_names(monkeypatch):
     out = mc._speak_candidates()
     assert "user-agent-x" in out
     assert "MC_UNTRUSTED" not in out             # name dropped, id kept
+
+
+def test_store_config_reads_the_environment(monkeypatch):
+    """_config reads OmegaClaw's config, NOT the environment, so every
+    OMEGACLAW_PG_* variable entrypoint.sh forwards was inert: the store resolved
+    to 127.0.0.1:5433 and failed with 'no password supplied' while the agent ran
+    on the in-memory fallback."""
+    monkeypatch.setattr(mc, "_config", lambda key, default: default)
+    monkeypatch.setenv("OMEGACLAW_PG_HOST", "/var/run/postgresql")
+    monkeypatch.setenv("OMEGACLAW_PG_PORT", "5432")
+    monkeypatch.setenv("OMEGACLAW_PG_DB", "omegaclaw")
+    monkeypatch.setenv("OMEGACLAW_PG_USER", "nobody")
+    cfg = mc._resolve_config("http://localhost:8080", "user-agent-x", "control")
+    assert cfg["pg_host"] == "/var/run/postgresql"   # a socket dir, not an address
+    assert cfg["pg_port"] == 5432
+    assert cfg["pg_user"] == "nobody"                # unprivileged role, not the owner
+    assert cfg["pg_dbname"] == "omegaclaw"

@@ -1400,16 +1400,32 @@ def _resolve_config(gateway_url, agent_id, mode):
                            f"falling back to {DEFAULT_MEMORY_BACKEND}")
         backend = DEFAULT_MEMORY_BACKEND
     cfg["memory_backend"] = backend
-    cfg["pg_host"] = _text(_config("PG_HOST", DEFAULT_PG_HOST)) or DEFAULT_PG_HOST
-    cfg["pg_port"] = int(_number(_config("PG_PORT", DEFAULT_PG_PORT),
+    # Environment FIRST, then the config system, then the default.
+    #
+    # _config reads OmegaClaw's config (config.yaml and the command line); it does
+    # NOT look at the environment. Every OMEGACLAW_PG_* variable that
+    # entrypoint.sh forwards through `env -i` was therefore inert, and the store
+    # silently resolved to host=127.0.0.1 port=5433 - a TCP port that is not even
+    # published any more - and failed with "fe_sendauth: no password supplied"
+    # while the agent ran on the in-memory fallback. The password below already
+    # read the environment directly; these now do the same.
+    cfg["pg_host"] = (_text(os.environ.get("OMEGACLAW_PG_HOST", ""))
+                      or _text(_config("PG_HOST", DEFAULT_PG_HOST))
+                      or DEFAULT_PG_HOST)
+    cfg["pg_port"] = int(_number(os.environ.get("OMEGACLAW_PG_PORT")
+                                 or _config("PG_PORT", DEFAULT_PG_PORT),
                                  DEFAULT_PG_PORT, 1, 65535))
     # Both spellings are honoured: OMEGACLAW_PG_DB is what docker-compose.yml
     # and docs/reference-grounded-memory.md use, OMEGACLAW_PG_DBNAME is what
     # Autotests/test_mcity_store.py uses. They default to the same database.
-    cfg["pg_dbname"] = (_text(_config("PG_DB", ""))
+    cfg["pg_dbname"] = (_text(os.environ.get("OMEGACLAW_PG_DB", ""))
+                        or _text(os.environ.get("OMEGACLAW_PG_DBNAME", ""))
+                        or _text(_config("PG_DB", ""))
                         or _text(_config("PG_DBNAME", ""))
                         or DEFAULT_PG_DBNAME)
-    cfg["pg_user"] = _text(_config("PG_USER", DEFAULT_PG_USER)) or DEFAULT_PG_USER
+    cfg["pg_user"] = (_text(os.environ.get("OMEGACLAW_PG_USER", ""))
+                      or _text(_config("PG_USER", DEFAULT_PG_USER))
+                      or DEFAULT_PG_USER)
     # The password deliberately bypasses _config: config_get_by_key logs every
     # value it resolves, and no credential may ever reach a log line. It still
     # arrives through the environment, as OMEGACLAW_PG_PASSWORD, exactly like
