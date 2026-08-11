@@ -1534,3 +1534,24 @@ def test_vitals_states_whether_earning_is_still_needed(control):
     assert "earned=keep-going" in mc._vitals_line()
     mc._VITALS.update({"hunger": "hungry(2)", "items": "meme_coin=18383"})
     assert "earned=keep-going" in mc._vitals_line(), "a hungry agent still earns"
+
+
+def test_the_roster_column_and_the_cache_agree_on_reachability(control):
+    """They disagreed: the column showed raw canSpeak - 200 rows saying yes -
+    while the cache required canSpeak AND no live action. The agent was being
+    told yes about people the harness itself would refuse to send to."""
+    roster = {"agents": [
+        {"agentId": "user-agent-engaged", "name": "Engaged", "distance": 1,
+         "canSpeak": True, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active"}},
+        {"agentId": "user-agent-free", "name": "Free", "distance": 2,
+         "canSpeak": True, "status": "idle", "activeAction": None},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    result = _check(mc.agents())
+    engaged_row = [r for r in result.splitlines() if "user-agent-engaged" in r][0]
+    free_row = [r for r in result.splitlines() if "user-agent-free" in r][0]
+    assert "can-speak=no" in engaged_row, engaged_row
+    assert "can-speak=yes" in free_row, free_row
+    assert mc._can_be_reached("user-agent-engaged") is False
+    assert mc._can_be_reached("user-agent-free") is True

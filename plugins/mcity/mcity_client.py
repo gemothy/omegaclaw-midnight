@@ -1248,6 +1248,22 @@ def _prune(store, ttl_ms, stamp):
         pass
 
 
+def _entry_engaged(entry):
+    """True when this roster entry is inside a live action."""
+    action = entry.get("action")
+    return isinstance(action, dict) and bool(action)
+
+
+def _entry_reachable(entry):
+    """The one verdict on whether a message to this agent can land.
+
+    Used by BOTH the rendered can-speak= column and the _CAN_SPEAK cache. They
+    disagreed: the column showed raw canSpeak - 200 rows saying yes - while the
+    cache required canSpeak AND no live action, so the agent was being told yes
+    about people the harness itself would have refused to send to."""
+    return bool(entry.get("can_speak")) and not _entry_engaged(entry)
+
+
 def _note_can_speak(entry):
     """Remember the world's own verdict on whether an agent can be spoken to.
 
@@ -1265,9 +1281,8 @@ def _note_can_speak(entry):
         # world put US in - speaker-side do-not-disturb vanished the moment we
         # moved away and went idle - so the rule is symmetric: an agent inside a
         # live engagement cannot be reached, whatever the flag says.
-        action = entry.get("action")
-        engaged = isinstance(action, dict) and bool(action)
-        _CAN_SPEAK[agent_id] = (can and not engaged, _now_ms())
+        _CAN_SPEAK[agent_id] = (_entry_reachable(entry), _now_ms())
+        engaged = _entry_engaged(entry)
         # Where the free people are. canSpeak is really "on the same map": every
         # one of 52 same-map agents had it true and every one of 24 off-map
         # agents had it false. So an idle, unengaged agent elsewhere is not
@@ -1557,7 +1572,7 @@ def _agent_row(entry, spoke_count):
         ("id", _plain(entry["id"])),
         ("name", _plain(entry["name"])),
         ("status", _plain(status) if _text(status) else "unknown"),
-        ("can-speak", _yn(entry["can_speak"])),
+        ("can-speak", "yes" if _entry_reachable(entry) else "no"),
         ("talking", "yes" if _yn(entry["talking"]) == "yes" else None),
         ("dist", _plain(entry["dist"])),
         ("prof", _plain(entry["profession"])),
