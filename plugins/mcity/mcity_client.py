@@ -1206,6 +1206,29 @@ def _project(head, name, ranking, rows):
     return Budgeter().render([source], TurnState(now_ms=_now_ms()), budget)
 
 
+def _PRUNE_CEILING():
+    return 4000
+
+
+def _prune(store, ttl_ms, stamp):
+    """Drop entries past their TTL, and hard-cap the rest.
+
+    These caches are keyed by agent id and were never pruned. One roster is 285
+    agents, which is nothing, but this process is meant to run for days in a city
+    with churn, and an entry older than its TTL is already ignored by every
+    reader - it was pure growth. The ceiling is a backstop for the case where
+    something keeps writing fresh entries faster than they expire."""
+    try:
+        now = _now_ms()
+        for key in [k for k, v in store.items() if (now - stamp(v)) > ttl_ms]:
+            store.pop(key, None)
+        if len(store) > _PRUNE_CEILING():
+            for key in sorted(store, key=lambda k: stamp(store[k]))[:len(store) // 2]:
+                store.pop(key, None)
+    except Exception:      # noqa: BLE001 - housekeeping must never break a skill
+        pass
+
+
 def _note_can_speak(entry):
     """Remember the world's own verdict on whether an agent can be spoken to.
 
@@ -1226,6 +1249,7 @@ def _note_can_speak(entry):
         action = entry.get("action")
         engaged = isinstance(action, dict) and bool(action)
         _CAN_SPEAK[agent_id] = (can and not engaged, _now_ms())
+        _prune(_CAN_SPEAK, _CAN_SPEAK_TTL_MS, lambda v: v[1])
     except Exception:      # noqa: BLE001 - grounding must never break a read
         pass
 
@@ -3090,6 +3114,7 @@ def speak(arg=None):
                                      or "target is in do not disturb" in lowered
                                      or "only talks to friends" in lowered):
             _ASLEEP[sent["agent_id"]] = _now_ms()
+            _prune(_ASLEEP, _ASLEEP_TTL_MS, lambda v: v)
         elif "speaker is in do not disturb" in lowered:
             # Speaker-side: a different target cannot fix it, so the candidate
             # list below would be misleading on its own.

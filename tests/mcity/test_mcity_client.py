@@ -1282,3 +1282,26 @@ def test_the_world_always_gets_a_chance_to_prove_the_rule_wrong(control):
     mc._last_self_probe_ms = mc._now_ms() - (mc._SELF_PROBE_MS + 1000)
     _check(mc.speak("user-agent-abc hello there"))
     assert control.actions, "the probe must let one attempt through"
+
+
+def test_the_reachability_caches_do_not_grow_without_bound(control):
+    """Keyed by agent id and never pruned. One roster is 285 agents, which is
+    nothing, but this process is meant to run for days in a city with churn, and
+    an entry past its TTL is already ignored by every reader."""
+    stale = mc._now_ms() - (mc._CAN_SPEAK_TTL_MS + 5000)
+    for i in range(50):
+        mc._CAN_SPEAK[f"user-agent-old-{i}"] = (True, stale)
+    roster = {"agents": [{"agentId": "user-agent-new", "name": "New", "distance": 1,
+                          "isOpenToTalk": True, "canSpeak": True, "status": "idle"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert "user-agent-new" in mc._CAN_SPEAK
+    assert not [k for k in mc._CAN_SPEAK if k.startswith("user-agent-old-")], \
+        "expired entries must not accumulate"
+
+
+def test_pruning_never_drops_a_live_entry(control):
+    fresh = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-live"] = (True, fresh)
+    mc._prune(mc._CAN_SPEAK, mc._CAN_SPEAK_TTL_MS, lambda v: v[1])
+    assert "user-agent-live" in mc._CAN_SPEAK
