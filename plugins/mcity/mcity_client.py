@@ -531,6 +531,12 @@ def _vitals_line():
     waiting = _someone_is_waiting()
     parts.append(f"waiting={len(waiting)}"
                  + (f" (answer {waiting[0]})" if waiting else ""))
+    # earned= replaces an arithmetic comparison the model was not doing. Step
+    # four asks it to read holding=... meme_coin=18383 and decide whether that
+    # beats two hundred; it kept calling mcity-work instead, 54 refusals in three
+    # minutes. Stating the conclusion as a fact is what worked for waiting=,
+    # hunger and can-speak.
+    parts.append("earned=enough" if _rich_enough() else "earned=keep-going")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:

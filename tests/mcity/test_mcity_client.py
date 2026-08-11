@@ -1521,3 +1521,16 @@ def test_the_opener_returns_nothing_rather_than_prose_to_sniff(control):
                   json.dumps({"agents": []}).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
     assert mc._reachable_opener() is None
+
+
+def test_vitals_states_whether_earning_is_still_needed(control):
+    """Step four asked the model to read holding=... meme_coin=18383 and compare
+    it against two hundred. It kept calling mcity-work instead - 54 refusals in
+    three minutes - so the line states the conclusion, as it does for waiting=."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
+                       "items": "crystal=13800 meme_coin=18383"})
+    assert "earned=enough" in mc._vitals_line()
+    mc._VITALS.update({"items": "meme_coin=12"})
+    assert "earned=keep-going" in mc._vitals_line()
+    mc._VITALS.update({"hunger": "hungry(2)", "items": "meme_coin=18383"})
+    assert "earned=keep-going" in mc._vitals_line(), "a hungry agent still earns"
