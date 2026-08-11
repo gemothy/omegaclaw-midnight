@@ -122,7 +122,17 @@ RECONNECT_GAP_SECONDS = 60.0
 MAX_RECONNECTS = 3                 # CONSECUTIVE failures, reset by any success
 RECONNECT_COOLDOWN_SECONDS = 900.0 # after a burst of failures, not a permanent stop
 ECHO_MEMORY = 32
-ECHO_MIN_OVERLAP = 24
+# How much contiguous world text an outgoing line may share before it counts as
+# repeating rather than replying. 24 was under a clause, and conversation shares
+# clauses by nature: it rejected "Spy, things have been relatively stable here.
+# I've been focusing on exploring..." - the agent's own writing - and 16 of 22
+# speak failures in one window were this guard blocking original replies.
+#
+# The property being protected is narrow: the agent must not relay an injected
+# instruction back into the world. A relayed instruction is a long verbatim run;
+# a reply that happens to share a phrase with the question is not. 48 characters
+# is about a full clause, which natural writing does not reproduce by accident.
+ECHO_MIN_OVERLAP = 48
 DEFAULT_MEMORY_BACKEND = "postgres"  # mcity_store backend: postgres | memory
 DEFAULT_PG_HOST = "127.0.0.1"
 DEFAULT_PG_PORT = 5433             # the dedicated pgvector container, NOT 5432
