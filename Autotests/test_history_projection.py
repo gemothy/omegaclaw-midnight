@@ -95,3 +95,28 @@ def test_a_mixed_turn_is_kept(tmp_path):
         '("2026-08-11 10:00:00" \n ((mcity-work) (send "No new input received.")) \n)\n',
         encoding="utf-8")
     assert "mcity-work" in helper.rankedHistory(str(history), 30000)
+
+
+def test_a_retired_skill_is_not_taught_back_to_the_agent(tmp_path):
+    """mcity-areas was unregistered and still ran 27 times in the next window,
+    because the agent's own recent turns were full of it. Feeding those back
+    teaches exactly the habit that removing the skill was meant to end."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-speak "user-agent-x hello there")) \n)\n'
+        + '("2026-08-11 10:00:10" \n ((mcity-areas)) \n)\n' * 15,
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "mcity-areas" not in body
+    assert "mcity-speak" in body, "the real turn must survive"
+
+
+def test_a_turn_that_only_partly_used_a_retired_skill_is_kept(tmp_path):
+    """Only turns made up entirely of retired calls are dropped."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-areas) (mcity-work)) \n)\n',
+        encoding="utf-8")
+    assert "mcity-work" in helper.rankedHistory(str(history), 30000)

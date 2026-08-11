@@ -430,6 +430,13 @@ def _history_commands(block):
                       r'(?:\s+"[^"]*")?\)', block)
 
 
+# Commands the agent is no longer offered. A retired skill keeps its binding so
+# that replayed history does not error, which means the agent can go on calling
+# it - and it does: mcity-areas was unregistered and still ran 27 times in the
+# next window, because its own recent turns were full of it. Feeding those back
+# teaches the habit that removing the skill was meant to end.
+RETIRED_COMMANDS = ("mcity-areas",)
+
 _IDLE_SEND_RE = re.compile(
     r"no new input|nothing to report|standing by|awaiting (?:your )?instructions"
     r"|no new messages?|idle(?: status)? report", re.I)
@@ -492,6 +499,9 @@ def rankedHistory(history_file, budget, repeat_cap=2):
         # recent things it did. Dropping them entirely means the newest turn it
         # can see is always one where something actually happened.
         if _is_idle_report(block, commands):
+            continue
+        if commands and all(
+                c.lstrip("( ").startswith(RETIRED_COMMANDS) for c in commands):
             continue
         # A turn with no recognisable command still carries prose worth keeping.
         if commands and all(seen_commands.get(c, 0) >= repeat_cap for c in commands):
