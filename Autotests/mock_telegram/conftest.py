@@ -30,6 +30,22 @@ import sys
 import urllib.error
 import urllib.request
 
+
+def _load_sibling(filename, unique_name):
+    """Import a module from THIS directory under a unique name.
+
+    Sibling mock suites ship files with identical names (real_driver.py), and a
+    module already in sys.modules wins over any sys.path order, so the second
+    suite collected imported the first suite's copy."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(__file__), filename + ".py")
+    spec = importlib.util.spec_from_file_location(unique_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[unique_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 import pytest
 
 # Reuse the LLM mock harness from Autotests/mock/ without duplicating its code.
@@ -45,7 +61,14 @@ if _SELF_DIR not in sys.path:
 from llm import LlmMockController  # noqa: E402
 from llm import LLM_MOCK_PORT as LLM_PORT_DEFAULT  # noqa: E402
 
-from real_driver import RealTgDriver  # noqa: E402
+# Loaded by PATH, not by name. Autotests/mock_slack/ also ships a real_driver.py,
+# and pytest collects mock_slack first, so by the time this runs
+# sys.modules["real_driver"] is already Slack's copy - a cached module name wins
+# over any sys.path order, and the whole suite failed to collect with
+# "cannot import name RealTgDriver from .../mock_slack/real_driver.py".
+# A unique module name makes the two siblings coexist whatever the collection
+# order happens to be.
+RealTgDriver = _load_sibling("real_driver", "mcity_tg_real_driver").RealTgDriver  # noqa: E402
 
 
 AUTH_SECRET = os.environ.get("OMEGACLAW_AUTH_SECRET") or "0000"

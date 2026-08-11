@@ -18,6 +18,22 @@ Required env vars for live runs:
 import os
 import sys
 
+
+def _load_sibling(filename, unique_name):
+    """Import a module from THIS directory under a unique name.
+
+    Sibling mock suites ship files with identical names (real_driver.py), and a
+    module already in sys.modules wins over any sys.path order, so the second
+    suite collected imported the first suite's copy."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(__file__), filename + ".py")
+    spec = importlib.util.spec_from_file_location(unique_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[unique_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 import pytest
 
 _MOCK_DIR = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "mock"))
@@ -30,7 +46,9 @@ if _SELF_DIR not in sys.path:
 
 from llm import LlmMockController, LLM_MOCK_PORT  # noqa: E402
 
-from real_driver import SlackRealDriver  # noqa: E402
+# Loaded by path under a unique name: mock_telegram/ ships a real_driver.py
+# too, and a cached module name beats sys.path order.
+SlackRealDriver = _load_sibling('real_driver', 'mcity_slack_real_driver').SlackRealDriver  # noqa: E402
 
 
 AUTH_SECRET = os.environ.get("OMEGACLAW_AUTH_SECRET") or "0000"

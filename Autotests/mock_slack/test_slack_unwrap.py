@@ -17,7 +17,31 @@ _PARENT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
-from channels.slack import _slack_unwrap  # noqa: E402
+
+def _load_channels_slack():
+    """Load channels/slack.py by path.
+
+    `from channels.slack import ...` cannot work here: pyproject puts src/ on
+    pythonpath and src/channels.py is a MODULE, so the name `channels` binds to
+    it and the channels/ directory is never consulted -
+    "No module named 'channels.slack'; 'channels' is not a package". Inserting
+    the repo root does not help, because a module already bound to that name
+    wins. Loading the file directly sidesteps the collision entirely."""
+    import importlib.util
+    channels_dir = os.path.join(_PARENT, "channels")
+    # slack.py imports its own siblings by bare name (`import auth`), which only
+    # resolves with the channels/ directory itself on the path.
+    if channels_dir not in sys.path:
+        sys.path.insert(0, channels_dir)
+    path = os.path.join(channels_dir, "slack.py")
+    spec = importlib.util.spec_from_file_location("omegaclaw_channels_slack", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["omegaclaw_channels_slack"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_slack_unwrap = _load_channels_slack()._slack_unwrap  # noqa: E402
 
 
 @pytest.fixture(scope="session")
