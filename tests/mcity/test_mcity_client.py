@@ -910,3 +910,33 @@ def test_an_idle_agent_is_still_refused_a_look_only_loop(control):
         mc.threads()
     mc._VITALS.update({"at_ms": mc._now_ms(), "status": "idle"})
     assert _check(mc.threads()).startswith("MCITY-THREADS-FAILED reason=repeat")
+
+
+def test_work_is_refused_while_a_person_waits_for_a_reply(control):
+    """The mission has said in prose for several passes that answering outranks
+    working. The agent started work anyway with two people waiting, and a long
+    action makes it unreachable for the duration, so the thread dies."""
+    control.on_action = lambda action: []
+    _check(mc.threads())                    # learns who is waiting
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-abc"]})
+    result = _check(mc.work())
+    assert result.startswith("MCITY-WORK-FAILED reason=someone_waiting")
+    assert "user-agent-abc" in result
+    assert not control.actions, "no long action may start while someone waits"
+
+
+def test_work_proceeds_once_nobody_is_waiting(control):
+    control.on_action = lambda action: []
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    _check(mc.work())
+    assert control.actions
+
+
+def test_a_stale_waiting_list_never_blocks_work(control):
+    """Refusing on old news would strand the agent: the reply may already have
+    been sent, or the thread may have died on its own."""
+    control.on_action = lambda action: []
+    mc._WAITING.update({"at_ms": mc._now_ms() - (mc._WAITING_STALE_MS + 1000),
+                        "ids": ["user-agent-abc"]})
+    _check(mc.work())
+    assert control.actions

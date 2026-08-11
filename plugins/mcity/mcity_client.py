@@ -368,6 +368,14 @@ _REPEATABLE_READS = frozenset((
     "THREADS", "AGENTS", "MERCHANTS", "AREAS", "RECENT-EVENTS", "NAVIGATION",
     "CONTEXT", "INVENTORY", "NEEDS", "STATUS",
 ))
+# Who is waiting on a reply, learned from the last mcity-threads render. The
+# mission has told the agent in prose since several passes ago that answering a
+# waiting person outranks working, and it still started long actions with two
+# people waiting - and a long action makes it unreachable for the duration, so
+# the thread dies. Prose is not enforcement; this is.
+_WAITING = {"at_ms": 0, "ids": []}
+_WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
+
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
@@ -2098,6 +2106,7 @@ def threads(_ignored=None):
     own_id = _c("agent_id", "")
     rows = []
     links = []
+    waiting_ids = []
     index = 0
     for item in items:
         if not isinstance(item, dict):
@@ -2158,6 +2167,8 @@ def threads(_ignored=None):
                 if (isinstance(recipient, str) and recipient.strip() == own_id
                         and ours == 0 and theirs > 0):
                     mine = "no"          # they opened it, we have never replied
+        if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
+            waiting_ids.append(others[0])
         band = 1.0 if mine == "no" else (0.3 if mine == "yes" else 0.6)
         rows.append((_row((
             ("thread", _plain(thread_id)),
@@ -2187,6 +2198,8 @@ def threads(_ignored=None):
     if _degraded(link_ok):
         pairs.append(("store", "degraded"))
     head = _line("THREADS", "OK", pairs)
+    _WAITING["at_ms"] = _now_ms()
+    _WAITING["ids"] = waiting_ids
     body = _project(head, "threads", "waiting-first", rows)
     return _line("THREADS", "OK", pairs, body.splitlines() if body else ["- none"])
 
@@ -2629,8 +2642,41 @@ def exit_building():
     return _mutate("EXIT-BUILDING", lambda: ({"kind": "exit_building"}, None))
 
 
+def _someone_is_waiting():
+    """The agent ids that owe a reply, per the last threads render, or []."""
+    if not _WAITING["ids"] or not _WAITING["at_ms"]:
+        return []
+    if (_now_ms() - _WAITING["at_ms"]) > _WAITING_STALE_MS:
+        return []
+    return list(_WAITING["ids"])
+
+
+def _refuse_while_someone_waits(verb):
+    """Long actions are refused while a real person is waiting on a reply.
+
+    The mission has said in prose for several passes that answering outranks
+    working. The agent started work anyway with two people waiting, and a long
+    action makes it unreachable for the whole duration - the world rejects
+    speech from a mid-action agent - so the thread dies at about sixty seconds
+    and a person is left on read. The refusal names who to answer, so the next
+    turn has an obvious move."""
+    waiting = _someone_is_waiting()
+    if not waiting:
+        return None
+    who = waiting[0]
+    more = f" ({len(waiting)} people are waiting)" if len(waiting) > 1 else ""
+    return _failed(verb, "someone_waiting",
+                   f"{who} is waiting on your reply{more}. This action would "
+                   "take minutes and the world refuses speech while it runs, so "
+                   f"the thread would die unanswered. Reply first with mcity-speak "
+                   f"{who} <your sentence>, then come back to this")
+
+
 @_guard("WORK")
 def work():
+    blocked = _refuse_while_someone_waits("WORK")
+    if blocked is not None:
+        return blocked
     return _mutate("WORK", lambda: ({"kind": "perform_job"}, None))
 
 
@@ -2689,6 +2735,10 @@ def sleep_action(arg=None):
 
 @_guard("HARVEST")
 def harvest(arg=None):
+    blocked = _refuse_while_someone_waits("HARVEST")
+    if blocked is not None:
+        return blocked
+
     def build():
         parts = _split(arg, 2)
         if parts is None or not ID_RE.match(parts[0]):

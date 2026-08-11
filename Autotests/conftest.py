@@ -74,6 +74,7 @@ def _reset_mcity_module_state():
     pristine = {"at_ms": 0, "hunger": None, "space": None, "items": None,
                 "status": None, "busy_for": None}
     mc._LAST_READ.clear()
+    mc._WAITING.update({'at_ms': 0, 'ids': []})
     mc._VITALS.clear(); mc._VITALS.update(pristine)
     mc._vitals_refreshing = False
     yield

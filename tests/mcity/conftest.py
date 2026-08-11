@@ -29,10 +29,12 @@ def _reset_module_state():
     mc._VITALS.update(_PRISTINE_VITALS)
     mc._vitals_refreshing = False
     mc._LAST_READ.clear()
+    mc._WAITING.update({'at_ms': 0, 'ids': []})
     yield
     mc._VITALS.clear()
     mc._VITALS.update(_PRISTINE_VITALS)
     mc._vitals_refreshing = False
     mc._LAST_READ.clear()
+    mc._WAITING.update({'at_ms': 0, 'ids': []})
     mc._cfg.clear()
     mc._cfg.update(cfg)
