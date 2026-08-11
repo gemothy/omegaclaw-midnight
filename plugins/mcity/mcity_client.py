@@ -2365,27 +2365,11 @@ def needs():
 
 @_guard("AREAS")
 def areas():
-    # Reading the map while the route is already known is looking instead of
-    # going. The route has ridden on the vitals line for a full deploy and the
-    # agent did not take it: every cmd= it has ever acted on was in the HEAD line
-    # of a refusal, never trailing at the end of a result. mcity-areas is its
-    # most frequent call - 22 in a four-minute window - so this is where the
-    # instruction reaches it.
-    #
-    # Rate-limited, not blocked: one read always goes through every
-    # _ROSTER_RECHECK_MS so the agent can still explore, and the refusal
-    # disappears the moment there is nowhere better to be.
-    global _last_areas_read_ms
-    route = _cached_route() if (_REACHABLE["n"] == 0
-                                and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS) else ""
-    if (route and not _someone_is_waiting() and not _needs_to_eat()
-            and (_now_ms() - _last_areas_read_ms) < _ROSTER_RECHECK_MS):
-        return _promote_command(
-            _failed("AREAS", "route_known",
-                    "you already know where the free agents are and reading the "
-                    "map again does not move you"),
-            route)
-    _last_areas_read_ms = _now_ms()
+    # A route_known refusal used to live here. It fired 52 times in one window
+    # and produced no movement at all, while blocking a legitimate read - the
+    # agent follows the numbered procedure in the mission, and travel now has a
+    # step there instead. Refusals steer well when they replace a wrong action;
+    # this one had nothing to replace, because moving was never in the procedure.
     payload, error = _skill_read("AREAS", "areas")
     if error is not None:
         return error
