@@ -1335,6 +1335,32 @@ def _reachable_opener():
         return None
 
 
+def _promote_command(result, hint):
+    """Lift the cmd= out of a hint and into the head line of a failure.
+
+    Everything learned this session says the same thing: this agent acts on a
+    complete command near the start of the first line, and ignores the same
+    command placed lower down. Measured both ways more than once."""
+    try:
+        command = ""
+        for piece in (hint or "").split():
+            if piece.startswith("cmd=mcity-"):
+                command = hint[hint.index(piece):].strip()
+                break
+        if not command:
+            return _out(f"{result}\n{hint}")
+        head, sep, rest = (result or "").partition("\n")
+        note = hint.split(" Go to them:")[0].split(" cmd=")[0].strip().rstrip(".")
+        marker = "reason=action_failed"
+        if marker in head:
+            head = head.replace(marker, f"{marker} {command} -- {note};", 1)
+        else:
+            head = f"{command} -- {note}; {head}"
+        return _out(head + sep + rest)
+    except Exception:      # noqa: BLE001 - a hint must never break a skill
+        return result
+
+
 def _travel_to_people_command():
     """Where to go when nobody here can talk, as a copyable command.
 
@@ -3052,7 +3078,10 @@ def work():
     if "no available" in (result or "").lower() and "worksite" in (result or "").lower():
         go = _travel_to_people_command()
         if go:
-            result = _out(f"{result}\n{go}")
+            # Into the HEAD line, not appended below it. Appended, this exact
+            # hint was shown 11 times and produced zero move attempts; the only
+            # thing that has ever moved this agent is a cmd= in the first line.
+            result = _promote_command(result, go)
     return result
 
 

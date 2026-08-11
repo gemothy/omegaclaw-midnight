@@ -1406,3 +1406,25 @@ def test_a_contended_worksite_points_at_somewhere_better(control):
     assert result.startswith("MCITY-WORK-FAILED")
     assert "free agents are at central" in result
     assert "cmd=mcity-" in result
+
+
+def test_the_travel_command_lands_in_the_head_line(control):
+    """Appended below the failure, this exact hint was shown 11 times and
+    produced zero move attempts. The only thing that has ever moved this agent
+    is a complete command near the start of the first line."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="perform_job",
+              reason="no available hacker worksite")]
+    result = _check(mc.work())
+    head = result.partition("\n")[0]
+    assert "cmd=mcity-" in head and "central" in head, head
+    assert head.index("cmd=mcity-") < 60, "the command must be near the front"
+    assert "no available hacker worksite" in result, "the world's words survive"
