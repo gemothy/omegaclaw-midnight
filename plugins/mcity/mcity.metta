@@ -46,6 +46,7 @@
          (add-skill mcity-inventory "List the items you carry in Midnight City" ())
          (add-skill mcity-needs "Check your hunger energy and other needs in Midnight City" ())
          (add-skill mcity-areas "List the areas you can move to from here in Midnight City" ())
+         (add-skill mcity-navigation "List the DISTRICTS you can travel to and the buildings you can enter from here. Districts are not areas: mcity-areas only lists places inside the district you are already in, so this is the only way to find another district" ())
          (add-skill mcity-agents "List the other agents near you in Midnight City" ())
          (add-skill mcity-merchants "List Midnight City merchants with the items they buy and pay" ())
          (add-skill mcity-recent-events "Read what recently happened around you in Midnight City" ())
@@ -55,6 +56,9 @@
            (progn
              (log INFO "mcity-plugin" "Adding Midnight City action skills")
              (add-skill mcity-move-area "Walk to another area in the place you are now" (area_id_in_quotes))
+             (add-skill mcity-travel-district "Travel to a different DISTRICT of Midnight City. One quoted district id copied exactly from mcity-navigation, for example north. Use this when what you need is not in your current district: mcity-move-area cannot leave the district and will fail" (district_id_in_quotes))
+             (add-skill mcity-enter-building "Enter a building you can see from here. One quoted building id copied exactly from mcity-navigation" (building_id_in_quotes))
+             (add-skill mcity-exit-building "Leave the building you are inside and step back out onto the street" ())
              (add-skill mcity-work "Do your job here, it only reports success when it yields a resource" ())
              (add-skill mcity-eat "Eat food from your inventory to reduce hunger" ())
              (add-skill mcity-harvest "Gather a resource, the activity must be chop wood or mine ore or trade crypto" (area_id_and_activity_in_quotes))

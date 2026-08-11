@@ -91,8 +91,15 @@ fi
 SAFE_VARS="HOME USER PATH HOSTNAME TERM LANG LC_ALL \
   PYTHONDONTWRITEBYTECODE PYTHONUNBUFFERED \
   HF_HOME SENTENCE_TRANSFORMERS_HOME HF_HUB_OFFLINE TRANSFORMERS_OFFLINE \
-  OMEGACLAW_DIR MEMORY_DIR TEST_SERVER_IP"
+  OMEGACLAW_DIR MEMORY_DIR TEST_SERVER_IP \
+  OMEGACLAW_PG_HOST OMEGACLAW_PG_PORT OMEGACLAW_PG_DB OMEGACLAW_PG_USER \
+  OMEGACLAW_MEMORY_BACKEND"
 
+# NOTE: OMEGACLAW_PG_PASSWORD is deliberately absent from SAFE_VARS. The roster
+# store authenticates over a unix socket with peer auth, so the kernel vouches for
+# the uid and no credential need ever enter this process. The agent has a shell
+# skill and is prompt-injectable by a shared world; the only safe secret is one
+# that does not exist here. Host/port/db/user are configuration, not credentials.
 env_args=""
 for var in $SAFE_VARS; do
   eval val=\${$var:-}
