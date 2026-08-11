@@ -2096,3 +2096,47 @@ def test_no_route_token_when_somebody_is_reachable_here(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     mc._REACHABLE.update({"n": 3, "at_ms": mc._now_ms()})
     assert "cmd=mcity-move-area" not in mc._vitals_line()
+
+
+def test_the_route_prefers_somewhere_outdoors(control):
+    """The first live route was cmd=mcity-move-area ada-arena, a building:
+    following it would have put the agent indoors again - the exact trap it is
+    leaving, where it can neither see areas that reach elsewhere nor use the
+    door, because this building's exit is a teleport."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [
+        {"id": "ada-arena", "kind": "building", "moveAreaAvailable": True,
+         "anchor": {"spaceId": "central"}},
+        {"id": "central-plaza", "kind": "park", "moveAreaAvailable": True,
+         "anchor": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    hint = mc._travel_to_people_command()
+    assert "central-plaza" in hint, hint
+    assert "ada-arena" not in hint
+
+
+def test_a_building_is_still_offered_when_it_is_the_only_way(control):
+    """Better indoors near people than nowhere near them."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [{"id": "ada-arena", "kind": "building",
+                        "moveAreaAvailable": True,
+                        "anchor": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    assert "ada-arena" in (mc._travel_to_people_command() or "")

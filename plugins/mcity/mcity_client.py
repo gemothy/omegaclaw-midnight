@@ -1605,7 +1605,16 @@ def _travel_to_people_command():
             # and sent the agent at travel-district and exit-building, both of
             # which the world refuses from here: travelDistricts is empty
             # indoors, and this building's exit is a teleport rather than a link.
-            for item in areas:
+            # Prefer somewhere OUTDOORS. Anchored areas include buildings, and
+            # the first live route was cmd=mcity-move-area ada-arena, a building:
+            # following it would have put the agent indoors again, which is the
+            # exact trap it is trying to leave - indoors it cannot see the areas
+            # that reach anywhere else, and this building's exit is a teleport
+            # that mcity-exit-building does not handle.
+            def _rank(item):
+                return 0 if _text(_get(item, "kind")) in ("park", "district") else 1
+
+            for item in sorted(areas, key=_rank):
                 anchor = _get(item, "anchor")
                 anchored = (anchor or {}).get("spaceId") if isinstance(anchor, dict) else None
                 area_id = _text(_get(item, "areaId", "id"))
