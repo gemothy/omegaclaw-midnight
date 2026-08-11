@@ -58,3 +58,25 @@ def _post_session_cleanup():
         print(f"   [final] live cleanup skipped: {exc}", flush=True)
         return
     print(f"   [final] history={h} blocks, chromadb={c} vectors", flush=True)
+
+
+@pytest.fixture(autouse=True)
+def _reset_mcity_module_state():
+    """mcity_client keeps grounding and read-dedup state in module globals, so a
+    test that reads twice can be suppressed by what an EARLIER test read. Two
+    roster tests here passed alone and failed in suite order for exactly that
+    reason. tests/mcity/conftest.py holds the matching fixture."""
+    try:
+        import mcity_client as mc
+    except ImportError:                 # suites that never load the plugin
+        yield
+        return
+    pristine = {"at_ms": 0, "hunger": None, "space": None, "items": None,
+                "status": None, "busy_for": None}
+    mc._LAST_READ.clear()
+    mc._VITALS.clear(); mc._VITALS.update(pristine)
+    mc._vitals_refreshing = False
+    yield
+    mc._LAST_READ.clear()
+    mc._VITALS.clear(); mc._VITALS.update(pristine)
+    mc._vitals_refreshing = False

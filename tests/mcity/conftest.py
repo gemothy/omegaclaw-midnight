@@ -28,9 +28,11 @@ def _reset_module_state():
     mc._VITALS.clear()
     mc._VITALS.update(_PRISTINE_VITALS)
     mc._vitals_refreshing = False
+    mc._LAST_READ.clear()
     yield
     mc._VITALS.clear()
     mc._VITALS.update(_PRISTINE_VITALS)
     mc._vitals_refreshing = False
+    mc._LAST_READ.clear()
     mc._cfg.clear()
     mc._cfg.update(cfg)

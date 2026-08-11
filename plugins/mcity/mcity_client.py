@@ -359,6 +359,18 @@ def _cap(text):
     return _cap_to(text, int(_c("max_result_chars", DEFAULT_MAX_RESULT_CHARS)))
 
 
+# Reads whose body is worth suppressing when it has not changed. Measured: in one
+# four-minute window 49 of 50 decisions were mcity-threads returning the same 28
+# rows, so the agent spent a whole window re-reading a list it had already seen
+# and never reached an action. Repeating a read is also the most expensive way to
+# waste context, because the body is the largest thing in the turn.
+_REPEATABLE_READS = frozenset((
+    "THREADS", "AGENTS", "MERCHANTS", "AREAS", "RECENT-EVENTS", "NAVIGATION",
+    "CONTEXT", "INVENTORY", "NEEDS", "STATUS",
+))
+_LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
+_REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
+
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
            "status": None, "busy_for": None}
 _VITALS_STALE_MS = 120000
@@ -514,6 +526,36 @@ def _failed(verb, reason, detail=""):
     return _line(verb, "FAILED", (("reason", reason), ("detail", detail)))
 
 
+def _suppress_repeat(verb, result):
+    """Collapse a read that returned exactly what it returned last time.
+
+    The body is compared BEFORE _out appends vitals, because vitals move on
+    almost every call (holdings tick) and would defeat the comparison.
+
+    One repeat is allowed through untouched: re-reading once after acting is
+    normal, and a first repeat is how the agent confirms something landed. From
+    the second identical body onward the full text is replaced by its own first
+    line plus how long the world has looked like this - enough to keep the count
+    visible, without paying for rows the agent has now seen three times."""
+    try:
+        if verb not in _REPEATABLE_READS or not result.startswith(f"MCITY-{verb}-OK"):
+            return result
+        now = _now_ms()
+        prev = _LAST_READ.get(verb)
+        if not prev or prev["body"] != result or (now - prev["at"]) > _REPEAT_WINDOW_MS:
+            _LAST_READ[verb] = {"body": result, "at": now, "n": 0}
+            return result
+        prev["n"] += 1
+        if prev["n"] < 2:
+            return result
+        age = int((now - prev["at"]) / 1000)
+        head = result.partition("\n")[0]
+        return (f"{head} unchanged for {age}s across {prev['n'] + 1} reads; "
+                "re-reading cannot change it, so act instead of looking again")
+    except Exception:      # noqa: BLE001 - never break a skill over an optimisation
+        return result
+
+
 def _guard(verb):
     """Wrap a skill so it can never raise into the agent loop and can never
     return an empty result (an empty COMMAND_RETURN row vanishes entirely)."""
@@ -541,7 +583,7 @@ def _guard(verb):
             if not isinstance(result, str) or not result.strip():
                 logger.error(f"mcity skill {verb} produced an empty result")
                 return _out(_failed(verb, "internal", "empty result"))
-            return _out(result)
+            return _out(_suppress_repeat(verb, result))
         return wrapper
     return decorator
 

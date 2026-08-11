@@ -837,3 +837,30 @@ def test_split_arguments_match_the_compound_form_exactly(control):
     split = control.actions[-1]
     _check(mc.speak("user-agent-abc hello there friend"))
     assert control.actions[-1] == split
+
+
+def test_an_unchanged_read_stops_repeating_its_whole_body(control):
+    """49 of 50 decisions in one window were mcity-threads returning the same 28
+    rows. One repeat is allowed - that is how the agent confirms something landed
+    - but from the second the body is replaced by its own first line."""
+    first = _check(mc.threads())
+    second = _check(mc.threads())          # one repeat passes through untouched
+    assert second.partition("\n")[0] == first.partition("\n")[0]
+    assert "unchanged for" not in second
+    third = _check(mc.threads())
+    assert "unchanged for" in third
+    assert "act instead of looking again" in third
+    assert len(third) < len(first)
+    assert third.startswith("MCITY-THREADS-OK")
+
+
+def test_a_changed_read_is_never_suppressed(control):
+    _check(mc.threads()); _check(mc.threads()); _check(mc.threads())
+    # Must change the RENDERED body, not just the payload: a different preview on
+    # the same single thread renders identically, and suppressing that is correct.
+    moved = {"threads": [{"threadId": f"t{i}", "participants": ["agent-1", f"agent-{i}"],
+                          "preview": "something genuinely new has happened"}
+                         for i in range(7, 10)]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(moved).encode())
+    result = _check(mc.threads())
+    assert "unchanged for" not in result, "new world state must always come through"
