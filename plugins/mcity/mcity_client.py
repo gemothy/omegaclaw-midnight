@@ -398,6 +398,8 @@ _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
 _ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
 # (target, exact words) -> when it was delivered. Repeating yourself verbatim
 # to the same person is the clearest tell of a bot.
+_RICH_NUDGE_EVERY_MS = 60000   # how often to steer a rich agent toward people
+_last_rich_nudge_ms = 0
 _SAID = {}
 _SAID_TTL_MS = 600000
 _DND_STREAK_HINT = 3           # refusals before we point out the pattern
@@ -451,7 +453,7 @@ def reset_runtime_state():
     globals().update(_vitals_refreshing=False, _can_speak_at_ms=0,
                      _can_speak_refreshing=False, _waiting_refresh_at_ms=0,
                      _waiting_refreshing=False, _last_self_probe_ms=0,
-                     _dnd_streak=0)
+                     _dnd_streak=0, _last_rich_nudge_ms=0)
 
 
 def _harvest_vitals(payload):
@@ -3205,8 +3207,16 @@ def work():
     # three minutes with nothing accomplished, where the agent had been
     # completing 27 work actions - strictly worse. Blocking the only available
     # action is not a priority, it is a dead end.
-    alternative = _reachable_opener() if _rich_enough() else None
+    # A NUDGE, not a wall. Blocking every turn produced 36 refusals and zero
+    # messages in three minutes, while windows where it fired 2-8 times
+    # delivered 2-4. The agent reads the roster when told to and then returns to
+    # work; refusing that constantly just removes the one thing it will do,
+    # which is strictly worse than letting it earn between reminders.
+    global _last_rich_nudge_ms
+    due = (_now_ms() - _last_rich_nudge_ms) >= _RICH_NUDGE_EVERY_MS
+    alternative = _reachable_opener() if (due and _rich_enough()) else None
     if alternative and not _someone_is_waiting():
+        _last_rich_nudge_ms = _now_ms()
         return _promote_command(
             _failed("WORK", "rich_enough",
                     "you hold well over the two hundred meme_coin the mission "

@@ -1711,3 +1711,37 @@ def test_earned_is_silent_when_holdings_are_unknown(control):
     assert "earned=" not in mc._vitals_line()
     mc._VITALS.update({"items": "meme_coin=18529"})
     assert "earned=enough" in mc._vitals_line()
+
+
+def test_the_wealth_nudge_does_not_block_every_turn(control):
+    """Blocking every turn produced 36 refusals and zero messages in three
+    minutes, where windows with 2-8 refusals delivered 2-4. The agent reads the
+    roster when told to and then returns to work; refusing that constantly just
+    removes the one thing it will do."""
+    control.on_action = lambda action: []
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "isOpenToTalk": True, "canSpeak": True, "status": "idle"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
+                       "items": "meme_coin=18383"})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    first = _check(mc.work())
+    assert first.startswith("MCITY-WORK-FAILED reason=rich_enough"), "nudge once"
+    before = len(control.actions)
+    _check(mc.work())
+    assert len(control.actions) > before, "and then let it work"
+
+
+def test_the_nudge_returns_after_its_interval(control):
+    control.on_action = lambda action: []
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "isOpenToTalk": True, "canSpeak": True, "status": "idle"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
+                       "items": "meme_coin=18383"})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    _check(mc.work())
+    mc._last_rich_nudge_ms = mc._now_ms() - (mc._RICH_NUDGE_EVERY_MS + 1000)
+    assert _check(mc.work()).startswith("MCITY-WORK-FAILED reason=rich_enough")
