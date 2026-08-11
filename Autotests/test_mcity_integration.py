@@ -650,3 +650,35 @@ def test_store_config_reads_the_environment(monkeypatch):
     assert cfg["pg_port"] == 5432
     assert cfg["pg_user"] == "nobody"                # unprivileged role, not the owner
     assert cfg["pg_dbname"] == "omegaclaw"
+
+
+def test_degraded_store_promotes_itself_back(monkeypatch):
+    """Falling back used to be permanent: a database that was merely late cost
+    the roster until the next restart, while a healthy Postgres sat beside it."""
+    import itertools
+    health = itertools.chain([False], itertools.repeat(True))
+
+    class Fake:
+        def __init__(self, cfg): self.cfg = cfg
+        def health(self): return next(health) if self.cfg.get("backend") != "memory" else True
+
+    monkeypatch.setattr(mc, "make_store", lambda cfg: Fake(cfg))
+    monkeypatch.setattr(mc, "_store_settings", lambda backend: {"backend": backend})
+    monkeypatch.setattr(mc, "_c", lambda k, d=None: "postgres" if k == "memory_backend" else d)
+    mc._store = None; mc._store_ready = False
+    mc._store_degraded = False; mc._store_rebuild_at = 0.0
+
+    first = mc._roster_store()                     # health() False -> fallback
+    assert mc._store_degraded is True
+    assert first.cfg["backend"] == "memory"
+
+    # Inside the rebuild window nothing is retried.
+    mc._store_rebuild_at = mc.time.monotonic() + 9999
+    assert mc._roster_store().cfg["backend"] == "memory"
+    assert mc._store_degraded is True
+
+    # Once the window passes it promotes itself back.
+    mc._store_rebuild_at = 0.0
+    promoted = mc._roster_store()
+    assert promoted.cfg["backend"] == "postgres"
+    assert mc._store_degraded is False

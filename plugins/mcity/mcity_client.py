@@ -129,6 +129,7 @@ DEFAULT_PG_PORT = 5433             # the dedicated pgvector container, NOT 5432
 DEFAULT_PG_DBNAME = "omegaclaw"
 DEFAULT_PG_USER = "omegaclaw"
 SPEAK_COOLDOWN_MS = 600_000        # candidates(): no re-greeting inside 10 min
+STORE_REBUILD_SECONDS = 300.0      # a degraded store re-probes the real backend
 STORE_RETRY_SECONDS = 60.0         # rest a failing store between attempts, so a
                                    # dead database costs one bounded attempt per
                                    # window instead of one per skill call
@@ -213,6 +214,7 @@ _store = None                   # RosterStore | None once _store_ready is set
 _store_degraded = False         # the configured backend was lost or replaced
 _store_ready = False            # one-shot guard for _roster_store()
 _store_retry_at = 0.0           # monotonic; store calls are skipped until then
+_store_rebuild_at = 0.0         # monotonic; a degraded store re-probes after this
 
 
 # --------------------------------------------------------------------------
@@ -858,14 +860,40 @@ def _store_settings(backend):
 
 
 def _roster_store():
-    """The roster store, built lazily and exactly once. Never raises: memory
-    infrastructure is an enhancement and must never become a new way for the
-    agent to die. An unusable configured backend is logged once and replaced
-    by the bounded in-memory fallback, reported as store=degraded - falling
-    back on a failed health() probe is this caller's decision by contract
-    (mcity_store.make_store docstring), and it is never silent."""
-    global _store, _store_degraded, _store_ready
-    if _store_ready:
+    """The roster store, built lazily. Never raises: memory infrastructure is an
+    enhancement and must never become a new way for the agent to die. An unusable
+    configured backend is logged once and replaced by the bounded in-memory
+    fallback, reported as store=degraded - falling back on a failed health()
+    probe is this caller's decision by contract (mcity_store.make_store
+    docstring), and it is never silent.
+
+    Falling back is NOT permanent. This was a one-shot guard, so a database that
+    was merely late - or misconfigured for one boot - cost the roster until the
+    next restart: the agent ran for hours on the in-memory fallback while a
+    perfectly healthy Postgres sat beside it. A degraded store now re-attempts
+    the configured backend every STORE_REBUILD_SECONDS and promotes itself back
+    the moment health() passes."""
+    global _store, _store_degraded, _store_ready, _store_rebuild_at
+    if _store_ready and not _store_degraded:
+        return _store
+    if _store_ready and _store_degraded:
+        with _store_lock:
+            if time.monotonic() < _store_rebuild_at:
+                return _store
+            _store_rebuild_at = time.monotonic() + STORE_REBUILD_SECONDS
+            backend = (_text(_c("memory_backend", DEFAULT_MEMORY_BACKEND)).lower()
+                       or DEFAULT_MEMORY_BACKEND)
+            if make_store is None or backend == "memory":
+                return _store
+            try:
+                built = make_store(_store_settings(backend))
+                if built.health():
+                    _store = built
+                    _store_degraded = False
+                    logger.info(f"mcity roster store ({backend}) recovered; "
+                                "leaving the in-memory fallback")
+            except Exception as e:  # noqa: BLE001 - recovery must never escape
+                logger.debug(f"mcity roster store retry failed: {e}")
         return _store
     with _store_lock:
         if _store_ready:
