@@ -370,6 +370,7 @@ _REPEATABLE_READS = frozenset((
 ))
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
+_REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
            "status": None, "busy_for": None}
@@ -550,6 +551,20 @@ def _suppress_repeat(verb, result):
             return result
         age = int((now - prev["at"]) / 1000)
         head = result.partition("\n")[0]
+        if prev["n"] >= _REPEAT_REFUSE_AT:
+            # Shortening the answer was not enough. Measured: with suppression
+            # live the agent still spent 48 of 48 decisions on mcity-threads,
+            # because an OK result - however terse - reads as a turn well spent
+            # and its own history then reinforces the pattern. A refusal is the
+            # only thing in this protocol the agent cannot mistake for progress.
+            # The counter clears the moment the body changes or any action lands,
+            # so a genuine need to look is never blocked twice.
+            return _failed(verb, "repeat",
+                           f"{head} and it has not changed for {age}s across "
+                           f"{prev['n'] + 1} reads - this read is refused because "
+                           "looking again cannot change it. Take a world action "
+                           "now: answer a row whose mine=no with mcity-speak, or "
+                           "eat, work or trade. Reading is not one of the choices")
         return (f"{head} unchanged for {age}s across {prev['n'] + 1} reads; "
                 "re-reading cannot change it, so act instead of looking again")
     except Exception:      # noqa: BLE001 - never break a skill over an optimisation
@@ -2422,6 +2437,10 @@ def _pace():
 
 def _submit(partial, verb):
     global _last_mutation_at, _action_count
+    # Any action at all clears the read-repeat counters. The refusal exists to
+    # break a look-only loop; once the agent acts, the loop is broken and the
+    # next read must be answered in full even if the world has not moved yet.
+    _LAST_READ.clear()
     lease = _lease_snapshot()
     if lease is None:
         return _failed(verb, "no_lease")

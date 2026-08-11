@@ -864,3 +864,27 @@ def test_a_changed_read_is_never_suppressed(control):
     control.force("/api/agents/agent-1/threads", 200, json.dumps(moved).encode())
     result = _check(mc.threads())
     assert "unchanged for" not in result, "new world state must always come through"
+
+
+def test_a_look_only_loop_is_eventually_refused(control):
+    """Shortening the repeated body was not enough: with suppression live the
+    agent still spent 48 of 48 decisions on mcity-threads, because an OK result
+    reads as a turn well spent. A refusal is the only outcome in this protocol
+    it cannot mistake for progress."""
+    seen = [_check(mc.threads()) for _ in range(mc._REPEAT_REFUSE_AT + 1)]
+    assert seen[-1].startswith("MCITY-THREADS-FAILED reason=repeat")
+    assert "Reading is not one of the choices" in seen[-1]
+    assert not any(s.startswith("MCITY-THREADS-FAILED") for s in seen[:2]), \
+        "the first reads must be answered normally"
+
+
+def test_acting_clears_the_repeat_refusal(control):
+    """The refusal breaks a look-only loop; it must never outlive the loop. Once
+    the agent acts, the next read is answered in full even if the world has not
+    moved yet."""
+    for _ in range(mc._REPEAT_REFUSE_AT + 1):
+        mc.threads()
+    assert _check(mc.threads()).startswith("MCITY-THREADS-FAILED reason=repeat")
+    control.on_action = lambda action: []
+    _check(mc.work())                      # any action at all
+    assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
