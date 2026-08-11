@@ -1228,11 +1228,16 @@ def _reachable_opener():
     or in do-not-disturb and it never reached the step that starts a new
     conversation. Naming a skill did not move it before; a whole command did."""
     try:
-        best = None
-        for agent_id, (can, at) in _CAN_SPEAK.items():
-            if can and (_now_ms() - at) <= _CAN_SPEAK_TTL_MS:
-                best = agent_id
-                break
+        def _fresh():
+            for agent_id, (can, at) in _CAN_SPEAK.items():
+                if can and (_now_ms() - at) <= _CAN_SPEAK_TTL_MS:
+                    return agent_id
+            return None
+
+        best = _fresh()
+        if best is None:
+            _refresh_can_speak_if_unknown((), force=True)
+            best = _fresh()
         if best is None:
             return ("Call mcity-agents and speak to someone showing "
                     "can-speak=yes")
@@ -1269,7 +1274,7 @@ def _escape_command():
         return "Use mcity-areas to find somewhere to go, then mcity-move-area."
 
 
-def _refresh_can_speak_if_unknown(agent_ids):
+def _refresh_can_speak_if_unknown(agent_ids, force=False):
     """One bounded roster read when a waiting counterpart's reachability is
     unknown.
 
@@ -1283,8 +1288,12 @@ def _refresh_can_speak_if_unknown(agent_ids):
     Reentrancy-guarded, rate-limited, and never allowed to break a skill."""
     global _can_speak_at_ms, _can_speak_refreshing
     try:
+        # force=True is for the opposite case: nobody waiting is reachable, so
+        # there are no unknowns to chase, and yet that is exactly when the agent
+        # most needs a name it CAN talk to. Without this the opener had nothing
+        # to offer and fell back to naming a skill, which has never moved it.
         unknown = [i for i in agent_ids if _can_be_reached(i) is None]
-        if not unknown:
+        if not unknown and not force:
             return
         with _lock:
             if _can_speak_refreshing:

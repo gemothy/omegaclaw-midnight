@@ -1160,3 +1160,16 @@ def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(contro
     assert mc._WAITING["ids"] == ["agent-2"]
     assert "answer a row whose mine=no" in result
     assert "Nobody waiting can hear you" not in result
+
+
+def test_the_opener_fetches_a_name_when_it_has_none(control):
+    """The roster refresh only ran for UNKNOWN waiting counterparts, so when
+    everyone waiting was known-unreachable it never ran - exactly when the agent
+    most needed somebody it could talk to. The opener now goes and looks."""
+    roster = {"agents": [{"agentId": "user-agent-awake", "name": "Awake",
+                          "distance": 3, "isOpenToTalk": True,
+                          "canSpeak": True, "status": "busy"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    assert not mc._CAN_SPEAK
+    opener = mc._reachable_opener()
+    assert "cmd=mcity-speak user-agent-awake" in opener
