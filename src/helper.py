@@ -500,8 +500,18 @@ def rankedHistory(history_file, budget, repeat_cap=2):
         # can see is always one where something actually happened.
         if _is_idle_report(block, commands):
             continue
-        if commands and all(
+        # ANY retired call, not only a turn made entirely of them. The narrower
+        # rule left mixed turns like ((mcity-areas) (mcity-agents)) in place, and
+        # those went on teaching the habit: mcity-areas was still called 19 times
+        # a window after being unregistered AND dropped in the all-retired form.
+        # Editing a turn to remove one call is not an option - blocks are dropped
+        # whole so nothing in the record is falsified - so the turn goes.
+        if commands and any(
                 c.lstrip("( ").startswith(RETIRED_COMMANDS) for c in commands):
+            continue
+        if any(f'"{name}"' in block for name in RETIRED_COMMANDS):
+            # The retired name passed as an ARGUMENT, which the model then
+            # imitates: ((mcity-agents "mcity-areas")) appeared verbatim.
             continue
         # A turn with no recognisable command still carries prose worth keeping.
         if commands and all(seen_commands.get(c, 0) >= repeat_cap for c in commands):

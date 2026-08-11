@@ -112,11 +112,28 @@ def test_a_retired_skill_is_not_taught_back_to_the_agent(tmp_path):
     assert "mcity-speak" in body, "the real turn must survive"
 
 
-def test_a_turn_that_only_partly_used_a_retired_skill_is_kept(tmp_path):
-    """Only turns made up entirely of retired calls are dropped."""
+def test_a_turn_that_partly_used_a_retired_skill_is_dropped_too(tmp_path):
+    """This asserted the opposite and was wrong. Keeping mixed turns left
+    ((mcity-areas) (mcity-agents)) in the window, and mcity-areas was still
+    called 19 times a window after being unregistered and dropped in its
+    all-retired form. A retired call in any position is still an example."""
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
+        '("2026-08-11 09:59:00" \n ((mcity-speak "user-agent-x hi there")) \n)\n'
         '("2026-08-11 10:00:00" \n ((mcity-areas) (mcity-work)) \n)\n',
         encoding="utf-8")
-    assert "mcity-work" in helper.rankedHistory(str(history), 30000)
+    body = helper.rankedHistory(str(history), 30000)
+    assert "mcity-areas" not in body
+    assert "mcity-speak" in body
+
+
+def test_a_retired_name_passed_as_an_argument_is_dropped(tmp_path):
+    """((mcity-agents "mcity-areas")) appeared verbatim in the live history and
+    the model imitates whatever it sees."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-agents "mcity-areas")) \n)\n',
+        encoding="utf-8")
+    assert "mcity-areas" not in helper.rankedHistory(str(history), 30000)
