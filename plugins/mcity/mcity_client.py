@@ -405,7 +405,13 @@ def _harvest_vitals(payload):
                     pass
         if isinstance(items, dict):
             _VITALS["items"] = " ".join(f"{k}={v}" for k, v in sorted(items.items()))
-        if _VITALS["hunger"] or _VITALS["space"] or _VITALS["items"]:
+        # status belongs in this list. Leaving it out meant a reply carrying
+        # status=busy and nothing else never stamped the clock, so every
+        # freshness-gated consumer treated a KNOWN-busy agent as unknown and
+        # skipped the speak refusal - which is how ~97 of 107 doomed speaks
+        # reached the world and came back "in do not disturb mode".
+        if (_VITALS["hunger"] or _VITALS["space"] or _VITALS["items"]
+                or _VITALS["status"]):
             _VITALS["at_ms"] = _now_ms()
     except Exception:
         pass
@@ -2624,24 +2630,36 @@ def speak(arg=None):
         if _is_echo(text):
             return None, _failed("SPEAK", "bad_args",
                                  "do not repeat text written by another agent")
+        # Refuse locally while an action is running. The world rejects it anyway
+        # with "speaker is in do not disturb mode" - 6 of 6 observed failures were
+        # at status=busy - so the round trip buys nothing, and the refusal can say
+        # the one thing the world's answer does not: that waiting is the way out.
+        #
+        # Refresh first. Gating on already-fresh vitals made this refusal nearly
+        # dead: over 25 minutes the agent attempted 107 speaks while vitals were
+        # harvested only 10 times, so the doomed writes sailed past the check.
+        # _refresh_vitals_if_stale is a no-op when vitals are fresh, so the cost is
+        # at worst one GET in place of a POST that was going to fail anyway.
+        #
+        # This lives INSIDE build, not ahead of _mutate: build runs after the lease
+        # check (which is what enforces read mode) and after the arguments parse,
+        # so a read-mode session and a malformed call still fail for their own
+        # reason instead of spending a request on vitals.
+        _refresh_vitals_if_stale()
+        if (_VITALS.get("status") == "busy" and _VITALS.get("at_ms")
+                and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS):
+            wait = _VITALS.get("busy_for")
+            detail = (f"you are mid-action for another {wait}s" if wait
+                      else "you are mid-action")
+            return None, _failed("SPEAK", "busy",
+                                 f"{detail}; the world refuses speech from a busy "
+                                 "agent, so wait for it to finish rather than "
+                                 "starting another action")
         sent["agent_id"], sent["text"] = parts[0], text
         # The text is NOT sanitised beyond the whitespace collapse of
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
         return {"kind": "speak", "targetAgentId": parts[0], "text": text}, None
 
-    # Refuse locally while an action is running. The world rejects it anyway with
-    # "speaker is in do not disturb mode" - 6 of 6 observed failures were at
-    # status=busy - so the round trip buys nothing, and the refusal can say the one
-    # thing the world's answer does not: how long to wait.
-    if (_VITALS.get("status") == "busy" and _VITALS.get("at_ms")
-            and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS):
-        wait = _VITALS.get("busy_for")
-        detail = (f"you are mid-action for another {wait}s" if wait
-                  else "you are mid-action")
-        return _out(_failed("SPEAK", "busy",
-                            f"{detail}; the world refuses speech from a busy "
-                            "agent, so wait for it to finish rather than starting "
-                            "another action"))
     result = _mutate("SPEAK", build)
     if sent and result.startswith("MCITY-SPEAK-OK") \
             and "outcome=delivered" in result.partition("\n")[0]:

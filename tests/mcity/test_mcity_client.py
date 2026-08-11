@@ -417,6 +417,20 @@ def test_pacing_refuses_a_second_immediate_action(control):
     assert result.startswith("MCITY-WORK-FAILED reason=busy")
 
 
+def test_speak_refreshes_stale_vitals_before_giving_up_the_round_trip(control):
+    """The world refuses speech from a mid-action agent, so the doomed POST is
+    worth catching locally - but only if vitals are consulted. Gating the refusal
+    on already-fresh vitals let ~97 of 107 observed attempts through, because the
+    agent rarely calls the reads that harvest them."""
+    mc._VITALS["at_ms"] = None              # stale: nothing harvested yet
+    control.force("/api/skill/agents/agent-1/needs", 200,
+                  json.dumps({"agent": {"status": "busy"}, "hunger": 42}).encode())
+    result = _check(mc.speak("user-agent-abc hello there"))
+    assert result.startswith("MCITY-SPEAK-FAILED reason=busy")
+    assert "wait for it to finish" in result
+    assert not control.actions              # no write reached the world
+
+
 @pytest.mark.parametrize("call,arg", [
     ("move_area", "not a valid id!"),
     ("move_agent", ""),
