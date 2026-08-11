@@ -375,6 +375,8 @@ _REPEATABLE_READS = frozenset((
 # the thread dies. Prose is not enforcement; this is.
 _WAITING = {"at_ms": 0, "ids": []}
 _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
+_BUSY_PROBE_MS = 20000         # min gap between speak attempts made while busy
+_last_busy_probe_ms = 0
 
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
@@ -2785,16 +2787,31 @@ def speak(arg=None):
         # check (which is what enforces read mode) and after the arguments parse,
         # so a read-mode session and a malformed call still fail for their own
         # reason instead of spending a request on vitals.
+        # While busy, RATE-LIMIT the attempt instead of refusing it. The old hard
+        # refusal was built on 6 of 6 speak failures correlating with status=busy
+        # and on the phrase "speaker is in do not disturb mode". Two things since
+        # then undermine it: the roster shows 283 nearby agents of which nearly
+        # all are busy or traveling, and those agents are plainly conversing -
+        # one of them opened a thread with us - so if busy blocked speech nobody
+        # in this city could talk. The phrase may well describe the RECIPIENT,
+        # which is what the mission text means by it elsewhere.
+        #
+        # The cost calculus also inverted. A doomed round trip cost three minutes
+        # when the refusal was written; a decision now takes about five seconds.
+        # Being wrong about the world costs a real person their reply, so let the
+        # world decide and keep only a flood guard.
+        global _last_busy_probe_ms
         _refresh_vitals_if_stale()
-        if (_VITALS.get("status") == "busy" and _VITALS.get("at_ms")
+        if (_VITALS.get("status") in ("busy", "traveling") and _VITALS.get("at_ms")
                 and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS):
-            wait = _VITALS.get("busy_for")
-            detail = (f"you are mid-action for another {wait}s" if wait
-                      else "you are mid-action")
-            return None, _failed("SPEAK", "busy",
-                                 f"{detail}; the world refuses speech from a busy "
-                                 "agent, so wait for it to finish rather than "
-                                 "starting another action")
+            since = _now_ms() - _last_busy_probe_ms
+            if _last_busy_probe_ms and since < _BUSY_PROBE_MS:
+                return None, _failed(
+                    "SPEAK", "busy",
+                    f"you are mid-action and already tried {int(since / 1000)}s "
+                    f"ago; wait {int((_BUSY_PROBE_MS - since) / 1000)}s before "
+                    "trying again rather than retrying every turn")
+            _last_busy_probe_ms = _now_ms()
         sent["agent_id"], sent["text"] = parts[0], text
         # The text is NOT sanitised beyond the whitespace collapse of
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.

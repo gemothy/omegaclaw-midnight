@@ -771,35 +771,38 @@ def test_vitals_refresh_never_recurses(monkeypatch):
     assert depth["max"] <= 1
 
 
-def test_speak_is_refused_while_busy(monkeypatch):
-    """6 of 6 observed speak failures were at status=busy - the world rejects
-    speech from a mid-action agent with 'speaker is in do not disturb mode'. The
-    world's answer never says how long to wait, so the agent kept falling through
-    to starting ANOTHER action and stayed unreachable."""
+def test_a_busy_agent_still_gets_to_try_speaking(monkeypatch):
+    """This asserted the opposite until the evidence was re-examined. The hard
+    refusal rested on 6 of 6 speak failures correlating with status=busy and on
+    the phrase 'speaker is in do not disturb mode'. But the roster shows 283
+    nearby agents nearly all busy or traveling, and they are plainly conversing -
+    one of them opened a thread with us - so busy cannot be what blocks speech,
+    and the phrase most likely describes the RECIPIENT. Meanwhile a doomed round
+    trip fell from three minutes to about five seconds, while being wrong still
+    costs a real person their reply. The world decides; the harness only stops a
+    flood."""
     called = []
-    # Stub the pieces _mutate calls, NOT _mutate itself: the refusal lives inside
-    # build() so that read mode and bad arguments still fail for their own reason.
-    # Patching _mutate skipped build entirely and tested a seam that is now gone.
     monkeypatch.setattr(mc, "_ensure_lease", lambda: None)
     monkeypatch.setattr(mc, "_pace", lambda: None)
     monkeypatch.setattr(mc, "_submit", lambda a, v: called.append(v) or "MCITY-SPEAK-OK")
     monkeypatch.setattr(mc, "_refresh_vitals_if_stale", lambda: None)
+    mc._last_busy_probe_ms = 0
     mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy", "busy_for": 42,
                        "hunger": "normal(1)", "space": "central", "items": None})
-    out = mc.speak("user-agent-x hello there")
-    assert "reason=busy" in out
-    assert "42s" in out                  # the wait time the world never tells it
-    assert called == []                  # no pointless world round trip
+    mc.speak("user-agent-x hello there")
+    assert called == ["SPEAK"], "busy must not silence the agent"
 
-    # Idle goes through untouched.
+    out = mc.speak("user-agent-x hello again")
+    assert "reason=busy" in out and "before trying again" in out
+    assert called == ["SPEAK"]
+
+    mc._last_busy_probe_ms = mc._now_ms() - (mc._BUSY_PROBE_MS + 1000)
+    mc.speak("user-agent-x hello once more")
+    assert called == ["SPEAK", "SPEAK"]
+
+    called.clear()
     mc._VITALS.update({"status": "idle", "busy_for": None})
     mc.speak("user-agent-x hello there")
     assert called == ["SPEAK"]
 
-    # Stale vitals must never block a legitimate attempt. In production speak
-    # refreshes first and usually learns the truth; when the refresh cannot
-    # confirm (stubbed out here), old news is not grounds to refuse.
-    called.clear()
-    mc._VITALS.update({"status": "busy", "at_ms": mc._now_ms() - (mc._VITALS_STALE_MS + 1000)})
-    mc.speak("user-agent-x hello there")
-    assert called == ["SPEAK"]
+

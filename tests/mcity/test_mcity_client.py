@@ -422,18 +422,32 @@ def test_pacing_refuses_a_second_immediate_action(control):
     assert result.startswith("MCITY-WORK-FAILED reason=busy")
 
 
-def test_speak_refreshes_stale_vitals_before_giving_up_the_round_trip(control):
-    """The world refuses speech from a mid-action agent, so the doomed POST is
-    worth catching locally - but only if vitals are consulted. Gating the refusal
-    on already-fresh vitals let ~97 of 107 observed attempts through, because the
-    agent rarely calls the reads that harvest them."""
+def test_a_busy_agent_still_attempts_the_reply(control):
+    """The hard refusal was built on 6 of 6 failures correlating with status=busy.
+    But the roster shows 283 nearby agents nearly all busy or traveling, and they
+    are plainly conversing - one opened a thread with us - so busy cannot be what
+    blocks speech. Being wrong costs a real person their reply, so the world gets
+    to decide and the harness keeps only a flood guard."""
     mc._VITALS["at_ms"] = None              # stale: nothing harvested yet
     control.force("/api/skill/agents/agent-1/needs", 200,
                   json.dumps({"agent": {"status": "busy"}, "hunger": 42}).encode())
-    result = _check(mc.speak("user-agent-abc hello there"))
-    assert result.startswith("MCITY-SPEAK-FAILED reason=busy")
-    assert "wait for it to finish" in result
-    assert not control.actions              # no write reached the world
+    control.on_action = lambda action: []
+    _check(mc.speak("user-agent-abc hello there"))
+    assert control.actions, "a busy agent must still be allowed to try"
+
+
+def test_repeated_busy_attempts_are_rate_limited_not_blocked(control):
+    """A flood guard, not a refusal: one attempt is allowed through, an immediate
+    retry is held back, and the message says how long to wait."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy"})
+    mc._last_busy_probe_ms = 0
+    _check(mc.speak("user-agent-abc first try"))
+    assert len(control.actions) == 1
+    again = _check(mc.speak("user-agent-abc second try"))
+    assert again.startswith("MCITY-SPEAK-FAILED reason=busy")
+    assert "before trying again" in again
+    assert len(control.actions) == 1, "the flood guard must stop the retry"
 
 
 @pytest.mark.parametrize("call,arg", [
