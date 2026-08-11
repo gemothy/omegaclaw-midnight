@@ -1384,3 +1384,25 @@ def test_no_travel_hint_when_the_free_people_are_already_here(control):
     opener = mc._reachable_opener()
     assert "cmd=mcity-speak user-agent-here" in opener, opener
     assert "free agents are at" not in opener
+
+
+def test_a_contended_worksite_points_at_somewhere_better(control):
+    """'no available hacker worksite' is contention: every terminal in the room
+    is held by one of the agents permanently engaged there. It is the same answer
+    as 'nobody here can talk', and this failure is where the agent is looking -
+    22 times in one window against 10 successes."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="perform_job",
+              reason="no available hacker worksite")]
+    result = _check(mc.work())
+    assert result.startswith("MCITY-WORK-FAILED")
+    assert "free agents are at central" in result
+    assert "cmd=mcity-" in result

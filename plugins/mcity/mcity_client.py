@@ -1345,6 +1345,10 @@ def _travel_to_people_command():
     spaceId, so this turns that into an instruction."""
     try:
         here = _VITALS.get("space")
+        if not _AWAKE_PLACES:
+            # Nothing recorded yet: the cache fills from roster reads, and the
+            # agent rarely calls mcity-agents on its own. One bounded read.
+            _refresh_can_speak_if_unknown((), force=True)
         now = _now_ms()
         best, count = None, 0
         for space, (seen, at) in _AWAKE_PLACES.items():
@@ -3039,7 +3043,17 @@ def work():
     blocked = _refuse_while_someone_waits("WORK")
     if blocked is not None:
         return blocked
-    return _mutate("WORK", lambda: ({"kind": "perform_job"}, None))
+    result = _mutate("WORK", lambda: ({"kind": "perform_job"}, None))
+    # "no available hacker worksite" is contention, not a bad call: every
+    # terminal in this room is taken by one of the 52 agents permanently engaged
+    # here. It is also the same answer as "nobody here can talk" - the room is
+    # the problem - and this failure is where the agent is actually looking, 22
+    # times in one window against 10 successes.
+    if "no available" in (result or "").lower() and "worksite" in (result or "").lower():
+        go = _travel_to_people_command()
+        if go:
+            result = _out(f"{result}\n{go}")
+    return result
 
 
 @_guard("EAT")
