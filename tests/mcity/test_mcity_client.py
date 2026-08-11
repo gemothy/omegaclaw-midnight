@@ -436,18 +436,15 @@ def test_a_busy_agent_still_attempts_the_reply(control):
     assert control.actions, "a busy agent must still be allowed to try"
 
 
-def test_repeated_busy_attempts_are_rate_limited_not_blocked(control):
-    """A flood guard, not a refusal: one attempt is allowed through, an immediate
-    retry is held back, and the message says how long to wait."""
+def test_busy_never_blocks_a_reply(control):
+    """Busy was never the blocker - the world's rejection is 'target is
+    sleeping'. Gating on the speaker's own status silenced the agent for hours
+    while two people waited, so no busy state may hold a reply back."""
     control.on_action = lambda action: []
     mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy"})
-    mc._last_busy_probe_ms = 0
     _check(mc.speak("user-agent-abc first try"))
-    assert len(control.actions) == 1
-    again = _check(mc.speak("user-agent-abc second try"))
-    assert again.startswith("MCITY-SPEAK-FAILED reason=busy")
-    assert "before trying again" in again
-    assert len(control.actions) == 1, "the flood guard must stop the retry"
+    _check(mc.speak("user-agent-abc second try"))
+    assert len(control.actions) == 2, "busy must never silence the agent"
 
 
 @pytest.mark.parametrize("call,arg", [
@@ -954,3 +951,44 @@ def test_a_stale_waiting_list_never_blocks_work(control):
                         "ids": ["user-agent-abc"]})
     _check(mc.work())
     assert control.actions
+
+
+def test_a_sleeping_target_is_remembered_and_not_retried(control):
+    """The world's real rejection is 'target is sleeping' - the speaker's own
+    busy status was never the blocker. It states this in prose inside the
+    untrusted markers, which the agent is told never to obey, so the fact has to
+    be captured by the harness where it can be acted on."""
+    control.on_action = lambda action: []
+    control.force("/api/actions", 200, b'{"accepted":false,"error":"target is sleeping"}')
+    first = _check(mc.speak("user-agent-abc are you there"))
+    assert "MCITY-SPEAK" in first
+    mc._ASLEEP["user-agent-abc"] = mc._now_ms()      # as the failure path records
+    before = len(control.actions)
+    again = _check(mc.speak("user-agent-abc are you there"))
+    assert again.startswith("MCITY-SPEAK-FAILED reason=target_asleep")
+    assert "cannot hear you" in again
+    assert len(control.actions) == before, "no round trip for a sleeping target"
+
+
+def test_a_sleeping_counterpart_is_flagged_and_never_counted_as_waiting(control):
+    """A sleeping person is still waiting but cannot hear us, so they must not
+    be what work refuses on - otherwise the agent can neither speak nor act."""
+    other = "agent-2"
+    waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", other],
+                            "pendingRecipientAgentId": "agent-1",
+                            "preview": "are you around tonight my friend"}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    _check(mc.threads())
+    assert mc._WAITING["ids"] == [other], "the fixture must have someone waiting"
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    mc._ASLEEP[other] = mc._now_ms()
+    result = _check(mc.threads())
+    assert "asleep=yes" in result
+    assert other not in mc._WAITING["ids"], "asleep must not block work"
+
+
+def test_a_stale_sleep_record_expires(control):
+    control.on_action = lambda action: []
+    mc._ASLEEP["user-agent-abc"] = mc._now_ms() - (mc._ASLEEP_TTL_MS + 1000)
+    _check(mc.speak("user-agent-abc good morning"))
+    assert control.actions, "an expired sleep record must not block the attempt"

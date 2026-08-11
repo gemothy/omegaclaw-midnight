@@ -375,8 +375,13 @@ _REPEATABLE_READS = frozenset((
 # the thread dies. Prose is not enforcement; this is.
 _WAITING = {"at_ms": 0, "ids": []}
 _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
-_BUSY_PROBE_MS = 20000         # min gap between speak attempts made while busy
-_last_busy_probe_ms = 0
+# Who the world said was asleep, and when. Measured: the world's actual rejection
+# is "target is sleeping" - the speaker's own busy status was never the blocker,
+# though the harness assumed it was and stayed silent for hours because of it.
+# A sleeping agent cannot hear us, so retrying them burns turns while other
+# people wait.
+_ASLEEP = {}
+_ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
 
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
@@ -2169,9 +2174,19 @@ def threads(_ignored=None):
                 if (isinstance(recipient, str) and recipient.strip() == own_id
                         and ours == 0 and theirs > 0):
                     mine = "no"          # they opened it, we have never replied
+        asleep = False
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
-            waiting_ids.append(others[0])
+            at = _ASLEEP.get(others[0])
+            asleep = bool(at and (_now_ms() - at) <= _ASLEEP_TTL_MS)
+            # A sleeping counterpart is still waiting, but cannot hear us yet, so
+            # it must not be what the agent spends the turn on.
+            if not asleep:
+                waiting_ids.append(others[0])
+        # An unreachable person ranks below a reachable one: the budget should
+        # spend its rows on threads the agent can actually answer this turn.
         band = 1.0 if mine == "no" else (0.3 if mine == "yes" else 0.6)
+        if asleep:
+            band = 0.5
         rows.append((_row((
             ("thread", _plain(thread_id)),
             # An agent id is the one thing here that MUST be echoable: it is the
@@ -2181,6 +2196,10 @@ def threads(_ignored=None):
             ("with", (_plain(others[0]) if len(others) == 1 and ID_RE.match(others[0])
                       else (_clean(participants) if participants else None))),
             ("mine", mine),
+            # Only rendered when true, so a normal row is unchanged. Without it
+            # the agent sees a person waiting, tries, and is told by the world -
+            # in text it is instructed not to trust - that they are asleep.
+            ("asleep", "yes" if asleep else None),
             ("last", _clean(preview) if isinstance(preview, str) and preview else None),
         )), band - min(index, 400) * 0.0005))
         index += 1
@@ -2800,18 +2819,21 @@ def speak(arg=None):
         # when the refusal was written; a decision now takes about five seconds.
         # Being wrong about the world costs a real person their reply, so let the
         # world decide and keep only a flood guard.
-        global _last_busy_probe_ms
-        _refresh_vitals_if_stale()
-        if (_VITALS.get("status") in ("busy", "traveling") and _VITALS.get("at_ms")
-                and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS):
-            since = _now_ms() - _last_busy_probe_ms
-            if _last_busy_probe_ms and since < _BUSY_PROBE_MS:
-                return None, _failed(
-                    "SPEAK", "busy",
-                    f"you are mid-action and already tried {int(since / 1000)}s "
-                    f"ago; wait {int((_BUSY_PROBE_MS - since) / 1000)}s before "
-                    "trying again rather than retrying every turn")
-            _last_busy_probe_ms = _now_ms()
+        # The busy rate-limit that stood here is gone: the world answered, and
+        # what it rejects is "target is sleeping". The speaker's own status was
+        # never the blocker, so gating on it silenced the agent for nothing.
+        # What IS worth remembering is who was asleep, so the agent does not
+        # spend turn after turn on someone who cannot hear it.
+        asleep_at = _ASLEEP.get(parts[0])
+        if asleep_at and (_now_ms() - asleep_at) <= _ASLEEP_TTL_MS:
+            ago = int((_now_ms() - asleep_at) / 1000)
+            others = [i for i in _someone_is_waiting() if i != parts[0]
+                      and not _ASLEEP.get(i)]
+            alt = (f" Someone else is waiting and awake: {others[0]}" if others
+                   else " Nobody else is waiting, so take a world action instead")
+            return None, _failed("SPEAK", "target_asleep",
+                                 f"the world said {parts[0]} was sleeping {ago}s "
+                                 f"ago, and a sleeping agent cannot hear you.{alt}")
         sent["agent_id"], sent["text"] = parts[0], text
         # The text is NOT sanitised beyond the whitespace collapse of
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
@@ -2830,6 +2852,12 @@ def speak(arg=None):
             result = _stamp_degraded(result)
         return result
     if "MCITY-SPEAK-FAILED" in (result or ""):
+        # Remember a sleeping target. The world states this in prose inside the
+        # untrusted markers, which the agent is correctly told never to obey - so
+        # the fact has to be captured here, where it can be acted on, rather than
+        # left for the model to notice and trust.
+        if sent.get("agent_id") and "sleeping" in (result or "").lower():
+            _ASLEEP[sent["agent_id"]] = _now_ms()
         suggestion = _speak_candidates()
         if suggestion:
             result = _out(f"{result}\n{suggestion}")

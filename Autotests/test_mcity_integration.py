@@ -771,38 +771,19 @@ def test_vitals_refresh_never_recurses(monkeypatch):
     assert depth["max"] <= 1
 
 
-def test_a_busy_agent_still_gets_to_try_speaking(monkeypatch):
-    """This asserted the opposite until the evidence was re-examined. The hard
-    refusal rested on 6 of 6 speak failures correlating with status=busy and on
-    the phrase 'speaker is in do not disturb mode'. But the roster shows 283
-    nearby agents nearly all busy or traveling, and they are plainly conversing -
-    one of them opened a thread with us - so busy cannot be what blocks speech,
-    and the phrase most likely describes the RECIPIENT. Meanwhile a doomed round
-    trip fell from three minutes to about five seconds, while being wrong still
-    costs a real person their reply. The world decides; the harness only stops a
-    flood."""
+def test_busy_never_silences_the_agent(monkeypatch):
+    """Twice reversed, and this is why. The rule began as 'the world refuses
+    speech from a busy agent', built on 6 of 6 failures correlating with
+    status=busy and on the phrase 'speaker is in do not disturb mode'. The world
+    was then asked directly and answered: the rejection is 'target is sleeping'.
+    The speaker's own status is irrelevant, and gating on it produced hours of
+    silence with real people waiting."""
     called = []
     monkeypatch.setattr(mc, "_ensure_lease", lambda: None)
     monkeypatch.setattr(mc, "_pace", lambda: None)
     monkeypatch.setattr(mc, "_submit", lambda a, v: called.append(v) or "MCITY-SPEAK-OK")
     monkeypatch.setattr(mc, "_refresh_vitals_if_stale", lambda: None)
-    mc._last_busy_probe_ms = 0
-    mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy", "busy_for": 42,
-                       "hunger": "normal(1)", "space": "central", "items": None})
-    mc.speak("user-agent-x hello there")
-    assert called == ["SPEAK"], "busy must not silence the agent"
-
-    out = mc.speak("user-agent-x hello again")
-    assert "reason=busy" in out and "before trying again" in out
-    assert called == ["SPEAK"]
-
-    mc._last_busy_probe_ms = mc._now_ms() - (mc._BUSY_PROBE_MS + 1000)
-    mc.speak("user-agent-x hello once more")
-    assert called == ["SPEAK", "SPEAK"]
-
-    called.clear()
-    mc._VITALS.update({"status": "idle", "busy_for": None})
-    mc.speak("user-agent-x hello there")
-    assert called == ["SPEAK"]
-
-
+    for status in ("busy", "traveling", "idle"):
+        mc._VITALS.update({"at_ms": mc._now_ms(), "status": status})
+        mc.speak("user-agent-x hello there")
+    assert called == ["SPEAK", "SPEAK", "SPEAK"], "no status may hold a reply back"
