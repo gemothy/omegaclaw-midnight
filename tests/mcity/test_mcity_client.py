@@ -2332,3 +2332,48 @@ def test_a_scan_does_not_invalidate_its_own_entries(control):
     assert mc._best_person_to_talk_to() == "user-agent-free"
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     assert "talk-to=user-agent-free" in mc._vitals_line()
+
+
+def test_a_door_that_does_not_open_is_not_tried_again(control):
+    """exit_building handles a buildingLink; this building's exit is a teleport,
+    so the world answers 'agent is not inside a linked building' every time - 4
+    in ten minutes, each costing a turn and a request."""
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="exit_building",
+              reason="agent is not inside a linked building")]
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)",
+                       "items": "meme_coin=5"})
+    first = _check(mc.exit_building())
+    assert first.startswith("MCITY-EXIT-BUILDING-FAILED")
+    before = len(control.actions)
+    again = _check(mc.exit_building())
+    assert again.startswith("MCITY-EXIT-BUILDING-FAILED reason=no_link_exit")
+    assert len(control.actions) == before, "no second request for a known answer"
+    assert "cmd=mcity-" in again.partition("\n")[0]
+
+
+def test_the_door_is_tried_again_once_the_memory_expires(control):
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="exit_building",
+              reason="agent is not inside a linked building")]
+    _check(mc.exit_building())
+    mc._no_link_exit_until_ms = mc._now_ms() - 1
+    before = len(control.actions)
+    _check(mc.exit_building())
+    assert len(control.actions) > before
+
+
+def test_the_route_stops_offering_a_door_that_does_not_open(control):
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200,
+                  json.dumps({"areas": []}).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    mc._no_link_exit_until_ms = mc._now_ms() + 60000
+    assert "exit-building" not in (mc._travel_to_people_command() or "")

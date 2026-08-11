@@ -407,6 +407,8 @@ _RICH_NUDGE_EVERY_MS = 60000   # how often to steer a rich agent toward people
 # refused call.
 FOOD_ITEMS = ("food",)
 _WORKSITE_BACKOFF_MS = 20000   # pause after the world says every worksite is taken
+_NO_LINK_EXIT_MS = 300000      # how long to believe 'no linked exit here'
+_no_link_exit_until_ms = 0
 _worksite_busy_until_ms = 0
 _last_rich_nudge_ms = 0
 _SAID = {}
@@ -481,7 +483,7 @@ def reset_runtime_state():
                      _waiting_refreshing=False, _last_self_probe_ms=0,
                      _dnd_streak=0, _last_rich_nudge_ms=0,
                      _worksite_busy_until_ms=0, _last_roster_read_ms=0,
-                     _last_areas_read_ms=0)
+                     _last_areas_read_ms=0, _no_link_exit_until_ms=0)
 
 
 def _harvest_vitals(payload):
@@ -1706,7 +1708,10 @@ def _travel_to_people_command():
                 if area_id == best and ID_RE.match(area_id or ""):
                     return (f"Nobody here can talk, but {count} free agents are "
                             f"at {best}. Go to them: cmd=mcity-move-area {area_id}")
-        if indoors:
+        if indoors and _now_ms() >= _no_link_exit_until_ms:
+            # Only when the door is still worth trying. It is not, in this
+            # building: exit_building handles a buildingLink and this exit is a
+            # teleport, so suggesting it just spends a turn on a known refusal.
             return (f"{count} free agents are out in {best}, and you are inside a "
                     f"building with no area reaching it. Try the door: "
                     f"cmd=mcity-exit-building")
@@ -3413,7 +3418,24 @@ def enter_building(arg=None):
 
 @_guard("EXIT-BUILDING")
 def exit_building():
-    return _mutate("EXIT-BUILDING", lambda: ({"kind": "exit_building"}, None))
+    # This building's exit is a teleport, not a link, and exit_building only
+    # handles links - the world answers "agent is not inside a linked building"
+    # every time, 4 in ten minutes. Remember that answer rather than re-asking,
+    # and hand over the route instead, which is what the agent wanted anyway.
+    global _no_link_exit_until_ms
+    if _now_ms() < _no_link_exit_until_ms:
+        return _promote_command(
+            _failed("EXIT-BUILDING", "no_link_exit",
+                    "the world said moments ago that this building has no linked "
+                    "exit, so this door does not open that way"),
+            _cached_route() or _next_action_command())
+    result = _mutate("EXIT-BUILDING", lambda: ({"kind": "exit_building"}, None))
+    if "not inside a linked building" in (result or "").lower():
+        _no_link_exit_until_ms = _now_ms() + _NO_LINK_EXIT_MS
+        result = _promote_command(result, _cached_route() or _next_action_command())
+    elif "MCITY-EXIT-BUILDING-OK" in (result or ""):
+        _no_link_exit_until_ms = 0
+    return result
 
 
 def _someone_is_waiting():
