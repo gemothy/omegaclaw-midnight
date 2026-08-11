@@ -385,6 +385,7 @@ _waiting_refreshing = False
 # people wait.
 _ASLEEP = {}
 _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
+_ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
 _DND_STREAK_HINT = 3           # refusals before we point out the pattern
 # The world's own canSpeak verdict per agent: {id: (bool, at_ms)}. Harvested
 # free from any mcity-agents read, since the field already rides along.
@@ -1340,25 +1341,38 @@ def _promote_command(result, hint):
 
     Everything learned this session says the same thing: this agent acts on a
     complete command near the start of the first line, and ignores the same
-    command placed lower down. Measured both ways more than once."""
+    command placed lower down. Measured both ways more than once.
+
+    The command goes AFTER the reason field, never before the MCITY- verb: every
+    result must start with that prefix or the agent loop cannot classify it, and
+    prepending broke exactly that invariant the first time this was written."""
     try:
+        hint = (hint or "").strip()
         command = ""
-        for piece in (hint or "").split():
+        for piece in hint.split():
             if piece.startswith("cmd=mcity-"):
                 command = hint[hint.index(piece):].strip()
                 break
         if not command:
-            return _out(f"{result}\n{hint}")
+            return _out(f"{result}\n{hint}") if hint else _out(result)
+        note = hint[:hint.index(command)].strip().rstrip(".").rstrip()
+        for tail in (" Go to them:", " Start a conversation with someone who can:",
+                     " Do this instead:", " Leave now with this exact line:"):
+            note = note.replace(tail, "")
+        note = note.strip().rstrip(":").strip()
         head, sep, rest = (result or "").partition("\n")
-        note = hint.split(" Go to them:")[0].split(" cmd=")[0].strip().rstrip(".")
-        marker = "reason=action_failed"
-        if marker in head:
-            head = head.replace(marker, f"{marker} {command} -- {note};", 1)
+        insert = f"{command}" + (f" -- {note}" if note else "")
+        match = re.search(r"(reason=[\w-]+)", head)
+        if match:
+            head = head.replace(match.group(1), f"{match.group(1)} {insert};", 1)
+        elif head.startswith("MCITY-"):
+            verb, _space, tail_text = head.partition(" ")
+            head = f"{verb} {insert}; {tail_text}".rstrip()
         else:
-            head = f"{command} -- {note}; {head}"
+            return _out(f"{result}\n{hint}")
         return _out(head + sep + rest)
     except Exception:      # noqa: BLE001 - a hint must never break a skill
-        return result
+        return _out(result)
 
 
 def _travel_to_people_command():
@@ -3064,11 +3078,35 @@ def _refuse_while_someone_waits(verb):
                    f"{who} <your sentence>, then come back to this")
 
 
+def _rich_enough():
+    """True when the mission's own step four says to stop earning.
+
+    'If hunger is normal and you hold more than two hundred meme_coin, skip
+    earning and go to step five.' The agent held 18383 and kept grinding work,
+    which is the same shape as the reply-first rule: it was prose, so it was not
+    followed. Earning is the means; the agent is here to be present with people.
+    """
+    hunger = (_VITALS.get("hunger") or "").lower()
+    if not hunger.startswith("normal"):
+        return False
+    match = re.search(r"meme_coin=(\d+)", _VITALS.get("items") or "")
+    return bool(match) and int(match.group(1)) > _ENOUGH_MEME_COIN
+
+
 @_guard("WORK")
 def work():
     blocked = _refuse_while_someone_waits("WORK")
     if blocked is not None:
         return blocked
+    if _rich_enough() and not _someone_is_waiting():
+        nxt = _reachable_opener() or ""
+        command = nxt if "cmd=mcity-" in nxt else ""
+        return _promote_command(
+            _failed("WORK", "rich_enough",
+                    "you hold well over the two hundred meme_coin the mission "
+                    "calls enough and you are not hungry, so earning more is not "
+                    "what this turn is for - go and be with people"),
+            command or "cmd=mcity-agents")
     result = _mutate("WORK", lambda: ({"kind": "perform_job"}, None))
     # "no available hacker worksite" is contention, not a bad call: every
     # terminal in this room is taken by one of the 52 agents permanently engaged

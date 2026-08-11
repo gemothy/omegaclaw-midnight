@@ -1428,3 +1428,42 @@ def test_the_travel_command_lands_in_the_head_line(control):
     assert "cmd=mcity-" in head and "central" in head, head
     assert head.index("cmd=mcity-") < 60, "the command must be near the front"
     assert "no available hacker worksite" in result, "the world's words survive"
+
+
+def test_work_stops_once_the_mission_says_it_is_enough(control):
+    """Step four: 'if hunger is normal and you hold more than two hundred
+    meme_coin, skip earning and go to step five.' The agent held 18383 and kept
+    grinding work - prose again, so it was not followed."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
+                       "items": "crystal=13800 meme_coin=18383"})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    result = _check(mc.work())
+    assert result.startswith("MCITY-WORK-FAILED reason=rich_enough")
+    assert "cmd=mcity-" in result.partition("\n")[0]
+    assert not control.actions
+
+
+def test_work_continues_while_poor_or_hungry(control):
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(5)",
+                       "items": "meme_coin=12"})
+    _check(mc.work())
+    assert control.actions, "a poor agent must still be allowed to earn"
+    control.actions.clear()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(3)",
+                       "items": "meme_coin=99999"})
+    _check(mc.work())
+    assert control.actions, "a hungry agent must still be allowed to earn"
+
+
+def test_promoting_a_command_never_breaks_the_result_prefix(control):
+    """Every result must start with MCITY- or the agent loop cannot classify it.
+    The first version of the promotion prepended the command and broke exactly
+    that; the suite's own invariant caught it."""
+    promoted = mc._promote_command(
+        "MCITY-WORK-FAILED reason=rich_enough detail=enough already",
+        "cmd=mcity-agents")
+    assert promoted.startswith("MCITY-WORK-FAILED reason=rich_enough cmd=mcity-agents")
+    assert promoted.count("cmd=mcity-agents") == 1, "the command must not duplicate"
+    assert "enough already" in promoted
