@@ -1177,6 +1177,7 @@ def test_the_opener_fetches_a_name_when_it_has_none(control):
     roster = {"agents": [{"agentId": "user-agent-awake", "name": "Awake",
                           "distance": 3, "isOpenToTalk": True,
                           "canSpeak": True, "status": "busy"}]}
+    mc._REACHABLE.update({"n": None, "at_ms": 0})   # let the roster decide
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     assert not mc._CAN_SPEAK
     opener = mc._reachable_opener()
@@ -1489,6 +1490,7 @@ def test_a_suggested_command_is_always_complete_and_copyable(control):
     verbatim, which is the only thing this agent reliably does."""
     roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
                           "isOpenToTalk": True, "canSpeak": True, "status": "idle"}]}
+    mc._REACHABLE.update({"n": None, "at_ms": 0})   # let the roster decide
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     opener = mc._reachable_opener()
     assert "<" not in opener and ">" not in opener, f"placeholder survived: {opener}"
@@ -1892,6 +1894,7 @@ def test_vitals_says_how_many_people_can_be_reached(control):
 def test_reachable_is_absent_rather_than_guessed(control):
     """Never claim zero from a roster we have not read: that would tell the agent
     to stop looking for people on no evidence."""
+    mc._REACHABLE.update({"n": None, "at_ms": 0})     # nothing read yet
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     assert "reachable=" not in mc._vitals_line()
 
@@ -2230,3 +2233,23 @@ def test_authorship_is_inferred_from_who_owes_the_reply(control):
     _check(mc.threads())
     assert not mc._is_echo("the shipment cleared customs an hour ago"), \
         "we owe nothing, so that preview was ours"
+
+
+def test_reachability_is_learned_without_the_agent_asking(control):
+    """reachable= and talk-to= are what step five turns on, and they appeared
+    only once the agent called mcity-agents itself. After every restart the
+    tokens were missing, so the step never fired and it fell through to work: 71
+    work calls and no speech across 25 minutes following a deploy, against 19
+    speaks in one window before it."""
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "status": "idle", "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    mc._REACHABLE.update({"n": None, "at_ms": 0})   # cold, as after a restart
+    assert mc._REACHABLE["n"] is None
+    mc._VITALS["at_ms"] = None                 # force the vitals refresh to run
+    mc._refresh_vitals_if_stale()
+    assert mc._REACHABLE["n"] == 1, "the agent never had to ask"
+    # The fake needs payload carries no agent block, so nothing else stamps the
+    # vitals clock; the point here is that reachability arrived unasked.
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    assert "talk-to=user-agent-free" in (mc._vitals_line() or "")

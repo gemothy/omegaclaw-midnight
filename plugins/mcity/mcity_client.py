@@ -576,6 +576,15 @@ def _refresh_vitals_if_stale():
         if not _VITALS.get("items"):
             _skill_read("VITALS", "inventory")
         _refresh_waiting_if_stale()
+        # ONLY on a cold start. reachable= and talk-to= are what step five turns
+        # on, and they appeared only once the agent called mcity-agents of its
+        # own accord - so after every restart the tokens were missing, the step
+        # never fired, and it fell through to work and stayed: 71 work calls and
+        # no speech across 25 minutes following a deploy, against 19 speaks in a
+        # single window before it. One read, once, when we know nothing; doing it
+        # on every refresh reads 286 agents for no new information.
+        if _REACHABLE["n"] is None:
+            _refresh_can_speak_if_unknown((), force=True)
     except Exception:  # noqa: BLE001 - grounding must never break a skill
         pass
     finally:
