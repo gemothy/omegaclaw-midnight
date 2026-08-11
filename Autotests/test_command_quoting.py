@@ -32,10 +32,20 @@ def test_wellformed_arguments_are_untouched():
 
 
 def test_inner_quotes_that_are_not_a_wrapper_survive():
-    """Only a wrapper is stripped; quotes that are part of the message stay."""
-    out = helper.balance_parentheses('send "he said \\"hi\\" to me"')
-    assert 'hi' in out
-    assert out.startswith('((send "') and out.endswith('"))')
+    """Upstream guarantees inner quotes are meaningful. The repair is narrow on
+    purpose: it fires only when the WHOLE argument is double-wrapped."""
+    assert helper.balance_parentheses('send "hello" world') \
+        == '((send "\\"hello\\" world"))'
+    multi = helper.balance_parentheses(
+        'send "Plain text version:"\n**Mars** - red planet')
+    assert '**Mars**' in multi and '\\"Plain text version:\\"' in multi
+
+
+def test_trailing_debris_after_the_wrapper_is_dropped():
+    """The model often leaves an unbalanced paren or quote after the wrapper."""
+    for tail in ('\\""', '\\")"', '\\"))', '\\")")'):
+        got = helper.balance_parentheses(f'pin "\\"status: idle{tail}')
+        assert got == '((pin "status: idle"))', (tail, got)
 
 
 def test_strip_is_total_and_never_raises():

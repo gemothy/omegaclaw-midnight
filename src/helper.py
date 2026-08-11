@@ -90,33 +90,35 @@ def around_time(needle_time_str, k):
     return ret
 
 def strip_redundant_quotes(x):
-    """Undo the model quoting an argument that is already quoted.
+    """Undo the model wrapping an argument that is already quoted.
 
-    Observed live: over one hour the agent produced 51 usable decisions and 65
-    syntax errors - more than half of every turn discarded before anything ran -
-    and the failures were all one shape:
+    Measured live: 51 usable decisions against 65 syntax errors in one hour -
+    more than half of every turn discarded before anything ran. Every failure
+    was the whole argument double-wrapped, often with trailing debris:
 
-        send "\\"Awaiting input.\\""      ->  (send "\\"Awaiting input.\\"")
+        pin "\"status: idle\""     pin "\"status: idle\")"     pin "\"status: idle\"))
 
-    The escaped quotes survive into the s-expression and MeTTa rejects the form.
-    The prompt already asks for "a real quote"; the model does not comply, and a
-    turn thrown away for punctuation is a turn the agent never gets back. This is
-    the same forgiveness the client applies to the underscore-shaped trade
-    argument, applied to quoting."""
+    Those reach MeTTa unparseable and the turn is lost to punctuation.
+
+    Deliberately narrow. It fires ONLY when the entire argument is wrapped in an
+    escaped quote pair, because upstream guarantees that inner quotes are
+    meaningful and must survive: `send "hello" world` keeps its quotes, and so
+    does multi-line prose. Anything else is returned untouched."""
     if not isinstance(x, str):
         return x
     text = x.strip()
-    # "\"...\"" -> "..."   (a quoted string whose whole content is quoted again)
-    while len(text) >= 4 and text.startswith('"') and text.endswith('"'):
-        inner = text[1:-1].strip()
-        if inner.startswith('\\"') and inner.endswith('\\"') and len(inner) >= 4:
-            text = '"' + inner[2:-2] + '"'
-            continue
-        break
-    # \"...\" with no outer quotes at all
-    if text.startswith('\\"') and text.endswith('\\"') and len(text) >= 4:
-        text = '"' + text[2:-2] + '"'
-    return text
+    # Must open with a quote immediately followed by an ESCAPED quote.
+    if not text.startswith('"\\"'):
+        return x
+    inner = text[1:]                     # drop the real opening quote
+    close = inner.rfind('\\"')           # the escaped closing quote
+    if close <= 0:
+        return x
+    content = inner[2:close]             # between the two escaped quotes
+    if '\\"' in content:                 # more than a simple wrapper: leave it
+        return x
+    return '"' + content + '"'
+
 
 def quote_arg(x):
     if x.startswith('"') and x.endswith('"') and "\n" not in x:
