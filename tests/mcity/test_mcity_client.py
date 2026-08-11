@@ -1019,3 +1019,34 @@ def test_the_world_verdict_beats_our_own_status(control):
     control.on_action = lambda action: []
     _check(mc.speak("user-agent-busytalker hello there"))
     assert control.actions, "a busy but reachable target must be spoken to"
+
+
+def test_threads_learns_reachability_before_a_doomed_reply(control):
+    """canSpeak only rides on /agents, and the agent reads threads almost
+    exclusively - 46 of 46 decisions in one window - so the verdict was missing
+    exactly when it mattered: of 30 speak attempts only 6 were caught locally
+    and 24 went to the world to be told the target was asleep."""
+    waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
+                            "pendingRecipientAgentId": "agent-1",
+                            "preview": "are you around tonight"}]}
+    roster = {"agents": [{"agentId": "agent-2", "name": "Sleeper", "distance": 2,
+                          "isOpenToTalk": True, "canSpeak": False,
+                          "status": "sleeping"}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    result = _check(mc.threads())
+    assert mc._can_be_reached("agent-2") is False, "the roster must have been read"
+    assert "asleep=yes" in result
+    assert mc._WAITING["ids"] == [], "an unreachable person must not block work"
+
+
+def test_the_reachability_refresh_is_rate_limited(control):
+    """One bounded GET, not one per turn: the agent reads threads every turn."""
+    waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-9"],
+                            "pendingRecipientAgentId": "agent-1",
+                            "preview": "still waiting on you"}]}
+    for _ in range(4):
+        control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+        mc.threads()
+    reads = [r for r in control.requests if r[1].endswith("/agents")]
+    assert len(reads) <= 1, f"one roster read expected, saw {len(reads)}"

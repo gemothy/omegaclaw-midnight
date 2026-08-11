@@ -30,6 +30,8 @@ def _reset_module_state():
     mc._vitals_refreshing = False
     mc._ASLEEP.clear()
     mc._CAN_SPEAK.clear()
+    mc._can_speak_at_ms = 0
+    mc._can_speak_refreshing = False
     mc._LAST_READ.clear()
     mc._WAITING.update({'at_ms': 0, 'ids': []})
     yield
@@ -38,6 +40,8 @@ def _reset_module_state():
     mc._vitals_refreshing = False
     mc._ASLEEP.clear()
     mc._CAN_SPEAK.clear()
+    mc._can_speak_at_ms = 0
+    mc._can_speak_refreshing = False
     mc._LAST_READ.clear()
     mc._WAITING.update({'at_ms': 0, 'ids': []})
     mc._cfg.clear()

@@ -386,6 +386,9 @@ _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
 # free from any mcity-agents read, since the field already rides along.
 _CAN_SPEAK = {}
 _CAN_SPEAK_TTL_MS = 120000     # the city changes; do not trust an old verdict
+_CAN_SPEAK_REFRESH_MS = 45000  # min gap between roster reads made for this
+_can_speak_at_ms = 0
+_can_speak_refreshing = False
 
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
@@ -1196,6 +1199,43 @@ def _can_be_reached(agent_id):
     if known and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
         return known[0]
     return None
+
+
+def _refresh_can_speak_if_unknown(agent_ids):
+    """One bounded roster read when a waiting counterpart's reachability is
+    unknown.
+
+    canSpeak only rides on /agents, and the agent reads threads almost
+    exclusively - 46 of 46 decisions in one window - so the verdict was usually
+    missing exactly when it mattered. Measured consequence: of 30 speak attempts
+    only 6 were caught locally, and 24 went to the world to be told the target
+    was asleep. One GET is cheaper than those round trips, and the same read
+    grounds the roster for the rest of the turn.
+
+    Reentrancy-guarded, rate-limited, and never allowed to break a skill."""
+    global _can_speak_at_ms, _can_speak_refreshing
+    try:
+        unknown = [i for i in agent_ids if _can_be_reached(i) is None]
+        if not unknown:
+            return
+        with _lock:
+            if _can_speak_refreshing:
+                return
+            if _can_speak_at_ms and (_now_ms() - _can_speak_at_ms) < _CAN_SPEAK_REFRESH_MS:
+                return
+            _can_speak_refreshing = True
+        try:
+            payload, error = _skill_read("VITALS", "agents")
+            if error is None:
+                for item in (_find_list(payload, "agents") or []):
+                    if isinstance(item, dict):
+                        _note_can_speak(_parse_agent(item))
+            _can_speak_at_ms = _now_ms()
+        finally:
+            with _lock:
+                _can_speak_refreshing = False
+    except Exception:      # noqa: BLE001 - grounding must never break a skill
+        pass
 
 
 def _parse_agent(item):
@@ -2137,6 +2177,15 @@ def threads(_ignored=None):
         return _line("THREADS", "OK", (), _flatten(payload))
 
     own_id = _c("agent_id", "")
+    # Learn reachability BEFORE building any row: the asleep flag, the ranking
+    # and the waiting list are all decided inside the loop below, so a refresh
+    # afterwards would arrive one turn too late to matter.
+    _refresh_can_speak_if_unknown([
+        part.strip()
+        for item in items if isinstance(item, dict)
+        for part in (_get(item, "participants", "participantIds", "with") or ())
+        if isinstance(part, str) and part.strip() and part.strip() != own_id
+    ])
     rows = []
     links = []
     waiting_ids = []
@@ -2246,6 +2295,7 @@ def threads(_ignored=None):
     if _degraded(link_ok):
         pairs.append(("store", "degraded"))
     head = _line("THREADS", "OK", pairs)
+    waiting_ids = [i for i in waiting_ids if _can_be_reached(i) is not False]
     _WAITING["at_ms"] = _now_ms()
     _WAITING["ids"] = waiting_ids
     body = _project(head, "threads", "waiting-first", rows)
