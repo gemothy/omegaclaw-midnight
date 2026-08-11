@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -323,10 +324,36 @@ def _stop_typing():
         pass
 
 
+# Phrases that mean "I have nothing to say". The agent is instructed never to
+# send these, and for most of a long session it did not - then a prompt edit
+# weakened the wording and it produced 132 of them in eight minutes. Prose alone
+# is not a safeguard for something that rings a real person's phone, so the ban
+# is enforced here too, at the last point before the message leaves the process.
+#
+# Deliberately narrow, and matched against the WHOLE message: a report that
+# happens to contain "nothing to report" inside a real update still goes out.
+_IDLE_REPORT_RE = re.compile(
+    r"^\W*(?:"
+    r"no new (?:input|messages?)(?: received)?"
+    r"|nothing (?:new )?to report"
+    r"|standing by"
+    r"|awaiting (?:your )?(?:instructions?|input)"
+    r"|no (?:new )?updates?"
+    r")\W*$", re.I)
+
+
+def is_idle_report(text):
+    """True when the whole message says only that there is nothing to say."""
+    return bool(_IDLE_REPORT_RE.match(str(text or "").strip()))
+
+
 def send_message(text):
     _stop_typing()
     text = str(text).replace("\\n", "\n").replace("\r", "")
     if not text:
+        return
+    if is_idle_report(text):
+        logger.warning("telegram: suppressed an idle report: %r", text[:80])
         return
 
     max_len = 3900
