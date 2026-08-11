@@ -382,11 +382,18 @@ _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
 # people wait.
 _ASLEEP = {}
 _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
+_DND_STREAK_HINT = 3           # refusals before we point out the pattern
 # The world's own canSpeak verdict per agent: {id: (bool, at_ms)}. Harvested
 # free from any mcity-agents read, since the field already rides along.
 _CAN_SPEAK = {}
 _CAN_SPEAK_TTL_MS = 120000     # the city changes; do not trust an old verdict
 _CAN_SPEAK_REFRESH_MS = 45000  # min gap between roster reads made for this
+# Consecutive speaker-side refusals. The world has TWO distinct rejections:
+# 'target is sleeping', which the canSpeak grounding above prevents, and
+# 'speaker is in do not disturb mode', which no target check can. The second
+# is what 50 of 50 failures in one window said, while status was busy in
+# every vitals sample and the world kept regenerating the activity itself.
+_dnd_streak = 0
 _can_speak_at_ms = 0
 _can_speak_refreshing = False
 
@@ -2855,6 +2862,7 @@ def harvest(arg=None):
 
 @_guard("SPEAK")
 def speak(arg=None):
+    global _dnd_streak
     sent = {}
 
     def build():
@@ -2926,14 +2934,32 @@ def speak(arg=None):
                                             sent["text"]))
         if _degraded(spoken_ok):
             result = _stamp_degraded(result)
+        _dnd_streak = 0
         return result
     if "MCITY-SPEAK-FAILED" in (result or ""):
         # Remember a sleeping target. The world states this in prose inside the
         # untrusted markers, which the agent is correctly told never to obey - so
         # the fact has to be captured here, where it can be acted on, rather than
         # left for the model to notice and trust.
-        if sent.get("agent_id") and "sleeping" in (result or "").lower():
+        lowered = (result or "").lower()
+        if sent.get("agent_id") and "sleeping" in lowered:
             _ASLEEP[sent["agent_id"]] = _now_ms()
+        if "do not disturb" in lowered:
+            # Speaker-side: a different target cannot fix it, so the candidate
+            # list below would be misleading on its own.
+            _dnd_streak += 1
+            if _dnd_streak >= _DND_STREAK_HINT:
+                where = _VITALS.get("space") or "where you are"
+                result = _out(
+                    f"{result}\nnote={_dnd_streak} replies refused as speaker "
+                    f"do-not-disturb while you were mid-action at {where}. This "
+                    "is about YOU, not the person you are answering, so trying "
+                    "someone else will not help. The world keeps starting this "
+                    "activity for you; you have not tried leaving. Consider "
+                    "mcity-exit-building or mcity-move-area, then reply")
+                return result
+        elif "MCITY-SPEAK-OK" in (result or ""):
+            _dnd_streak = 0
         suggestion = _speak_candidates()
         if suggestion:
             result = _out(f"{result}\n{suggestion}")

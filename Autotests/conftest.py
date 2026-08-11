@@ -76,6 +76,7 @@ def _reset_mcity_module_state():
     mc._ASLEEP.clear()
     mc._CAN_SPEAK.clear()
     mc._can_speak_at_ms = 0
+    mc._dnd_streak = 0
     mc._can_speak_refreshing = False
     mc._LAST_READ.clear()
     mc._WAITING.update({'at_ms': 0, 'ids': []})
