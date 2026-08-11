@@ -1193,3 +1193,26 @@ def test_an_engaged_target_is_unreachable_despite_can_speak(control):
     assert mc._can_be_reached("user-agent-engaged") is False
     assert mc._can_be_reached("user-agent-free") is True
     assert "user-agent-free" in (mc._reachable_opener() or "")
+
+
+def test_a_friends_only_refusal_is_remembered_too(control):
+    """Social rather than temporal, so it will not clear on its own - all the
+    more reason not to spend another turn on that person."""
+    seq = itertools.count()
+    control.on_action = lambda action: [
+        event(f"e{next(seq)}", "action_failed", actionKind="speak",
+              targetAgentId="user-agent-abc",
+              reason="target only talks to friends")]
+    mc.speak("user-agent-abc hello there")
+    assert mc._can_be_reached("user-agent-abc") is False
+    assert mc._dnd_streak == 0, "this is the target's rule, not ours"
+
+
+def test_the_opener_admits_when_nobody_can_be_reached(control):
+    """A live roster had zero of 285 agents both able to speak and free of an
+    action. Sending the agent hunting for one is advice that cannot succeed."""
+    control.force("/api/skill/agents/agent-1/agents", 200,
+                  json.dumps({"agents": []}).encode())
+    opener = mc._reachable_opener()
+    assert "Nobody in the city can receive a message" in opener
+    assert "work, eat or trade" in opener

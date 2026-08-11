@@ -1248,8 +1248,11 @@ def _reachable_opener():
             _refresh_can_speak_if_unknown((), force=True)
             best = _fresh()
         if best is None:
-            return ("Call mcity-agents and speak to someone showing "
-                    "can-speak=yes")
+            # Do not send it hunting for someone who is not there. A live roster
+            # had zero of 285 agents both able to speak and free of an action.
+            return ("Nobody in the city can receive a message right now, so "
+                    "conversation is not available this turn: work, eat or "
+                    "trade instead and try again later")
         return (f"Start a conversation with someone who can: "
                 f"cmd=mcity-speak {best} <your sentence>")
     except Exception:      # noqa: BLE001 - a hint must never break a skill
@@ -3034,8 +3037,12 @@ def speak(arg=None):
         # Matching "do not disturb" alone counted the target-side one against
         # ourselves and told the agent to walk away when the real answer was to
         # answer somebody else.
+        # A fourth refusal: "target only talks to friends". Social, not
+        # temporal, so it will not clear on its own - all the more reason not to
+        # spend another turn on that person.
         if sent.get("agent_id") and ("target is sleeping" in lowered
-                                     or "target is in do not disturb" in lowered):
+                                     or "target is in do not disturb" in lowered
+                                     or "only talks to friends" in lowered):
             _ASLEEP[sent["agent_id"]] = _now_ms()
         elif "speaker is in do not disturb" in lowered:
             # Speaker-side: a different target cannot fix it, so the candidate
