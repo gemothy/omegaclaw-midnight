@@ -3348,7 +3348,14 @@ def speak(arg=None):
             # 35 attempts in one window, every one refused here, every target
             # already flagged. It does not act on flags or on prose telling it to
             # do something else - it acts on a whole command. So give it one.
-            alt = (f" cmd=mcity-speak {others[0]} <your sentence>" if others
+            # A complete command again, not "cmd=mcity-speak <id> <your
+            # sentence>": the placeholder form was measured at 63 emissions for
+            # one speak. mcity-threads stands alone, lands on the waiting row,
+            # and carries what that person actually said - which is what the
+            # reply needs anyway. Live: 18 sends to unreachable people while a
+            # reachable person was waiting the whole time.
+            alt = (f" {others[0]} is waiting and CAN hear you - read them and "
+                   f"reply: cmd=mcity-threads" if others
                    else f" Nobody waiting can hear you. {_next_action_command()}")
             return None, _failed("SPEAK", "unreachable",
                                  f"the world reports {parts[0]} cannot receive a "

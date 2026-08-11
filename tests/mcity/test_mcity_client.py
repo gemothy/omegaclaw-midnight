@@ -1251,7 +1251,10 @@ def test_a_reachable_waiting_person_is_named_as_a_command(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-awake"]})
     mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
     result = _check(mc.speak("user-agent-abc hello there"))
-    assert "cmd=mcity-speak user-agent-awake" in result
+    # A standalone command, not a speak template: mcity-threads lands on the
+    # waiting row and carries what they said, which the reply needs anyway.
+    assert "user-agent-awake is waiting" in result
+    assert "cmd=mcity-threads" in result
 
 
 def test_our_own_engagement_stops_a_doomed_reply(control):
@@ -1656,3 +1659,17 @@ def test_a_thread_preview_we_wrote_does_not_gag_us(control):
     control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())
     _check(mc.threads())
     assert not mc._is_echo(ours), "our own preview must not become forbidden text"
+
+
+def test_an_unreachable_send_is_redirected_to_the_person_waiting(control):
+    """18 sends went to unreachable people while a reachable person was waiting
+    the whole time. The redirect has to be a command that stands alone - the
+    placeholder form was measured at 63 emissions for one speak."""
+    mc._ASLEEP["user-agent-asleep"] = mc._now_ms()
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-waiting"]})
+    mc._CAN_SPEAK["user-agent-waiting"] = (True, mc._now_ms())
+    result = _check(mc.speak("user-agent-asleep hello there"))
+    assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert "user-agent-waiting is waiting" in result
+    assert "cmd=mcity-threads" in result
+    assert "<" not in result and ">" not in result, "no placeholder may survive"
