@@ -1,10 +1,3 @@
-"""Isolate the mcity client's module-level state between tests.
-
-mcity_client keeps grounding state in module globals (_VITALS above all), and
-tests in both suites write to them directly. Nothing restored them, so the two
-suites passed alone - 142 and 105 - and failed 11 when run in one process,
-purely from order. A left-over status=busy is enough to make an unrelated test's
-speak refuse. Reset before every test so the suites compose."""
 import os
 import sys
 
@@ -18,43 +11,16 @@ for _path in (os.path.join(_REPO, "plugins", "mcity"), _HERE):
 
 import mcity_client as mc                       # noqa: E402
 
-_PRISTINE_VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-                    "status": None, "busy_for": None,
-                    "engaged": False,
-                    "district": None}
-
 
 @pytest.fixture(autouse=True)
 def _reset_module_state():
+    """mcity_client keeps grounding and dedup state in module globals, so a test
+    can be changed by what an earlier one did. The reset lives in the module
+    itself: three caches in a row caused order-dependent failures because a new
+    one was added there and this file was not updated to match."""
     cfg = dict(mc._cfg)
-    mc._VITALS.clear()
-    mc._VITALS.update(_PRISTINE_VITALS)
-    mc._vitals_refreshing = False
-    mc._ASLEEP.clear()
-    mc._CAN_SPEAK.clear()
-    mc._AWAKE_PLACES.clear()
-    mc._can_speak_at_ms = 0
-    mc._dnd_streak = 0
-    mc._last_self_probe_ms = 0
-    mc._waiting_refresh_at_ms = 0
-    mc._waiting_refreshing = False
-    mc._can_speak_refreshing = False
-    mc._LAST_READ.clear()
-    mc._WAITING.update({'at_ms': 0, 'ids': []})
+    mc.reset_runtime_state()
     yield
-    mc._VITALS.clear()
-    mc._VITALS.update(_PRISTINE_VITALS)
-    mc._vitals_refreshing = False
-    mc._ASLEEP.clear()
-    mc._CAN_SPEAK.clear()
-    mc._AWAKE_PLACES.clear()
-    mc._can_speak_at_ms = 0
-    mc._dnd_streak = 0
-    mc._last_self_probe_ms = 0
-    mc._waiting_refresh_at_ms = 0
-    mc._waiting_refreshing = False
-    mc._can_speak_refreshing = False
-    mc._LAST_READ.clear()
-    mc._WAITING.update({'at_ms': 0, 'ids': []})
+    mc.reset_runtime_state()
     mc._cfg.clear()
     mc._cfg.update(cfg)

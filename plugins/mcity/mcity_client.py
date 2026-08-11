@@ -396,6 +396,10 @@ _waiting_refreshing = False
 _ASLEEP = {}
 _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
 _ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
+# (target, exact words) -> when it was delivered. Repeating yourself verbatim
+# to the same person is the clearest tell of a bot.
+_SAID = {}
+_SAID_TTL_MS = 600000
 _DND_STREAK_HINT = 3           # refusals before we point out the pattern
 # The world's own canSpeak verdict per agent: {id: (bool, at_ms)}. Harvested
 # free from any mcity-agents read, since the field already rides along.
@@ -425,6 +429,29 @@ _last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
 VITALS_REFRESH_MS = 30000      # re-read vitals at most this often
 _vitals_refreshing = False     # guards the refresh path against reentry via _out
+
+
+def reset_runtime_state():
+    """Clear every ephemeral cache. Exists for tests, and owned by this module.
+
+    Three separate caches have now caused order-dependent failures because a new
+    one was added here and the two conftests were not updated to match. Keeping
+    the list next to the state it resets is the only version of this that stays
+    correct.
+
+    Deliberately NOT reset: the lease, the config and the store handles, which
+    the fixtures own and which have their own lifecycles."""
+    for cache in (_CAN_SPEAK, _ASLEEP, _LAST_READ, _SAID, _AWAKE_PLACES, _inbound):
+        cache.clear()
+    _WAITING.update({"at_ms": 0, "ids": []})
+    _VITALS.clear()
+    _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
+                    "status": None, "busy_for": None, "engaged": False,
+                    "district": None})
+    globals().update(_vitals_refreshing=False, _can_speak_at_ms=0,
+                     _can_speak_refreshing=False, _waiting_refresh_at_ms=0,
+                     _waiting_refreshing=False, _last_self_probe_ms=0,
+                     _dnd_streak=0)
 
 
 def _harvest_vitals(payload):
@@ -554,7 +581,11 @@ def _vitals_line():
     # beats two hundred; it kept calling mcity-work instead, 54 refusals in three
     # minutes. Stating the conclusion as a fact is what worked for waiting=,
     # hunger and can-speak.
-    parts.append("earned=enough" if _rich_enough() else "earned=keep-going")
+    # Only when holdings are actually known. Before the first inventory harvest
+    # items is empty, and asserting keep-going there told the agent to go and
+    # earn on evidence we did not have - 36 of 152 samples in one window.
+    if _VITALS.get("items"):
+        parts.append("earned=enough" if _rich_enough() else "earned=keep-going")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -3289,6 +3320,17 @@ def speak(arg=None):
         if _is_echo(text):
             return None, _failed("SPEAK", "bad_args",
                                  "do not repeat text written by another agent")
+        # The same greeting, to the same person, twice in a row - observed live,
+        # word for word. Delivered twice it reads as a bot, which is the one
+        # thing this agent is meant not to be.
+        said_before = _SAID.get((parts[0], _norm_arg(text).lower()))
+        if said_before and (_now_ms() - said_before) <= _SAID_TTL_MS:
+            ago = int((_now_ms() - said_before) / 1000)
+            return None, _failed("SPEAK", "already_said",
+                                 f"you sent {parts[0]} these exact words {ago}s "
+                                 "ago and it was delivered. Say something new, "
+                                 "or answer what they actually replied - read it "
+                                 "with cmd=mcity-threads")
         # Refuse locally while an action is running. The world rejects it anyway
         # with "speaker is in do not disturb mode" - 6 of 6 observed failures were
         # at status=busy - so the round trip buys nothing, and the refusal can say
@@ -3371,6 +3413,8 @@ def speak(arg=None):
         # Ground the delivery: spoke_count is the anti-greeting-loop counter
         # that candidates() ranks on. A store failure must never fail a speak
         # that already happened; it only marks the turn as ungrounded.
+        _SAID[(sent["agent_id"], _norm_arg(sent["text"]).lower())] = _now_ms()
+        _prune(_SAID, _SAID_TTL_MS, lambda v: v)
         _unused, spoken_ok = _store_call(
             lambda store: store.mark_spoken(sent["agent_id"], _now_ms(),
                                             sent["text"]))

@@ -62,33 +62,13 @@ def _post_session_cleanup():
 
 @pytest.fixture(autouse=True)
 def _reset_mcity_module_state():
-    """mcity_client keeps grounding and read-dedup state in module globals, so a
-    test that reads twice can be suppressed by what an EARLIER test read. Two
-    roster tests here passed alone and failed in suite order for exactly that
-    reason. tests/mcity/conftest.py holds the matching fixture."""
+    """Matches tests/mcity/conftest.py. The reset itself lives in the module,
+    so adding a cache there cannot leave these two files out of date."""
     try:
         import mcity_client as mc
     except ImportError:                 # suites that never load the plugin
         yield
         return
-    pristine = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-                "status": None, "busy_for": None,
-                    "engaged": False,
-                    "district": None}
-    mc._ASLEEP.clear()
-    mc._CAN_SPEAK.clear()
-    mc._AWAKE_PLACES.clear()
-    mc._can_speak_at_ms = 0
-    mc._dnd_streak = 0
-    mc._last_self_probe_ms = 0
-    mc._waiting_refresh_at_ms = 0
-    mc._waiting_refreshing = False
-    mc._can_speak_refreshing = False
-    mc._LAST_READ.clear()
-    mc._WAITING.update({'at_ms': 0, 'ids': []})
-    mc._VITALS.clear(); mc._VITALS.update(pristine)
-    mc._vitals_refreshing = False
+    mc.reset_runtime_state()
     yield
-    mc._LAST_READ.clear()
-    mc._VITALS.clear(); mc._VITALS.update(pristine)
-    mc._vitals_refreshing = False
+    mc.reset_runtime_state()

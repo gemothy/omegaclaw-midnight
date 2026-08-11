@@ -1673,3 +1673,41 @@ def test_an_unreachable_send_is_redirected_to_the_person_waiting(control):
     assert "user-agent-waiting is waiting" in result
     assert "cmd=mcity-threads" in result
     assert "<" not in result and ">" not in result, "no placeholder may survive"
+
+
+def test_the_same_words_are_not_sent_to_the_same_person_twice(control):
+    """Observed live: the identical greeting to the identical person, word for
+    word, in consecutive turns. Delivered twice it reads as a bot."""
+    control.on_action = lambda action: [
+        event("e1", "agent_spoke", targetAgentId="user-agent-abc",
+              text="Hello Leofric, I am Gem Ozan from NexiFuse Health",
+              threadId="t1", messageId="m1", sequenceNo=1)]
+    line = "user-agent-abc Hello Leofric, I am Gem Ozan from NexiFuse Health"
+    first = _check(mc.speak(line))
+    assert "MCITY-SPEAK-OK" in first
+    before = len(control.actions)
+    again = _check(mc.speak(line))
+    assert again.startswith("MCITY-SPEAK-FAILED reason=already_said")
+    assert "cmd=mcity-threads" in again
+    assert len(control.actions) == before, "the repeat must not reach the world"
+
+
+def test_the_same_words_to_a_different_person_are_fine(control):
+    """An opener is allowed to be reused on someone who has not heard it."""
+    control.on_action = lambda action: [
+        event("e1", "agent_spoke", targetAgentId="user-agent-abc", text="Hello there friend",
+              threadId="t1", messageId="m1", sequenceNo=1)]
+    _check(mc.speak("user-agent-abc Hello there friend"))
+    control.on_action = lambda action: []
+    before = len(control.actions)
+    _check(mc.speak("user-agent-xyz Hello there friend"))
+    assert len(control.actions) > before
+
+
+def test_earned_is_silent_when_holdings_are_unknown(control):
+    """Before the first inventory harvest, asserting keep-going told the agent to
+    go and earn on evidence we did not have - 36 of 152 samples in one window."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)", "items": None})
+    assert "earned=" not in mc._vitals_line()
+    mc._VITALS.update({"items": "meme_coin=18529"})
+    assert "earned=enough" in mc._vitals_line()
