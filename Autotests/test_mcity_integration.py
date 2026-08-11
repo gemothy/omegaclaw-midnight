@@ -535,3 +535,43 @@ def test_trade_inversion_is_corrected(monkeypatch):
     out = mc.trade("crystal 50 Central Mart Outlet")
     assert sent["itemId"] == "crystal"
     assert "corrected=" not in out
+
+
+def test_vitals_ride_along_on_every_result(monkeypatch):
+    """The agent spent 68 of 75 reads in ten minutes re-asking its own hunger
+    and inventory. Carrying the answer on every result removes the reason."""
+    mc._VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None})
+    assert mc._vitals_line() is None                 # nothing known yet
+
+    mc._harvest_vitals({
+        "agent": {"position": {"spaceId": "central"}},
+        "hunger": {"state": "starving", "value": 100},
+        "inventory": {"crystal": 13950, "fish": 1},
+    })
+    line = mc._vitals_line()
+    assert "hunger=starving" in line
+    assert "at=central" in line
+    assert "crystal=13950" in line
+
+    out = mc._out("MCITY-NEEDS-OK")
+    assert out.startswith("MCITY-NEEDS-OK")
+    assert "vitals hunger=starving" in out
+    # Never doubled when a caller already appended one.
+    assert mc._out(out).count("vitals hunger=") == 1
+
+
+def test_harvest_never_raises_on_junk():
+    for junk in (None, [], "text", {"agent": "not-a-dict"}, {"hunger": 5}):
+        mc._harvest_vitals(junk)                     # must not raise
+
+
+def test_vitals_survive_truncation(monkeypatch):
+    """_cap truncates the tail, so appending vitals before capping would chop
+    them off exactly on the long results that most need grounding."""
+    monkeypatch.setattr(mc, "_c", lambda k, d=None: 200 if k == "max_result_chars" else d)
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "starving",
+                       "space": "central", "items": "crystal=1"})
+    out = mc._out("X" * 5000)
+    assert out.endswith(mc._vitals_line())     # vitals kept
+    assert "...TRUNCATED" in out               # body was the thing cut
+    assert len(out) <= 200 + len(mc._vitals_line()) + 20

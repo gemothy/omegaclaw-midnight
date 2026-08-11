@@ -347,17 +347,85 @@ def _redact(text):
         return "[REDACTED]"
 
 
-def _cap(text):
-    limit = int(_c("max_result_chars", DEFAULT_MAX_RESULT_CHARS))
+def _cap_to(text, limit):
     if len(text) <= limit:
         return text
-    return text[:limit] + " ...TRUNCATED"
+    return text[:max(0, limit)] + " ...TRUNCATED"
+
+
+def _cap(text):
+    return _cap_to(text, int(_c("max_result_chars", DEFAULT_MAX_RESULT_CHARS)))
+
+
+_VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None}
+_VITALS_STALE_MS = 120000
+
+
+def _harvest_vitals(payload):
+    """Remember hunger, place and holdings from any response that carries them.
+
+    Free: these fields already ride along on needs/inventory/context replies, so
+    nothing extra is fetched. Never raises - a vitals miss must not break a
+    skill."""
+    try:
+        if not isinstance(payload, dict):
+            return
+        agent = payload.get("agent")
+        hunger = payload.get("hunger")
+        items = payload.get("inventory")
+        if isinstance(hunger, dict) and hunger.get("state"):
+            _VITALS["hunger"] = str(hunger.get("state"))
+        if isinstance(agent, dict):
+            position = agent.get("position")
+            if isinstance(position, dict) and position.get("spaceId"):
+                _VITALS["space"] = str(position["spaceId"])
+        if isinstance(items, dict):
+            _VITALS["items"] = " ".join(f"{k}={v}" for k, v in sorted(items.items()))
+        if _VITALS["hunger"] or _VITALS["space"] or _VITALS["items"]:
+            _VITALS["at_ms"] = _now_ms()
+    except Exception:
+        pass
+
+
+def _vitals_line():
+    """One trusted line of current state, or None.
+
+    The agent spent 68 of 75 reads in a ten-minute window re-asking for its own
+    hunger and inventory - two thirds of every turn spent looking at itself
+    instead of acting, against a prompt that allows two reads per turn. Carrying
+    the answer on every result removes the reason to ask."""
+    if not _VITALS["at_ms"]:
+        return None
+    age = _now_ms() - _VITALS["at_ms"]
+    parts = []
+    if _VITALS["hunger"]:
+        parts.append(f"hunger={_VITALS['hunger']}")
+    if _VITALS["space"]:
+        parts.append(f"at={_VITALS['space']}")
+    if _VITALS["items"]:
+        parts.append(f"holding={_VITALS['items']}")
+    if not parts:
+        return None
+    if age > _VITALS_STALE_MS:
+        parts.append(f"as-of={int(age / 1000)}s-ago")
+    return "vitals " + " ".join(parts)
 
 
 def _out(text):
     """The single exit point of every public function."""
     try:
-        return _cap(_redact(text))
+        body = _redact(text)
+        vitals = _vitals_line()
+        if not vitals or "\nvitals " in body:
+            return _cap(body)
+        # Cap the BODY first, then append. _cap truncates the tail, so appending
+        # before capping would chop the vitals off exactly on the long results
+        # that most need grounding.
+        reserve = len(vitals) + 1
+        limit = int(_c("max_result_chars", DEFAULT_MAX_RESULT_CHARS))
+        if len(body) + reserve > limit:
+            body = _cap_to(body, max(0, limit - reserve))
+        return f"{body}\n{vitals}"
     except Exception:
         return "MCITY-FAILED reason=internal"
 
@@ -1481,6 +1549,7 @@ def _skill_read(verb, endpoint):
     resp = _http("GET", f"/api/skill/agents/{agent}/{endpoint}")
     if not resp["ok"]:
         return None, _fail_http(verb, resp)
+    _harvest_vitals(resp["json"])
     return resp["json"], None
 
 
