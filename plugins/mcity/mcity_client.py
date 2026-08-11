@@ -3402,8 +3402,21 @@ def work():
     # delivered 2-4. The agent reads the roster when told to and then returns to
     # work; refusing that constantly just removes the one thing it will do,
     # which is strictly worse than letting it earn between reminders.
+    # Two regimes, because the evidence differs.
+    #
+    # Nobody reachable: a nudge once a minute. Blocking every turn here produced
+    # 36 refusals and zero messages, while the agent kept earning between them.
+    #
+    # Somebody reachable: refuse every time. Measured this pass - the agent took
+    # the route, reached central with reachable=2, then called mcity-work, and a
+    # hacker's worksite is the crypto terminal back inside the hacker house. Work
+    # walked it home and the world re-engaged it there, undoing the journey it
+    # had just made. When there is a person to talk to, earning more money it
+    # does not need is not worth crossing the city to give up.
     global _last_rich_nudge_ms
-    due = (_now_ms() - _last_rich_nudge_ms) >= _RICH_NUDGE_EVERY_MS
+    someone_here = (_REACHABLE["n"] or 0) > 0 and (
+        _now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS
+    due = someone_here or (_now_ms() - _last_rich_nudge_ms) >= _RICH_NUDGE_EVERY_MS
     alternative = _reachable_opener() if (due and _rich_enough()) else None
     if alternative and not _someone_is_waiting():
         _last_rich_nudge_ms = _now_ms()
