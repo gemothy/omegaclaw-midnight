@@ -849,3 +849,93 @@ def test_the_memory_directory_is_the_mounted_volume():
     launcher = (repo / "bin" / "omegaclaw-midnight-up").read_text()
     assert f"{match.group(1)}" in launcher, (
         "the memory directory must be the volume the launcher mounts")
+
+
+# --------------------------------------------------------------------------
+# a busy city, end to end
+# --------------------------------------------------------------------------
+
+def _busy_city_routes():
+    """A city that is awake: people waiting, some reachable, some not.
+
+    Every guard in this plugin was built against a city that was asleep - 1 of
+    285 agents reachable for hours at a stretch - so their interaction under
+    load was never exercised. That is what this scenario is for."""
+    roster = {"agents": [
+        # waiting on us AND reachable: the one the whole procedure exists for
+        {"agentId": "user-agent-awake", "name": "Awake", "distance": 4,
+         "isOpenToTalk": True, "canSpeak": True, "status": "idle",
+         "activeAction": None, "position": {"spaceId": "central"}},
+        # waiting on us but mid-engagement: still owed a reply, cannot hear it
+        {"agentId": "user-agent-engaged", "name": "Engaged", "distance": 2,
+         "isOpenToTalk": True, "canSpeak": True, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active"},
+         "position": {"spaceId": "central"}},
+        # asleep, off-map
+        {"agentId": "user-agent-sleeper", "name": "Sleeper", "distance": None,
+         "isOpenToTalk": True, "canSpeak": False, "status": "sleeping",
+         "activeAction": None, "position": {"spaceId": "harbour"}},
+    ]}
+    threads = {"threads": [
+        {"threadId": "t-awake", "participants": [OWN_ID, "user-agent-awake"],
+         "pendingRecipientAgentId": OWN_ID,
+         "preview": "Gem, did the crystal shipment clear customs tonight?"},
+        {"threadId": "t-engaged", "participants": [OWN_ID, "user-agent-engaged"],
+         "pendingRecipientAgentId": OWN_ID,
+         "preview": "ping me when you are free"},
+        {"threadId": "t-sleeper", "participants": [OWN_ID, "user-agent-sleeper"],
+         "pendingRecipientAgentId": OWN_ID,
+         "preview": "talk tomorrow"},
+    ]}
+    return {("GET", f"/api/skill/agents/{OWN_ID}/agents"): roster,
+            ("GET", f"/api/agents/{OWN_ID}/threads"): threads}
+
+
+def test_busy_city_counts_only_the_person_who_can_hear_us(monkeypatch):
+    _install_http(monkeypatch, _busy_city_routes())
+    _check(mc.agents())                      # learn reachability
+    result = _check(mc.threads())
+    assert "waiting-reachable=1" in result, result.partition("\n")[0]
+    assert mc._WAITING["ids"] == ["user-agent-awake"]
+    rows = _body_rows(result)
+    assert "user-agent-awake" in rows[0], "the answerable person ranks first"
+    engaged = [r for r in rows if "user-agent-engaged" in r][0]
+    assert "asleep=yes" in engaged, "mid-engagement means unreachable, not absent"
+
+
+def test_busy_city_vitals_names_who_to_answer(monkeypatch):
+    _install_http(monkeypatch, _busy_city_routes())
+    _check(mc.agents())
+    _check(mc.threads())
+    line = mc._vitals_line()
+    assert "waiting=1" in line and "answer user-agent-awake" in line
+
+
+def test_busy_city_holds_work_back_until_the_reply_is_sent(monkeypatch):
+    routes = _busy_city_routes()
+    routes.update(_speak_routes())
+    _install_http(monkeypatch, routes)
+    _take_lease()
+    _check(mc.agents())
+    _check(mc.threads())
+
+    blocked = _check(mc.work())
+    assert blocked.startswith("MCITY-WORK-FAILED reason=someone_waiting")
+    assert "user-agent-awake" in blocked, "it must name who is owed the reply"
+
+    spoken = _check(mc.speak("user-agent-awake The shipment cleared an hour ago"))
+    assert "MCITY-SPEAK-OK" in spoken, spoken
+
+    repeat = _check(mc.speak("user-agent-awake The shipment cleared an hour ago"))
+    assert repeat.startswith("MCITY-SPEAK-FAILED reason=already_said")
+
+
+def test_busy_city_refuses_the_unreachable_and_redirects(monkeypatch):
+    _install_http(monkeypatch, _busy_city_routes())
+    _take_lease()
+    _check(mc.agents())
+    _check(mc.threads())
+    result = _check(mc.speak("user-agent-engaged are you free yet"))
+    assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert "user-agent-awake is waiting" in result
+    assert "cmd=mcity-threads" in result

@@ -1809,3 +1809,19 @@ def test_a_fed_agent_is_not_told_to_eat(control):
                        "items": "to_go_food=2"})
     _check(mc.work())
     assert control.actions
+
+
+def test_waiting_is_reported_even_before_anything_else_is_known(control):
+    """The line used to be suppressed entirely when hunger, place and holdings
+    were all unharvested, withholding the name of the person owed a reply
+    because unrelated fields were missing."""
+    mc._VITALS["at_ms"] = 0
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-abc"]})
+    line = mc._vitals_line()
+    assert line and "waiting=1" in line and "answer user-agent-abc" in line
+
+
+def test_nothing_known_and_nobody_waiting_still_prints_nothing(control):
+    mc._VITALS["at_ms"] = 0
+    mc._WAITING.update({"at_ms": 0, "ids": []})
+    assert mc._vitals_line() is None

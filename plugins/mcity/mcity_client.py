@@ -567,7 +567,11 @@ def _vitals_line():
     hunger and inventory - two thirds of every turn spent looking at itself
     instead of acting, against a prompt that allows two reads per turn. Carrying
     the answer on every result removes the reason to ask."""
-    if not _VITALS["at_ms"]:
+    # Knowing who is waiting is itself grounding worth printing. This used to
+    # return early whenever hunger, place and holdings were all unharvested,
+    # which would withhold the single most important token - the name of the
+    # person owed a reply - because unrelated fields happened to be missing.
+    if not _VITALS["at_ms"] and not _someone_is_waiting():
         return None
     age = _now_ms() - _VITALS["at_ms"]
     parts = []
