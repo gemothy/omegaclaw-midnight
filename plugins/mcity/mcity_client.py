@@ -422,6 +422,8 @@ _CAN_SPEAK = {}
 # help here: roster rows carry distances and statuses that jitter, so no two
 # bodies are ever byte-identical.
 _REACHABLE = {"n": None, "at_ms": 0}
+_ROSTER_RECHECK_MS = 30000     # how often a roster re-read is worth a turn
+_last_roster_read_ms = 0
 _AWAKE_PLACES = {}
 _AWAKE_PLACES_TTL_MS = 120000
 _CAN_SPEAK_TTL_MS = 120000     # the city changes; do not trust an old verdict
@@ -470,7 +472,7 @@ def reset_runtime_state():
                      _can_speak_refreshing=False, _waiting_refresh_at_ms=0,
                      _waiting_refreshing=False, _last_self_probe_ms=0,
                      _dnd_streak=0, _last_rich_nudge_ms=0,
-                     _worksite_busy_until_ms=0)
+                     _worksite_busy_until_ms=0, _last_roster_read_ms=0)
 
 
 def _harvest_vitals(payload):
@@ -2318,6 +2320,27 @@ def areas():
 
 @_guard("AGENTS")
 def agents():
+    # Refuse a re-read we already know the answer to. reachable=0 told the agent
+    # nobody could hear it and it called this 26 times in four minutes anyway -
+    # stating the fact was not enough, exactly as with earned=enough. Repeat
+    # suppression cannot catch it either: roster rows carry distances and
+    # statuses that jitter, so no two bodies are byte-identical.
+    #
+    # Rate-limited rather than blocked, because people wake up: one read every
+    # _ROSTER_RECHECK_MS always goes through, so the agent learns within half a
+    # minute of the city changing.
+    global _last_roster_read_ms
+    if (_REACHABLE["n"] == 0
+            and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS
+            and (_now_ms() - _last_roster_read_ms) < _ROSTER_RECHECK_MS):
+        left = int((_ROSTER_RECHECK_MS - (_now_ms() - _last_roster_read_ms)) / 1000) + 1
+        return _promote_command(
+            _failed("AGENTS", "nobody_reachable",
+                    f"the roster said nobody can receive a message and it was "
+                    f"read moments ago; it is worth looking again in {left}s, not "
+                    "now"),
+            _next_action_command())
+    _last_roster_read_ms = _now_ms()
     payload, error = _skill_read("AGENTS", "agents")
     if error is not None:
         return error

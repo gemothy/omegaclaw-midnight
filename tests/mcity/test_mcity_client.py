@@ -1902,3 +1902,38 @@ def test_reachable_is_absent_rather_than_guessed(control):
     to stop looking for people on no evidence."""
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     assert "reachable=" not in mc._vitals_line()
+
+
+def test_the_roster_is_not_re_read_when_it_just_said_nobody(control):
+    """reachable=0 told the agent nobody could hear it and it called mcity-agents
+    26 times in four minutes anyway. Stating the fact was not enough, exactly as
+    with earned=enough; a refusal carrying a command is what has always worked."""
+    control.force("/api/skill/agents/agent-1/agents", 200,
+                  json.dumps({"agents": []}).encode())
+    _check(mc.agents())
+    assert mc._REACHABLE["n"] == 0
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)",
+                       "items": "meme_coin=5"})
+    result = _check(mc.agents())
+    assert result.startswith("MCITY-AGENTS-FAILED reason=nobody_reachable")
+    assert "cmd=mcity-" in result.partition("\n")[0]
+
+
+def test_the_roster_is_re_read_once_the_pause_ends(control):
+    """People wake up: the block must expire on its own."""
+    control.force("/api/skill/agents/agent-1/agents", 200,
+                  json.dumps({"agents": []}).encode())
+    _check(mc.agents())
+    mc._last_roster_read_ms = mc._now_ms() - (mc._ROSTER_RECHECK_MS + 1000)
+    control.force("/api/skill/agents/agent-1/agents", 200,
+                  json.dumps({"agents": []}).encode())
+    assert _check(mc.agents()).startswith("MCITY-AGENTS-OK")
+
+
+def test_a_roster_with_somebody_on_it_is_never_refused(control):
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "status": "idle", "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    assert _check(mc.agents()).startswith("MCITY-AGENTS-OK")
