@@ -217,6 +217,7 @@ _reconnects = 0
 _last_mutation_at = 0.0     # monotonic
 _action_count = 0
 _inbound = deque(maxlen=ECHO_MEMORY)   # normalised text read out of the world
+_my_texts = deque(maxlen=40)           # our OWN recent words, never an echo
 _started = False
 _store_lock = threading.Lock()  # roster store init/rest state; never nested
                                 # inside _lock, and store calls never hold it
@@ -465,7 +466,8 @@ def reset_runtime_state():
 
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
-    for cache in (_CAN_SPEAK, _ASLEEP, _LAST_READ, _SAID, _AWAKE_PLACES, _inbound):
+    for cache in (_CAN_SPEAK, _ASLEEP, _LAST_READ, _SAID, _AWAKE_PLACES, _inbound,
+                  _my_texts):
         cache.clear()
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0})
@@ -1144,10 +1146,31 @@ def _remember_inbound(text, sender=None):
         _inbound.append(normalised)
 
 
+def _remember_said(text):
+    """A bounded memory of OUR OWN words, so they can never be taken for
+    somebody else's."""
+    normalised = _norm_arg(text).lower()
+    if len(normalised) >= 8:
+        with _lock:
+            _my_texts.append(normalised)
+
+
 def _is_echo(text):
     probe = _norm_arg(text).lower()
     if len(probe) < 4:
         return False
+    # Ours is never an echo. The agent's own introduction came back as a thread
+    # preview and was refused 32 times in one window as "text written by another
+    # agent" - it was written by us.
+    with _lock:
+        mine = list(_my_texts)
+    for said in mine:
+        if probe == said:
+            return False
+        if len(probe) >= ECHO_MIN_OVERLAP:
+            for start in range(0, len(probe) - ECHO_MIN_OVERLAP + 1):
+                if probe[start:start + ECHO_MIN_OVERLAP] in said:
+                    return False
     with _lock:
         remembered = list(_inbound)
     for item in remembered:
@@ -2852,7 +2875,17 @@ def threads(_ignored=None):
                 sender = _get(preview, "senderAgentId", "agentId", "fromAgentId")
             preview = preview.get("text")
         if isinstance(preview, str):
-            _remember_inbound(preview, sender)
+            # This world sends no sender with the preview - the thread payload
+            # has no lastMessageSenderId at all - so the check added earlier
+            # never had a value to work with, and our own last message was filed
+            # as another agent's words. pendingRecipientAgentId does carry it: if
+            # WE owe the reply, they spoke last; otherwise the preview is ours.
+            author = sender
+            if author is None:
+                pending = _get(item, "pendingRecipientAgentId")
+                if isinstance(pending, str) and pending.strip():
+                    author = own_id if pending.strip() != own_id else None
+            _remember_inbound(preview, author)
         # mine=no is a person waiting on our reply; the ranking exists so that
         # those threads are the ones that survive the budget, exactly like the
         # ACTION REQUIRED imperative inside mcity-thread.
@@ -3708,6 +3741,7 @@ def speak(arg=None):
         # Ground the delivery: spoke_count is the anti-greeting-loop counter
         # that candidates() ranks on. A store failure must never fail a speak
         # that already happened; it only marks the turn as ungrounded.
+        _remember_said(sent["text"])
         _SAID[(sent["agent_id"], _norm_arg(sent["text"]).lower())] = _now_ms()
         _prune(_SAID, _SAID_TTL_MS, lambda v: v)
         _unused, spoken_ok = _store_call(
