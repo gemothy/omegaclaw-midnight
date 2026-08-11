@@ -44,6 +44,10 @@ COPY --chown=www-data:www-data --chmod=600 proxy/nginx.conf.template            
 COPY --chown=www-data:www-data --chmod=600 proxy/nginx.mcity-control.conf.template /opt/nginx/nginx.mcity-control.conf.template
 COPY --chown=www-data:www-data --chmod=600 proxy/nginx.sh                          /opt/nginx/nginx.sh
 COPY --chown=root:root src/helper.py                   ${CORE}/src/helper.py
+# getHistory now projects history instead of tailing it. Both files must ship
+# together: memory.metta py-calls helper.rankedHistory, and a core file that is
+# not COPYed here silently does not reach the image.
+COPY --chown=root:root src/memory.metta                ${CORE}/src/memory.metta
 COPY --chown=root:root channels/telegram.py                ${CORE}/channels/telegram.py
 COPY --chown=root:root profile/policy.yaml             ${CORE}/profile/policy.yaml
 COPY --chown=root:root overlay/prompt.txt              ${CORE}/memory/prompt.txt

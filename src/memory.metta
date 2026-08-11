@@ -30,7 +30,13 @@
    (let $history_file
          (library OmegaClaw-Core ./memory/history.metta)
      (if (exists-file $history_file) ;Safely read the history. Return an empty string if the file does not exist.
-         (read_file_tail $history_file (maxHistory))
+         ;Was (read_file_tail $history_file (maxHistory)). A raw tail selects by
+         ;POSITION, so a loop repeating one failing command fills the window with
+         ;copies of its own mistake and the model imitates the majority pattern.
+         ;Live measurement: the 30000-byte tail held the same wrong trade command
+         ;13 times and the correct form 0 times. rankedHistory caps repetition and
+         ;reaches 5.5 hours further back within the same budget.
+         (py-call (helper.rankedHistory $history_file (maxHistory)))
          "")))
 
 (= (addToHistory $lastmessage $response $sexpr $msgnew)

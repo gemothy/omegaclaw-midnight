@@ -288,6 +288,93 @@ def test_balance_parenthesis():
     assert balance_parentheses('- Found\na\nbug') == '((pin "Found\\na\\nbug"))'
     assert balance_parentheses('(- Found a bug') == '((pin "Found a bug"))'
 
+# ---------------------------------------------------------------------------
+# History projection
+# ---------------------------------------------------------------------------
+
+HISTORY_BLOCK_RE = re.compile(r'^\("\d{4}-\d{2}-\d{2} ', re.M)
+
+
+def _history_blocks(text):
+    """Split history.metta into timestamped blocks, oldest first."""
+    starts = [m.start() for m in HISTORY_BLOCK_RE.finditer(text)]
+    if not starts:
+        return []
+    bounds = list(zip(starts, starts[1:] + [len(text)]))
+    return [text[a:b] for a, b in bounds]
+
+
+def _history_signature(block):
+    """What makes two turns 'the same turn'.
+
+    The timestamp line differs every time, so it is stripped; everything else
+    is whitespace-normalised. Two turns issuing the same commands collapse to
+    one signature however far apart they are."""
+    body = block.split("\n", 1)[1] if "\n" in block else block
+    return " ".join(body.split())
+
+
+def _history_commands(block):
+    """Every command s-expression in a turn, e.g. (mcity-trade "crystal 50 X")."""
+    return re.findall(r'\((?:mcity-[a-z-]+|send|pin|remember|query|shell|episodes)'
+                      r'(?:\s+"[^"]*")?\)', block)
+
+
+def rankedHistory(history_file, budget, repeat_cap=2):
+    """Recent history with runaway repetition capped, newest-biased.
+
+    Replaces a raw `read_file_tail`. Tail-truncation selects by POSITION, so a
+    loop that repeats one failing command fills the window with copies of its
+    own mistake and the model imitates the majority pattern. Measured on the
+    live agent, the 30000-byte tail held
+
+        (mcity-trade "to_go_food 50 Central Mart Outlet")   x13   <- all failed
+        (mcity-trade "Central Mart Outlet to_go_food 50")   x2    <- all failed
+        the correct "crystal 50 ..." form                    x0
+
+    so every exemplar in context was wrong, and no improvement to the merchant
+    listing could outvote fifteen of them.
+
+    Turns are walked newest-first. A turn is kept if it still carries something
+    worth seeing: a command we have not already shown `repeat_cap` times. Turns
+    that are pure repetition are dropped whole - never edited, so nothing in
+    the record is falsified - and the drop is stated in the header."""
+    try:
+        budget = int(budget)
+    except (TypeError, ValueError):
+        budget = 30000
+    try:
+        text = Path(history_file).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+    blocks = _history_blocks(text)
+    if not blocks:
+        return text[-budget:] if budget > 0 else ""
+
+    seen_commands, chosen, used = {}, [], 0
+    for block in reversed(blocks):
+        commands = _history_commands(block)
+        # A turn with no recognisable command still carries prose worth keeping.
+        if commands and all(seen_commands.get(c, 0) >= repeat_cap for c in commands):
+            continue
+        if used + len(block) > budget:
+            break
+        for command in commands:
+            seen_commands[command] = seen_commands.get(command, 0) + 1
+        chosen.append(block)
+        used += len(block)
+
+    shown, total = len(chosen), len(blocks)
+    chosen.reverse()                                   # back to chronological
+    body = "".join(chosen)
+    if shown < total:
+        body = (f'("history" ; {shown} of {total} turns shown, newest first; '
+                f'turns repeating an already-shown command {repeat_cap}x are '
+                f'omitted)\n' + body)
+    return body
+
+
 if __name__ == "__main__":
     test_omegaclaw_version()
     test_balance_parenthesis()
