@@ -1130,3 +1130,33 @@ def test_the_header_counts_only_people_who_can_hear_a_reply(control):
     result = _check(mc.threads())
     assert "waiting-reachable=0" in result
     assert "asleep=yes" in result, "the row must still say why"
+
+
+def test_the_repeat_refusal_points_at_someone_reachable(control):
+    """The old advice - answer a mine=no row - is the exact instruction that
+    trapped the agent: it looped on threads while 56 reachable agents stood
+    nearby, because everyone owing it a reply was asleep or in do-not-disturb."""
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
+    for _ in range(mc._REPEAT_REFUSE_AT + 2):
+        mc.threads()
+    result = _check(mc.threads())
+    assert result.startswith("MCITY-THREADS-FAILED reason=repeat")
+    assert "Nobody waiting can hear you" in result
+    assert "cmd=mcity-speak user-agent-awake" in result
+
+
+def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(control):
+    """threads() recomputes the waiting list on every call, so the fixture has to
+    carry a genuinely waiting counterpart rather than a pre-seeded one."""
+    waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
+                            "pendingRecipientAgentId": "agent-1",
+                            "preview": "still waiting on you tonight"}]}
+    for _ in range(mc._REPEAT_REFUSE_AT + 2):
+        control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+        mc.threads()
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    result = _check(mc.threads())
+    assert mc._WAITING["ids"] == ["agent-2"]
+    assert "answer a row whose mine=no" in result
+    assert "Nobody waiting can hear you" not in result

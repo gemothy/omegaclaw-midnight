@@ -594,12 +594,24 @@ def _suppress_repeat(verb, result):
             # only thing in this protocol the agent cannot mistake for progress.
             # The counter clears the moment the body changes or any action lands,
             # so a genuine need to look is never blocked twice.
+            # The advice has to match the situation. When nobody waiting can
+            # hear a reply, telling the agent to answer a mine=no row is the
+            # exact instruction that trapped it: it looped on threads while 56
+            # reachable agents stood nearby. Hand it a copyable command instead,
+            # the way the merchant cmd= and the escape hint do.
+            if verb == "THREADS" and not _WAITING.get("ids"):
+                opener = _reachable_opener()
+                nudge = (f"Nobody waiting can hear you. {opener}" if opener
+                         else "Nobody waiting can hear you, so eat, work or "
+                              "trade instead")
+            else:
+                nudge = ("Take a world action now: answer a row whose mine=no "
+                         "with mcity-speak, or eat, work or trade")
             return _failed(verb, "repeat",
                            f"{head} and it has not changed for {age}s across "
                            f"{prev['n'] + 1} reads - this read is refused because "
-                           "looking again cannot change it. Take a world action "
-                           "now: answer a row whose mine=no with mcity-speak, or "
-                           "eat, work or trade. Reading is not one of the choices")
+                           f"looking again cannot change it. {nudge}. Reading is "
+                           "not one of the choices")
         return (f"{head} unchanged for {age}s across {prev['n'] + 1} reads; "
                 "re-reading cannot change it, so act instead of looking again")
     except Exception:      # noqa: BLE001 - never break a skill over an optimisation
@@ -1206,6 +1218,28 @@ def _can_be_reached(agent_id):
     if known and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
         return known[0]
     return None
+
+
+def _reachable_opener():
+    """A copyable opener aimed at someone who can actually hear it.
+
+    Live: the agent was idle with 56 reachable agents nearby and spoke to none of
+    them, because every thread it was told to answer belonged to somebody asleep
+    or in do-not-disturb and it never reached the step that starts a new
+    conversation. Naming a skill did not move it before; a whole command did."""
+    try:
+        best = None
+        for agent_id, (can, at) in _CAN_SPEAK.items():
+            if can and (_now_ms() - at) <= _CAN_SPEAK_TTL_MS:
+                best = agent_id
+                break
+        if best is None:
+            return ("Call mcity-agents and speak to someone showing "
+                    "can-speak=yes")
+        return (f"Start a conversation with someone who can: "
+                f"cmd=mcity-speak {best} <your sentence>")
+    except Exception:      # noqa: BLE001 - a hint must never break a skill
+        return None
 
 
 def _escape_command():
