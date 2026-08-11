@@ -51,8 +51,19 @@ maxFeedback: 12000
 maxRecallItems: 20
 # Lines returned by `episodes`
 maxEpisodeRecallLines: 20
-# Tail of `memory/history.metta` included in the prompt (chars)
-maxHistory: 8000
+# History included in the prompt (chars, measured BEFORE escaping).
+# The prompt is what decides how fast the agent can answer anybody: in a world
+# where a thread dies after about sixty seconds, every second of prefill is a
+# second somebody waits. Measured at 8000: history was 15282 characters of a
+# 28137 character prompt - 54% - because escaping inflates it ("_quote_" for a
+# quote, "_newline_" for a newline), and with prefix caching the static blocks
+# above it are reused while this is re-prefilled every single turn.
+#
+# 4000 keeps roughly ninety turns, which is far more than the agent has ever
+# used well: this session's repeated finding was that history teaches habits
+# rather than facts - idle reports, retired skills, its own status updates - and
+# the durable facts live in the roster store and on the vitals line instead.
+maxHistory: 4000
 # `Local` (Python-side model) or `OpenAI` (requires `OPENAI_API_KEY`)
 embeddingprovider: Local
 

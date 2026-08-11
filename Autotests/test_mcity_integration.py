@@ -812,6 +812,15 @@ def test_the_loop_cadence_suits_a_live_world():
     cfg = (repo / "config" / "config.yaml").read_text()
     assert "wakeupInterval: 1\n" in cfg, "the literal in loop.metta is not the knob"
     assert "maxWakeLoops: 50" in cfg
+    # The history budget sets decision latency, and the reference must not drift
+    # from it: it is the part re-prefilled on every turn.
+    import re as _re
+    reference = (repo / "docs" / "reference-configuration.md").read_text()
+    actual = _re.search(r"^maxHistory:\s*(\d+)", cfg, _re.M)
+    documented = _re.search(r"\|\s*`maxHistory`\s*\|\s*(\d+)", reference)
+    assert actual and documented and actual.group(1) == documented.group(1), (
+        f"maxHistory is {actual and actual.group(1)} but the reference says "
+        f"{documented and documented.group(1)}")
 
 
 def test_the_documented_cadence_matches_the_shipped_cadence():

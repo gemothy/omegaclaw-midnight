@@ -30,7 +30,7 @@ This reads a command-line override via `argk` (`name=value` on the MeTTa command
 | `maxFeedback` | 50000 (chars) | Ceiling on `LAST_SKILL_USE_RESULTS` text fed back into the prompt. |
 | `maxRecallItems` | 20 | Items returned by `query`. |
 | `maxEpisodeRecallLines` | 20 | Lines returned by `episodes`. |
-| `maxHistory` | 30000 (chars) | Tail of `memory/history.metta` included in the prompt. |
+| `maxHistory` | 4000 (chars) | History included in the prompt, measured before escaping. Upstream is 30000. Escaping roughly doubles it in the prompt, and with prefix caching this is the part re-prefilled every turn, so it sets the decision latency. |
 | `embeddingprovider` | `Local` | `Local` (Python-side model) or `OpenAI`. |
 
 ## Channels (`src/channels.metta`, `initChannels`)
