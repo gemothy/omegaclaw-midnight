@@ -2395,3 +2395,28 @@ def test_moving_somewhere_else_is_untouched(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
     _check(mc.move_area("bison-valley"))
     assert control.actions
+
+
+def test_a_one_second_action_does_not_block_a_reply(control):
+    """The agent is engaged 80% of the time but busy-for reads 1 or 2 seconds -
+    tiny actions, back to back - while this refusal held speech back for a thirty
+    second probe window. Blocking a conversation for half a minute to save a
+    round trip costing milliseconds is the wrong way round."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "engaged": True, "busy_for": 1})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._last_self_probe_ms = mc._now_ms()
+    _check(mc.speak("user-agent-abc hello there"))
+    assert control.actions, "a one second action must not silence the agent"
+
+
+def test_a_long_action_still_holds_speech_back(control):
+    """The rule earns its place when there is real time left: the world refuses
+    speech from a mid-action agent, measured 50 times out of 50."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "engaged": True, "busy_for": 40})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._last_self_probe_ms = mc._now_ms()
+    result = _check(mc.speak("user-agent-abc hello there"))
+    assert result.startswith("MCITY-SPEAK-FAILED reason=self_engaged")
+    assert not control.actions

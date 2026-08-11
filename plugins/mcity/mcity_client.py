@@ -452,6 +452,7 @@ _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outr
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
            "status": None, "busy_for": None, "engaged": False, "space_kind": None}
 _SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
+_SELF_ENGAGED_MIN_S = 3        # below this the action ends before the refusal helps
 _last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
 VITALS_REFRESH_MS = 30000      # re-read vitals at most this often
@@ -3760,8 +3761,16 @@ def speak(arg=None):
         # this existed it silenced the agent for hours: it never applies when
         # somebody reachable is waiting on a reply, and it always lets an attempt
         # through every _SELF_PROBE_MS so the world can prove us wrong.
+        # Only worth refusing for an action with real time left on it. Measured:
+        # the agent is engaged 80% of the time but busy-for reads 1 or 2 seconds
+        # - the actions are tiny and back to back - while this refusal held
+        # speech back for a thirty second probe window. Blocking a conversation
+        # for half a minute to save a round trip that costs milliseconds is the
+        # wrong way round, and it fired 26 times in eight minutes.
         global _last_self_probe_ms
-        if (_VITALS.get("engaged") and _VITALS.get("at_ms")
+        left = _VITALS.get("busy_for")
+        long_action = left is None or left > _SELF_ENGAGED_MIN_S
+        if (_VITALS.get("engaged") and long_action and _VITALS.get("at_ms")
                 and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS
                 and not _someone_is_waiting()
                 and (_now_ms() - _last_self_probe_ms) < _SELF_PROBE_MS):
