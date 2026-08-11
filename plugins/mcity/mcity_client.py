@@ -442,7 +442,7 @@ _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-           "status": None, "busy_for": None, "engaged": False, "district": None}
+           "status": None, "busy_for": None, "engaged": False, "space_kind": None}
 _SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
 _last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
@@ -467,7 +467,7 @@ def reset_runtime_state():
     _VITALS.clear()
     _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
                     "status": None, "busy_for": None, "engaged": False,
-                    "district": None})
+                    "space_kind": None})
     globals().update(_vitals_refreshing=False, _can_speak_at_ms=0,
                      _can_speak_refreshing=False, _waiting_refresh_at_ms=0,
                      _waiting_refreshing=False, _last_self_probe_ms=0,
@@ -492,9 +492,13 @@ def _harvest_vitals(payload):
         # is still the district. Without this the harness told the agent to
         # travel to central while it was already in central, and the world
         # answered "agent is already in district central".
+        # currentSpace.kind is what matters, not its id: inside a building the id
+        # is just the building again - identical to position.spaceId - which is
+        # why comparing a destination against it never detected being indoors.
+        # kind="interior" says the way out is the door, whatever the destination.
         space_now = payload.get("currentSpace")
-        if isinstance(space_now, dict) and space_now.get("id"):
-            _VITALS["district"] = str(space_now["id"])
+        if isinstance(space_now, dict) and space_now.get("kind"):
+            _VITALS["space_kind"] = str(space_now["kind"])
         if isinstance(hunger, dict) and hunger.get("state"):
             _VITALS["hunger"] = str(hunger.get("state"))
             if hunger.get("value") is not None:
@@ -1516,7 +1520,11 @@ def _travel_to_people_command():
     spaceId, so this turns that into an instruction."""
     try:
         here = _VITALS.get("space")
-        district = _VITALS.get("district")
+        if _VITALS.get("space_kind") is None:
+            # Only the context endpoint carries it, and the vitals refresh reads
+            # needs, so without this the indoor check never had its input.
+            _skill_read("VITALS", "context")
+        indoors = (_VITALS.get("space_kind") or "").lower() == "interior"
         if not _AWAKE_PLACES:
             # Nothing recorded yet: the cache fills from roster reads, and the
             # agent rarely calls mcity-agents on its own. One bounded read.
@@ -1530,12 +1538,12 @@ def _travel_to_people_command():
                 best, count = space, seen
         if not best or not ID_RE.match(best):
             return None
-        if best == district:
-            # Already in that district, just not in that space - we are indoors.
-            # Travelling would be refused with "agent is already in district X";
-            # the way out of a building is the door.
-            return (f"{count} free agents are out in {best}, but you are inside a "
-                    f"building. Step outside: cmd=mcity-exit-building")
+        if indoors:
+            # Nowhere outside is in the areas list while we are in an interior -
+            # measured: 'central' held 55 free agents and did not appear at all -
+            # and travelling from indoors is refused. The door comes first.
+            return (f"{count} free agents are out in {best}, and you are inside a "
+                    f"building. Step outside first: cmd=mcity-exit-building")
         payload, error = _skill_read("VITALS", "areas")
         if error is None:
             for item in (_find_list(payload, "areas") or []):

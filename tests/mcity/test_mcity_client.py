@@ -1572,7 +1572,7 @@ def test_being_indoors_is_told_to_use_the_door_not_the_map(control):
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
-                       "district": "central"})
+                       "space_kind": "interior"})
     hint = mc._travel_to_people_command()
     assert "cmd=mcity-exit-building" in hint, hint
     assert "travel-district" not in hint, "that call is refused when already there"
@@ -1587,17 +1587,21 @@ def test_a_genuinely_different_district_still_gets_a_travel_command(control):
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central",
-                       "district": "central"})
+                       "space_kind": "district"})
     hint = mc._travel_to_people_command()
     assert "harbour" in hint and "cmd=mcity-" in hint
 
 
-def test_the_district_is_harvested_from_the_world(control):
-    mc._VITALS["district"] = None
+def test_the_space_kind_is_harvested_from_the_world(control):
+    """kind is the useful field: inside a building currentSpace.id is just the
+    building again, identical to position.spaceId, which is why comparing a
+    destination against it never detected being indoors."""
+    mc._VITALS["space_kind"] = None
     mc._harvest_vitals({"agent": {"position": {"spaceId": "hacker-house-interior"}},
-                        "currentSpace": {"id": "central", "kind": "district"}})
-    assert mc._VITALS["district"] == "central"
-    assert mc._VITALS["space"] == "hacker-house-interior", "the two are distinct"
+                        "currentSpace": {"id": "hacker-house-interior",
+                                         "kind": "interior"}})
+    assert mc._VITALS["space_kind"] == "interior"
+    assert mc._VITALS["space"] == "hacker-house-interior"
 
 
 def test_a_natural_reply_sharing_a_phrase_is_not_an_echo(control):
