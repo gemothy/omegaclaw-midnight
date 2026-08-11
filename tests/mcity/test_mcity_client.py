@@ -815,3 +815,25 @@ def test_thread_stays_quiet_when_we_spoke_last(control):
     result = _check(mc.thread("t1"))
     if "mine=no" not in result:
         assert "ACTION REQUIRED" not in result
+
+
+def test_split_arguments_are_rejoined_into_the_compound_form(control):
+    """The model writes (mcity-speak "user-agent-x" "hello") rather than one
+    compound string. MeTTa had no clause of that arity, so the call died in the
+    janus binding as a partial application, never reached Python, and emitted no
+    MCITY-SPEAK line - every log count read zero speaks instead of failed ones."""
+    control.on_action = lambda action: []
+    _check(mc.speak("user-agent-abc", "hello there friend"))
+    assert control.actions, "the split form must reach the world"
+    assert control.actions[-1]["targetAgentId"] == "user-agent-abc"
+    assert control.actions[-1]["text"] == "hello there friend"
+
+
+def test_split_arguments_match_the_compound_form_exactly(control):
+    """Both spellings must produce byte-identical actions: speak confirmation
+    compares payload.text against the coordinator's echo byte for byte."""
+    control.on_action = lambda action: []
+    _check(mc.speak("user-agent-abc", "hello there friend"))
+    split = control.actions[-1]
+    _check(mc.speak("user-agent-abc hello there friend"))
+    assert control.actions[-1] == split

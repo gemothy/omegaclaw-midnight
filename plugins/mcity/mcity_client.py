@@ -520,6 +520,19 @@ def _guard(verb):
     def decorator(func):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
+            # Accept the multi-argument form. The skills take ONE compound string
+            # - "<agent-id> <sentence>" for speak, "<item> <qty> <merchant>" for
+            # trade - but the model naturally writes the parts as separate quoted
+            # arguments, and MeTTa had no clause of that arity. The call then died
+            # at the janus binding with
+            #   ALERT_FAILED (domain_error py_term (partial mcity-speak (...)))
+            # before reaching Python, so it produced NO MCITY-SPEAK line at all:
+            # every outcome count read zero speaks rather than failed speaks, and
+            # the agent looked like it simply never tried. Joining here means the
+            # split form and the compound form are the same call.
+            if len(args) > 1:
+                joined = " ".join(p for p in (_text(a) for a in args) if p)
+                args = (joined,)
             try:
                 result = func(*args, **kwargs)
             except BaseException as e:  # noqa: BLE001 - the loop needs a string

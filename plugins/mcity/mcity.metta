@@ -130,3 +130,24 @@
 (= (mcity-speak $arg)         (py-call (mcity_client.speak $arg)))
 (= (mcity-trade)              (py-call (mcity_client.trade)))
 (= (mcity-trade $arg)         (py-call (mcity_client.trade $arg)))
+
+; Split-argument forms. These skills take one compound string, but the model
+; writes the parts as separate quoted arguments - (mcity-speak "user-agent-x"
+; "hello") rather than (mcity-speak "user-agent-x hello"). With no clause of
+; that arity the call failed inside the janus binding as a partial application
+; and never reached Python, so it emitted no MCITY-SPEAK line and was invisible
+; to every log count. _guard rejoins the parts, so both forms are one call.
+(= (mcity-speak $a $b)        (py-call (mcity_client.speak $a $b)))
+(= (mcity-speak $a $b $c)     (py-call (mcity_client.speak $a $b $c)))
+(= (mcity-speak $a $b $c $d)  (py-call (mcity_client.speak $a $b $c $d)))
+(= (mcity-trade $a $b)        (py-call (mcity_client.trade $a $b)))
+(= (mcity-trade $a $b $c)     (py-call (mcity_client.trade $a $b $c)))
+(= (mcity-trade $a $b $c $d)  (py-call (mcity_client.trade $a $b $c $d)))
+(= (mcity-thread $a $b)       (py-call (mcity_client.thread $a $b)))
+(= (mcity-move-area $a $b)    (py-call (mcity_client.move_area $a $b)))
+(= (mcity-move-agent $a $b)   (py-call (mcity_client.move_agent $a $b)))
+(= (mcity-move-tile $a $b)    (py-call (mcity_client.move_tile $a $b)))
+(= (mcity-travel-district $a $b) (py-call (mcity_client.travel_district $a $b)))
+(= (mcity-enter-building $a $b)  (py-call (mcity_client.enter_building $a $b)))
+(= (mcity-harvest $a $b)      (py-call (mcity_client.harvest $a $b)))
+(= (mcity-sleep $a $b)        (py-call (mcity_client.sleep_action $a $b)))
