@@ -36,12 +36,21 @@ from dockerlogs import read_window
 READ_SKILLS = (
     "mcity-threads", "mcity-thread", "mcity-agents", "mcity-needs",
     "mcity-inventory", "mcity-context", "mcity-areas", "mcity-merchants",
-    "mcity-recent-events", "mcity-status", "mcity-inventory",
+    "mcity-recent-events", "mcity-status", "mcity-navigation",
 )
 ACT_SKILLS = (
     "mcity-speak", "mcity-work", "mcity-eat", "mcity-trade", "mcity-harvest",
-    "mcity-move-area", "send",
+    "mcity-move-area", "mcity-travel-district", "mcity-enter-building",
+    "mcity-exit-building", "mcity-sleep", "send",
 )
+
+# Anything the agent actually invoked that we have not classified. Silently
+# dropping unknown skills is how this script under-reported once already: the
+# four navigation skills were added to the plugin and simply vanished from the
+# totals until they were listed here.
+def unclassified(counts):
+    known = set(READ_SKILLS) | set(ACT_SKILLS)
+    return {name: n for name, n in counts.items() if name not in known}
 
 _SKILL_RE = re.compile(r"\((mcity-[a-z-]+|send)\b")
 
@@ -111,6 +120,10 @@ def main(argv=None):
     for skill, n in result["counts"].items():
         kind = "read" if skill in READ_SKILLS else "act"
         print(f"  {skill:<20}{n:>7}   {kind}")
+    stray = unclassified(result["counts"])
+    if stray:
+        print("\nUNCLASSIFIED (not counted in either total): "
+              + ", ".join(f"{k} x{v}" for k, v in stray.items()))
     print(f"\nreads {result['reads']}  acts {result['acts']}  "
           f"read ratio {result['read_ratio']:.1%}")
     if result["read_ratio"] > 0.80:
