@@ -954,3 +954,20 @@ def test_the_areas_skill_is_not_offered_to_the_agent():
     assert "(= (mcity-areas)" in metta, "the binding stays: history may still call it"
     assert 'VITALS", "areas"' in (repo / "plugins" / "mcity" / "mcity_client.py").read_text(), \
         "the harness must still read areas to compute a route"
+
+
+def test_the_context_skill_is_not_offered_either():
+    """mcity-context became the top call at 34 in ten minutes once areas was
+    retired, and vitals already carries everything it returns: where the agent
+    is, its status, its hunger and its holdings. The plugin still reads context
+    internally - currentSpace.kind is how it knows it is indoors - which is not
+    a turn the agent has to spend."""
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    metta = (repo / "plugins" / "mcity" / "mcity.metta").read_text()
+    assert "add-skill mcity-context" not in metta
+    assert "(= (mcity-context)" in metta, "the binding stays for replayed history"
+    client = (repo / "plugins" / "mcity" / "mcity_client.py").read_text()
+    assert '"VITALS", "context"' in client, "the harness still reads it itself"
+    helper = (repo / "src" / "helper.py").read_text()
+    assert '"mcity-context"' in helper, "and history must stop teaching it"

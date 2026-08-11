@@ -435,7 +435,7 @@ def _history_commands(block):
 # it - and it does: mcity-areas was unregistered and still ran 27 times in the
 # next window, because its own recent turns were full of it. Feeding those back
 # teaches the habit that removing the skill was meant to end.
-RETIRED_COMMANDS = ("mcity-areas",)
+RETIRED_COMMANDS = ("mcity-areas", "mcity-context")
 
 # Turns whose whole content was telling the operator nothing. The second group
 # is the unsolicited self-status report - "I am currently in the
