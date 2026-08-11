@@ -9,14 +9,32 @@
 (= (spamShield) (empty)) ; TODO: this parameter is considered deprecated
 
 (= (initLoop)
+   ; CADENCE IS TUNED FOR A LIVE WORLD, not for a chat assistant.
+   ;
+   ; &loops is a budget of decision cycles. The loop spends it, then goes dormant
+   ; and refills only when wakeupInterval has passed. Upstream that is 1 extra
+   ; loop every 600 seconds, which is right for an agent that waits on a human
+   ; and wrong for Midnight City: a thread there dies after about sixty seconds,
+   ; so a ten minute nap means every person who writes is answered far too late
+   ; or not at all. Measured on this fork before the change: the agent made its
+   ; last decision at 06:18:48 and was still asleep at 06:25:18, iterating once a
+   ; second and doing nothing - absent for well over ninety percent of the time,
+   ; which no amount of reachability work could compensate for.
+   ;
+   ; It also invalidated my own throughput readings: bursts measured right after
+   ; a restart were spending the startup budget of 50, not a steady state.
+   ;
+   ; 5 loops every 15 seconds is near-continuous while still bounded, so a
+   ; runaway cannot spin the GPU flat out forever. Each decision costs about five
+   ; seconds of a short generation, and the box stays well inside the memory cap.
    (progn (configure maxNewInputLoops 50) ;20
-          (configure maxWakeLoops 1)
+          (configure maxWakeLoops 5)
           (configure spamShield False)
           (configure sleepInterval 1) ;10
           (configure provider Anthropic)
           (configure maxOutputToken 6000)
           (configure reasoningMode medium)
-          (configure wakeupInterval 600) ;600=10 minutes
+          (configure wakeupInterval 15) ;upstream 600=10 minutes; see the note above
           (configure memoryDirectory ./)
           (change-state! &prevmsg "")
           (change-state! &lastresults "")

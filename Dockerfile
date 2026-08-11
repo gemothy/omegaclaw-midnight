@@ -48,6 +48,9 @@ COPY --chown=root:root src/helper.py                   ${CORE}/src/helper.py
 # together: memory.metta py-calls helper.rankedHistory, and a core file that is
 # not COPYed here silently does not reach the image.
 COPY --chown=root:root src/memory.metta                ${CORE}/src/memory.metta
+# loop.metta carries the decision cadence. It was NOT shipped before, so the
+# image silently kept upstream's ten minute dormancy however the fork was edited.
+COPY --chown=root:root src/loop.metta                  ${CORE}/src/loop.metta
 COPY --chown=root:root channels/telegram.py                ${CORE}/channels/telegram.py
 COPY --chown=root:root profile/policy.yaml             ${CORE}/profile/policy.yaml
 COPY --chown=root:root overlay/prompt.txt              ${CORE}/memory/prompt.txt

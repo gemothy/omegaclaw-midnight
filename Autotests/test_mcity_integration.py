@@ -791,3 +791,18 @@ def test_busy_never_silences_the_agent(monkeypatch):
         mc._VITALS.update({"at_ms": mc._now_ms(), "status": status})
         mc.speak("user-agent-x hello there")
     assert called == ["SPEAK", "SPEAK", "SPEAK"], "no status may hold a reply back"
+
+
+def test_the_loop_cadence_suits_a_live_world():
+    """A thread in Midnight City dies after about sixty seconds. Upstream's
+    cadence - one extra loop every 600 seconds - left the agent asleep for over
+    ninety percent of the time: measured last decision 06:18:48, still asleep at
+    06:25:18. This locks the fork's cadence so an upstream merge cannot quietly
+    restore it, and asserts loop.metta is actually shipped, which it was not."""
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    loop = (repo / "src" / "loop.metta").read_text()
+    assert "(configure wakeupInterval 15)" in loop
+    assert "(configure maxWakeLoops 5)" in loop
+    dockerfile = (repo / "Dockerfile").read_text()
+    assert "src/loop.metta" in dockerfile, "an unshipped file changes nothing"
