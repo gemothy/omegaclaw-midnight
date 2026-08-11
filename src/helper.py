@@ -430,6 +430,24 @@ def _history_commands(block):
                       r'(?:\s+"[^"]*")?\)', block)
 
 
+_IDLE_SEND_RE = re.compile(
+    r"no new input|nothing to report|standing by|awaiting (?:your )?instructions"
+    r"|no new messages?|idle(?: status)? report", re.I)
+
+
+def _is_idle_report(block, commands):
+    """True for a turn whose whole content was telling the operator nothing.
+
+    Deliberately narrow: only when EVERY command in the turn is a send, and the
+    text matches one of the known do-nothing phrases. A send that answers a real
+    message, or reports a world outcome, is exactly what the channel is for and
+    must survive."""
+    # _history_commands keeps the leading paren: "(send \"...\")".
+    if not commands or any(not c.lstrip("( ").startswith("send") for c in commands):
+        return False
+    return bool(_IDLE_SEND_RE.search(block))
+
+
 def rankedHistory(history_file, budget, repeat_cap=2):
     """Recent history with runaway repetition capped, newest-biased.
 
@@ -465,6 +483,16 @@ def rankedHistory(history_file, budget, repeat_cap=2):
     seen_commands, chosen, used = {}, [], 0
     for block in reversed(blocks):
         commands = _history_commands(block)
+        # An idle report is not a turn worth imitating. Measured: after a prompt
+        # edit weakened the ban on them, the agent emitted
+        # (send "No new input received.") 90 times in four minutes, and restoring
+        # the prompt text alone did not stop it - the newest turns in its own
+        # history were all idle reports, and it copies its last turn. Repetition
+        # capping does not help, because two shown copies are still the two most
+        # recent things it did. Dropping them entirely means the newest turn it
+        # can see is always one where something actually happened.
+        if _is_idle_report(block, commands):
+            continue
         # A turn with no recognisable command still carries prose worth keeping.
         if commands and all(seen_commands.get(c, 0) >= repeat_cap for c in commands):
             continue

@@ -54,3 +54,44 @@ def test_missing_file_is_not_fatal():
 def test_untimestamped_content_falls_back_to_tail(tmp_path):
     f = tmp_path / "h.metta"; f.write_text("no blocks here at all")
     assert "no blocks" in helper.rankedHistory(str(f), 30000)
+
+
+def test_idle_reports_are_not_fed_back_as_examples(tmp_path):
+    """After a prompt edit weakened the ban on them, the agent emitted
+    (send "No new input received.") 90 times in four minutes, and restoring the
+    prompt text alone did not stop it: the newest turns in its own history were
+    all idle reports, and it copies its last turn. Repetition capping cannot fix
+    that - two shown copies are still the two most recent things it did."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        + '("2026-08-11 10:00:10" \n ((send "No new input received.")) \n)\n' * 20,
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "No new input" not in body, "an idle report must never be an exemplar"
+    assert "mcity-work" in body, "the real turn must survive"
+
+
+def test_a_send_that_says_something_is_kept(tmp_path):
+    """Narrow by design: a send answering a real message, or reporting a world
+    outcome, is what the channel exists for."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((send "Traded 50 crystal, confirmed by the world")) \n)\n'
+        '("2026-08-11 10:00:10" \n ((send "Yes - I am at the hacker house tonight")) \n)\n',
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "Traded 50 crystal" in body
+    assert "hacker house tonight" in body
+
+
+def test_a_mixed_turn_is_kept(tmp_path):
+    """Only turns whose ENTIRE content was a do-nothing send are dropped."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-work) (send "No new input received.")) \n)\n',
+        encoding="utf-8")
+    assert "mcity-work" in helper.rankedHistory(str(history), 30000)
