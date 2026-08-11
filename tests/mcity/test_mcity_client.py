@@ -1095,3 +1095,22 @@ def test_the_escape_hint_carries_a_copyable_command(control):
         result = mc.speak("user-agent-abc hello there")
     assert "cmd=mcity-move-area forest-worksite" in result, result
     assert "mines-worksite" not in result, "moveAreaAvailable=false must be skipped"
+
+
+@pytest.mark.parametrize("reason,expect_unreachable", [
+    ("target is sleeping", True),
+    ("target is in do not disturb mode", True),
+    ("speaker is in do not disturb mode", False),
+])
+def test_target_side_and_speaker_side_refusals_are_told_apart(control, reason,
+                                                              expect_unreachable):
+    """Matching 'do not disturb' alone counted the target's status against
+    ourselves: the agent was told to walk away and end its own activity when the
+    real answer was to answer somebody else."""
+    seq = itertools.count()
+    control.on_action = lambda action: [
+        event(f"e{next(seq)}", "action_failed", actionKind="speak",
+              targetAgentId="user-agent-abc", reason=reason)]
+    mc.speak("user-agent-abc hello there")
+    assert (mc._can_be_reached("user-agent-abc") is False) is expect_unreachable
+    assert (mc._dnd_streak > 0) is (not expect_unreachable)

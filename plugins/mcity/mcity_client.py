@@ -2969,9 +2969,17 @@ def speak(arg=None):
         # the fact has to be captured here, where it can be acted on, rather than
         # left for the model to notice and trust.
         lowered = (result or "").lower()
-        if sent.get("agent_id") and "sleeping" in lowered:
+        # THREE distinct world refusals, and the difference decides everything:
+        #   "target is sleeping"                -> that person, unreachable
+        #   "target is in do not disturb mode"  -> that person, unreachable
+        #   "speaker is in do not disturb mode" -> us, and no other target helps
+        # Matching "do not disturb" alone counted the target-side one against
+        # ourselves and told the agent to walk away when the real answer was to
+        # answer somebody else.
+        if sent.get("agent_id") and ("target is sleeping" in lowered
+                                     or "target is in do not disturb" in lowered):
             _ASLEEP[sent["agent_id"]] = _now_ms()
-        if "do not disturb" in lowered:
+        elif "speaker is in do not disturb" in lowered:
             # Speaker-side: a different target cannot fix it, so the candidate
             # list below would be misleading on its own.
             _dnd_streak += 1
