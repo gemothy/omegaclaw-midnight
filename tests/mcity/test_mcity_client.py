@@ -2310,3 +2310,25 @@ def test_talk_to_uses_entries_from_the_newest_scan(control):
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
     assert mc._best_person_to_talk_to() == "user-agent-free"
+
+
+def test_a_scan_does_not_invalidate_its_own_entries(control):
+    """The per-agent entries are written while the scan runs, so stamping the
+    scan with its FINISH time made every one of them older than it - and the
+    freshness test then excluded the lot, silently emptying talk-to= entirely."""
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "status": "idle", "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert mc._REACHABLE["n"] == 1
+    # Assert the INVARIANT rather than simulating skew: every entry a scan wrote
+    # must be at least as new as the scan itself. The original bug read the clock
+    # per entry and again at the end, so a real scan - long enough to matter -
+    # made its own entries look stale and talk-to= silently emptied. In-process
+    # both reads land in the same millisecond, which is why it hid here.
+    stamp = mc._CAN_SPEAK["user-agent-free"][1]
+    assert stamp >= mc._REACHABLE["at_ms"], \
+        "a scan must never be newer than the entries it wrote"
+    assert mc._best_person_to_talk_to() == "user-agent-free"
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    assert "talk-to=user-agent-free" in mc._vitals_line()

@@ -1419,7 +1419,7 @@ def _entry_reachable(entry):
     return bool(entry.get("can_speak")) and not _entry_engaged(entry)
 
 
-def _note_can_speak(entry):
+def _note_can_speak(entry, at_ms=None):
     """Remember the world's own verdict on whether an agent can be spoken to.
 
     canSpeak is authoritative and is NOT implied by status: a live roster showed
@@ -1436,7 +1436,11 @@ def _note_can_speak(entry):
         # world put US in - speaker-side do-not-disturb vanished the moment we
         # moved away and went idle - so the rule is symmetric: an agent inside a
         # live engagement cannot be reached, whatever the flag says.
-        _CAN_SPEAK[agent_id] = (_entry_reachable(entry), _now_ms())
+        # One timestamp for a whole scan. Reading the clock per entry and again
+        # for the scan made every entry a few milliseconds older than the scan
+        # that wrote it, so the freshness test excluded the lot and talk-to=
+        # silently emptied.
+        _CAN_SPEAK[agent_id] = (_entry_reachable(entry), _now_ms() if at_ms is None else at_ms)
         engaged = _entry_engaged(entry)
         # Where the free people are. canSpeak is really "on the same map": every
         # one of 52 same-map agents had it true and every one of 24 off-map
@@ -1767,17 +1771,18 @@ def _refresh_can_speak_if_unknown(agent_ids, force=False):
                 return
             _can_speak_refreshing = True
         try:
+            scan_at = _now_ms()
             payload, error = _skill_read("VITALS", "agents")
             if error is None:
                 entries = [_parse_agent(item)
                            for item in (_find_list(payload, "agents") or [])
                            if isinstance(item, dict)]
                 for entry in entries:
-                    _note_can_speak(entry)
+                    _note_can_speak(entry, scan_at)
                 if entries:
                     _REACHABLE["n"] = sum(1 for e in entries if _entry_reachable(e)
                                           and _looks_speakable(e["id"]))
-                    _REACHABLE["at_ms"] = _now_ms()
+                    _REACHABLE["at_ms"] = scan_at
             _can_speak_at_ms = _now_ms()
         finally:
             with _lock:
@@ -2525,7 +2530,7 @@ def agents():
         if not isinstance(item, dict):
             continue
         entry = _parse_agent(item)
-        _note_can_speak(entry)
+        _note_can_speak(entry, now)
         if isinstance(entry["name"], str):
             _remember_inbound(entry["name"])
         roster.append(entry)
@@ -2535,7 +2540,7 @@ def agents():
     # it exists to make unnecessary.
     _REACHABLE["n"] = sum(1 for entry in roster
                           if _entry_reachable(entry) and _looks_speakable(entry["id"]))
-    _REACHABLE["at_ms"] = _now_ms()
+    _REACHABLE["at_ms"] = now
 
     # Ground every observation BEFORE rendering anything: the store keeps all
     # the fields, so nothing shown or dropped below is lost to the roster.
@@ -3847,10 +3852,10 @@ def _speak_candidates(limit=3):
     now = _now_ms()
     roster = [_parse_agent(item) for item in items if isinstance(item, dict)]
     for entry in roster:
-        _note_can_speak(entry)
+        _note_can_speak(entry, now)
     _REACHABLE["n"] = sum(1 for entry in roster
                           if _entry_reachable(entry) and _looks_speakable(entry["id"]))
-    _REACHABLE["at_ms"] = _now_ms()
+    _REACHABLE["at_ms"] = now
     reachable = {entry["id"]: entry for entry in roster if entry["id"]}
     if AgentObservation is not None:
         observed = [_agent_observation(entry, now) for entry in roster if entry["id"]]
