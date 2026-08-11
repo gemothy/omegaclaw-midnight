@@ -222,6 +222,11 @@ def test_results_are_capped(control):
     flood = {"messages": [{"sequenceNo": i, "agentId": "agent-9",
                            "text": "spam " * 60} for i in range(200)]}
     control.force("/api/threads/t1/messages", 200, json.dumps(flood).encode())
+    # Arrange the grounding this test asserts on. It used to inherit populated
+    # vitals from whichever test ran before it, which is why it passed alone and
+    # failed once the suites shared a process.
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)",
+                       "space": "downtown", "status": "idle"})
     result = _check(mc.thread("t1"))
     # The truncation must still be announced, but it is no longer the LAST thing
     # in the result: the vitals line is appended after the body is capped, on

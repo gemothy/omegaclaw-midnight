@@ -777,7 +777,13 @@ def test_speak_is_refused_while_busy(monkeypatch):
     world's answer never says how long to wait, so the agent kept falling through
     to starting ANOTHER action and stayed unreachable."""
     called = []
-    monkeypatch.setattr(mc, "_mutate", lambda v, b: called.append(v) or "MCITY-SPEAK-OK")
+    # Stub the pieces _mutate calls, NOT _mutate itself: the refusal lives inside
+    # build() so that read mode and bad arguments still fail for their own reason.
+    # Patching _mutate skipped build entirely and tested a seam that is now gone.
+    monkeypatch.setattr(mc, "_ensure_lease", lambda: None)
+    monkeypatch.setattr(mc, "_pace", lambda: None)
+    monkeypatch.setattr(mc, "_submit", lambda a, v: called.append(v) or "MCITY-SPEAK-OK")
+    monkeypatch.setattr(mc, "_refresh_vitals_if_stale", lambda: None)
     mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy", "busy_for": 42,
                        "hunger": "normal(1)", "space": "central", "items": None})
     out = mc.speak("user-agent-x hello there")
@@ -790,7 +796,9 @@ def test_speak_is_refused_while_busy(monkeypatch):
     mc.speak("user-agent-x hello there")
     assert called == ["SPEAK"]
 
-    # Stale vitals must never block a legitimate attempt.
+    # Stale vitals must never block a legitimate attempt. In production speak
+    # refreshes first and usually learns the truth; when the refresh cannot
+    # confirm (stubbed out here), old news is not grounds to refuse.
     called.clear()
     mc._VITALS.update({"status": "busy", "at_ms": mc._now_ms() - (mc._VITALS_STALE_MS + 1000)})
     mc.speak("user-agent-x hello there")
