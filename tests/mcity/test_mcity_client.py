@@ -2291,3 +2291,22 @@ def test_a_preview_we_are_owed_is_still_guarded(control):
     control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())
     _check(mc.threads())
     assert mc._is_echo(theirs)
+
+
+def test_talk_to_never_names_somebody_a_later_scan_ruled_out(control):
+    """talk-to= named an agent three times whose newest record was canSpeak false
+    and off-map: an entry still inside its TTL but already contradicted by a
+    later full scan. Third place this drift has appeared, after the rendered
+    can-speak column and the candidate list."""
+    stale = mc._now_ms() - 1000
+    mc._CAN_SPEAK["user-agent-gone"] = (True, stale)       # believed reachable
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})  # newer scan: nobody
+    assert mc._best_person_to_talk_to() is None
+
+
+def test_talk_to_uses_entries_from_the_newest_scan(control):
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "status": "idle", "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert mc._best_person_to_talk_to() == "user-agent-free"

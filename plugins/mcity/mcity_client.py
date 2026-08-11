@@ -1589,9 +1589,15 @@ def _best_person_to_talk_to():
     cost a request."""
     try:
         now = _now_ms()
+        # A full roster scan supersedes every per-agent entry older than it. Live:
+        # talk-to= named an agent three times whose newest record was canSpeak
+        # false and off-map - an entry still inside its TTL but already
+        # contradicted by a later scan. Third place this same drift has appeared,
+        # after the rendered column and the candidate list.
+        scan_at = _REACHABLE["at_ms"] if _REACHABLE["n"] is not None else 0
         best = None
         for agent_id, (can, at) in _CAN_SPEAK.items():
-            if not can or (now - at) > _CAN_SPEAK_TTL_MS:
+            if not can or (now - at) > _CAN_SPEAK_TTL_MS or at < scan_at:
                 continue
             if not _looks_speakable(agent_id):
                 continue
