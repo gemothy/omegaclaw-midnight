@@ -423,6 +423,10 @@ _CAN_SPEAK = {}
 # bodies are ever byte-identical.
 _REACHABLE = {"n": None, "at_ms": 0}
 _ROSTER_RECHECK_MS = 30000     # how often a roster re-read is worth a turn
+# The computed route to wherever free people are, cached because vitals is
+# appended to EVERY result and the computation costs a read or two.
+_ROUTE = {"text": None, "at_ms": 0}
+_ROUTE_TTL_MS = 60000
 _last_roster_read_ms = 0
 _AWAKE_PLACES = {}
 _AWAKE_PLACES_TTL_MS = 120000
@@ -463,6 +467,7 @@ def reset_runtime_state():
     for cache in (_CAN_SPEAK, _ASLEEP, _LAST_READ, _SAID, _AWAKE_PLACES, _inbound):
         cache.clear()
     _REACHABLE.update({"n": None, "at_ms": 0})
+    _ROUTE.update({"text": None, "at_ms": 0})
     _WAITING.update({"at_ms": 0, "ids": []})
     _VITALS.clear()
     _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
@@ -626,6 +631,15 @@ def _vitals_line():
     if (_REACHABLE["n"] is not None
             and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS):
         parts.append(f"reachable={_REACHABLE['n']}")
+        # Nobody here, but somebody somewhere: carry the route on the line the
+        # agent reads every single turn. Measured: with reachable=0 it stopped
+        # calling mcity-agents entirely - as instructed - so the only code path
+        # that offered a route was a work-backoff refusal, and for four deploys
+        # running it saw no route at all while nine free agents stood in central.
+        if _REACHABLE["n"] == 0:
+            route = _cached_route()
+            if route:
+                parts.append(route)
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -1519,6 +1533,27 @@ def _promote_command(result, hint):
         return _out(head + sep + rest)
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return _out(result)
+
+
+def _cached_route():
+    """The route command, recomputed at most once per _ROUTE_TTL_MS.
+
+    vitals is appended to every result, and the underlying lookup costs a roster
+    and an areas read, so it must never run per render."""
+    try:
+        if _ROUTE["text"] is not None and (_now_ms() - _ROUTE["at_ms"]) <= _ROUTE_TTL_MS:
+            return _ROUTE["text"]
+        hint = _travel_to_people_command() or ""
+        command = ""
+        for piece in hint.split():
+            if piece.startswith("cmd=mcity-"):
+                command = " ".join(hint[hint.index(piece):].split()[:2])
+                break
+        _ROUTE["text"] = command
+        _ROUTE["at_ms"] = _now_ms()
+        return command
+    except Exception:      # noqa: BLE001 - vitals must never break a skill
+        return ""
 
 
 def _travel_to_people_command():

@@ -2056,3 +2056,43 @@ def test_stale_place_knowledge_is_refreshed_not_ignored(control):
                        "space_kind": "interior"})
     hint = mc._travel_to_people_command()
     assert hint and "central-plaza" in hint, hint
+
+
+def test_the_route_rides_on_the_line_the_agent_always_reads(control):
+    """With reachable=0 the agent stopped calling mcity-agents entirely - as
+    instructed - so the only path offering a route was a work-backoff refusal,
+    and for four deploys it saw none while nine free agents stood in central."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [{"id": "central-plaza", "kind": "park",
+                        "moveAreaAvailable": True,
+                        "anchor": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior", "hunger": "normal(9)"})
+    line = mc._vitals_line()
+    assert "reachable=0" in line
+    assert "cmd=mcity-move-area central-plaza" in line, line
+
+
+def test_the_route_is_computed_at_most_once_per_window(control):
+    """vitals is appended to every result; the lookup costs two reads."""
+    mc._ROUTE.update({"text": "cmd=mcity-move-area central-plaza",
+                      "at_ms": mc._now_ms()})
+    control.requests.clear()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
+    for _ in range(5):
+        mc._vitals_line()
+    assert not [r for r in control.requests if r[1].endswith(("/areas", "/agents"))]
+
+
+def test_no_route_token_when_somebody_is_reachable_here(control):
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    mc._REACHABLE.update({"n": 3, "at_ms": mc._now_ms()})
+    assert "cmd=mcity-move-area" not in mc._vitals_line()
