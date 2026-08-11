@@ -1216,3 +1216,31 @@ def test_the_opener_admits_when_nobody_can_be_reached(control):
     opener = mc._reachable_opener()
     assert "Nobody in the city can receive a message" in opener
     assert "work, eat or trade" in opener
+
+
+def test_an_unreachable_refusal_hands_over_a_command(control):
+    """The row already said asleep=yes and the agent spoke to them anyway: 35
+    attempts in one window, every one refused here, every target already
+    flagged. It does not act on flags or on prose - it acts on a command."""
+    mc._ASLEEP["user-agent-abc"] = mc._now_ms()
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    result = _check(mc.speak("user-agent-abc hello there"))
+    assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert "cmd=mcity-work" in result
+
+
+def test_the_command_is_eat_only_when_actually_hungry(control):
+    mc._ASLEEP["user-agent-abc"] = mc._now_ms()
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(2)",
+                       "items": "to_go_food=2"})
+    assert "cmd=mcity-eat" in _check(mc.speak("user-agent-abc hello there"))
+
+
+def test_a_reachable_waiting_person_is_named_as_a_command(control):
+    mc._ASLEEP["user-agent-abc"] = mc._now_ms()
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-awake"]})
+    mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
+    result = _check(mc.speak("user-agent-abc hello there"))
+    assert "cmd=mcity-speak user-agent-awake" in result

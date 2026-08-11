@@ -602,8 +602,7 @@ def _suppress_repeat(verb, result):
             if verb == "THREADS" and not _WAITING.get("ids"):
                 opener = _reachable_opener()
                 nudge = (f"Nobody waiting can hear you. {opener}" if opener
-                         else "Nobody waiting can hear you, so eat, work or "
-                              "trade instead")
+                         else f"Nobody waiting can hear you. {_next_action_command()}")
             else:
                 nudge = ("Take a world action now: answer a row whose mine=no "
                          "with mcity-speak, or eat, work or trade")
@@ -1227,6 +1226,18 @@ def _can_be_reached(agent_id):
     if known and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
         return known[0]
     return None
+
+
+def _next_action_command():
+    """One copyable command for a turn with no conversation available.
+
+    Chosen from what vitals already knows, so it is never advice the world will
+    refuse for a reason we could have seen: eat only when actually hungry, work
+    otherwise."""
+    hunger = (_VITALS.get("hunger") or "").lower()
+    if hunger.startswith(("hungry", "starving")) and _VITALS.get("items"):
+        return "Do this instead: cmd=mcity-eat"
+    return "Do this instead: cmd=mcity-work"
 
 
 def _reachable_opener():
@@ -3000,9 +3011,12 @@ def speak(arg=None):
         if _can_be_reached(parts[0]) is False:
             others = [i for i in _someone_is_waiting()
                       if i != parts[0] and _can_be_reached(i) is not False]
-            alt = (f" {others[0]} is waiting and CAN be reached - answer them "
-                   "instead" if others else
-                   " Nobody reachable is waiting, so take a world action instead")
+            # The row already said asleep=yes and the agent spoke to them anyway:
+            # 35 attempts in one window, every one refused here, every target
+            # already flagged. It does not act on flags or on prose telling it to
+            # do something else - it acts on a whole command. So give it one.
+            alt = (f" cmd=mcity-speak {others[0]} <your sentence>" if others
+                   else f" Nobody waiting can hear you. {_next_action_command()}")
             return None, _failed("SPEAK", "unreachable",
                                  f"the world reports {parts[0]} cannot receive a "
                                  f"message right now (asleep or away).{alt}")
