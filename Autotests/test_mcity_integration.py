@@ -504,3 +504,34 @@ def test_trade_cmd_is_copy_ready():
 
     # A partial row renders no command rather than a broken one.
     assert mc._trade_cmd({"name": "X", "trade": {}}, "X") is None
+
+
+def test_trade_inversion_is_corrected(monkeypatch):
+    """The model names the item it WANTS, not the one it hands over.
+
+    (mcity-trade "to_go_food 50 Central Mart Outlet")
+      -> not enough to_go_food to trade: have 0, need 50
+    It repeated that through two separate merchant-listing improvements, so the
+    harness now forgives it - the same way it already forgives the
+    underscore-shaped argument."""
+    terms = {"Central Mart Outlet": {"pays": "to_go_food", "takes": "crystal",
+                                     "min": 50, "batch": 50}}
+    monkeypatch.setattr(mc, "_merchant_terms", lambda name: terms.get(name))
+    sent = {}
+    monkeypatch.setattr(mc, "_mutate",
+                        lambda verb, build: (sent.update(build()[0] or {}) or "MCITY-TRADE-OK"))
+    monkeypatch.setattr(mc, "trade_enabled", lambda: True)
+    monkeypatch.setattr(mc, "_c", lambda k, d=None:
+                        100000 if k == "trade_max_quantity" else ("*",) if k == "trade_merchants" else d)
+
+    out = mc.trade("to_go_food 50 Central Mart Outlet")
+    assert sent["itemId"] == "crystal"          # corrected to what we hand over
+    assert sent["quantity"] == 50
+    assert "_corrected_from" not in sent        # never sent to the world
+    assert "corrected=" in out                  # but reported to the agent
+
+    # A correct argument is passed through untouched.
+    sent.clear()
+    out = mc.trade("crystal 50 Central Mart Outlet")
+    assert sent["itemId"] == "crystal"
+    assert "corrected=" not in out

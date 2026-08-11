@@ -1719,6 +1719,42 @@ def merchants():
     return _line("MERCHANTS", "OK", (("count", len(items)),), rows or ["- none"])
 
 
+_TERMS_CACHE = {"at": 0.0, "by_name": {}}
+_TERMS_TTL = 60.0
+
+
+def _merchant_terms(name):
+    """Trade terms for one merchant, briefly cached. None if unknown.
+
+    Bounded like every other call here: one gateway read at most per TTL, and
+    any failure returns None so trading proceeds unvalidated rather than
+    breaking."""
+    now = _now_ms() / 1000.0
+    if now - _TERMS_CACHE["at"] > _TERMS_TTL or not _TERMS_CACHE["by_name"]:
+        resp = _http("GET", "/api/skill/merchants")
+        if not resp["ok"]:
+            return None
+        items = _find_list(resp["json"], "merchants", "offers")
+        if items is None:
+            return None
+        table = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            label = _merchant_label(_get(item, "merchantName", "name"))
+            if label is None:
+                continue
+            table[label] = {
+                "pays": _get(item, "paysItemId"),      # what the merchant GIVES
+                "takes": _get(item, "itemId"),         # what we HAND OVER
+                "min": _get(item, "minQuantity"),
+                "batch": _get(item, "batchMultiple"),
+            }
+        _TERMS_CACHE["at"] = now
+        _TERMS_CACHE["by_name"] = table
+    return _TERMS_CACHE["by_name"].get(name)
+
+
 def _trade_cmd(item, name):
     """The exact mcity-trade argument for this merchant: what to hand over, at
     the smallest legal quantity, then the merchant name copied verbatim.
@@ -2388,6 +2424,8 @@ def speak(arg=None):
 
 @_guard("TRADE")
 def trade(arg=None):
+    fixups = []
+
     def build():
         if not trade_enabled():
             return None, _failed("TRADE", "disabled",
@@ -2426,11 +2464,47 @@ def trade(arg=None):
         if "*" not in allowed and merchant not in allowed:
             return None, _failed("TRADE", "disabled",
                                  "that merchant is not on the allowed list")
+        # Accept the inverted argument. The model reaches for the thing it
+        # WANTS and names that, so it emits the item the merchant PAYS rather
+        # than the one it takes:
+        #   (mcity-trade "to_go_food 50 Central Mart Outlet")
+        #   -> not enough to_go_food to trade: have 0, need 50
+        # It repeated that fifteen times across two sessions, through two
+        # separate improvements to the merchant listing. This file already
+        # forgives the underscore-shaped argument for the same reason; an
+        # unambiguous inversion is no different. Corrected here, and the
+        # correction is reported so the agent can learn the right form.
+        terms = _merchant_terms(merchant)
+        corrected = None
+        if (terms and terms.get("takes") and terms.get("pays")
+                and item_id == terms["pays"] and item_id != terms["takes"]):
+            corrected = item_id
+            item_id = terms["takes"]
+            try:
+                least = int(terms.get("min") or 0)
+                step = int(terms.get("batch") or 0)
+            except (TypeError, ValueError):
+                least, step = 0, 0
+            if quantity < least:
+                quantity = least
+            if step > 0 and quantity % step:
+                quantity += step - (quantity % step)
+            if quantity > maximum:
+                return None, _failed("TRADE", "bad_args",
+                                     f"the corrected quantity exceeds {maximum}")
+        if corrected is not None:
+            # Never travels in the action body - the world would reject an
+            # unknown field. Reported to the agent after the call instead.
+            fixups.append((corrected, item_id, quantity))
         return {"kind": "trade",
                 "merchantName": merchant,
                 "itemId": item_id,
                 "quantity": quantity}, None
     result = _mutate("TRADE", build)
+    if fixups:
+        was, now, count = fixups[-1]
+        result = _out(f"{result}\ncorrected=you named {_plain(was)}, which is what "
+                      f"this merchant GIVES; handed over {count} {_plain(now)} instead")
     if "MCITY-TRADE-FAILED" not in (result or ""):
         return result
     # The world explains the inversion perfectly - "not enough to_go_food to
