@@ -1506,20 +1506,6 @@ def test_an_unusable_agent_id_is_never_suggested(control):
     assert "nyx" not in opener
 
 
-def test_work_is_not_blocked_when_there_is_nothing_better_to_do(control):
-    """Refusing on wealth alone produced 68 refused turns in three minutes with
-    nothing accomplished, where the agent had been completing 27 work actions.
-    Blocking the only available action is a dead end, not a priority."""
-    control.on_action = lambda action: []
-    control.force("/api/skill/agents/agent-1/agents", 200,
-                  json.dumps({"agents": []}).encode())
-    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
-                       "space": "central", "items": "meme_coin=18383"})
-    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
-    _check(mc.work())
-    assert control.actions, "with nobody to talk to, earning must stay available"
-
-
 def test_the_opener_returns_nothing_rather_than_prose_to_sniff(control):
     """Callers used to test the returned sentence with startswith('Start'), so
     rewording it silently changed which command the agent was handed."""
@@ -1720,27 +1706,23 @@ def test_earned_is_silent_when_holdings_are_unknown(control):
     assert "earned=enough" in mc._vitals_line()
 
 
-def test_the_wealth_nudge_does_not_block_every_turn(control):
-    """With nobody reachable, blocking every turn produced 36 refusals and zero
-    messages in three minutes, where windows with 2-8 refusals delivered 2-4. The
-    agent reads the roster when told to and then returns to work; refusing that
-    constantly just removes the one thing it will do.
-
-    The reachable case is the opposite and is covered separately: there, work
-    walks the agent back across the city to a worksite and undoes the journey."""
+def test_work_is_refused_while_the_money_is_not_needed(control):
+    """Deliberate: the once-a-minute grace is gone. 69 prompts carried talk-to=
+    with a reachable person named, and every one was answered with mcity-work or
+    mcity-areas - not one speak. Discovery is not the problem and neither is
+    permission, so the preferred action is removed while the mission's own
+    threshold says the money is not needed."""
     control.on_action = lambda action: []
     control.force("/api/skill/agents/agent-1/agents", 200,
                   json.dumps({"agents": []}).encode())
     _check(mc.agents())
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
-                       "items": "meme_coin=18383"})
+                       "items": "meme_coin=21427"})
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
-    mc._last_rich_nudge_ms = 0
-    first = _check(mc.work())
-    assert "reason=rich_enough" in first or control.actions, first
-    before = len(control.actions)
-    _check(mc.work())
-    assert len(control.actions) > before, "and then let it work"
+    for _ in range(3):
+        result = _check(mc.work())
+        assert result.startswith("MCITY-WORK-FAILED reason=rich_enough"), result
+    assert not control.actions
 
 
 def test_the_nudge_returns_after_its_interval(control):
@@ -2164,21 +2146,6 @@ def test_work_is_refused_every_turn_while_somebody_is_reachable(control):
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-FAILED reason=rich_enough"), result
     assert not control.actions
-
-
-def test_work_keeps_its_once_a_minute_grace_when_nobody_is_reachable(control):
-    """With nobody to talk to, blocking every turn produced 36 refusals and no
-    messages, so the nudge stays a nudge."""
-    control.on_action = lambda action: []
-    control.force("/api/skill/agents/agent-1/agents", 200,
-                  json.dumps({"agents": []}).encode())
-    _check(mc.agents())
-    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(50)",
-                       "items": "meme_coin=21088"})
-    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
-    mc._last_rich_nudge_ms = mc._now_ms()
-    _check(mc.work())
-    assert control.actions, "earning must stay available when there is nobody"
 
 
 def test_vitals_names_somebody_to_talk_to(control):
