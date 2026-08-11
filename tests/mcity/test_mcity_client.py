@@ -2140,3 +2140,38 @@ def test_a_building_is_still_offered_when_it_is_the_only_way(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
                        "space_kind": "interior"})
     assert "ada-arena" in (mc._travel_to_people_command() or "")
+
+
+def test_reading_the_map_is_refused_when_the_route_is_known(control):
+    """The route rode on the vitals line for a full deploy and the agent did not
+    take it. Every cmd= it has ever acted on was in the head line of a refusal,
+    never trailing at the end of a result, and mcity-areas is its most frequent
+    call - 22 in a four-minute window."""
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
+    mc._ROUTE.update({"text": "cmd=mcity-move-area central-plaza",
+                      "at_ms": mc._now_ms()})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    _check(mc.areas())                       # the first read always goes through
+    result = _check(mc.areas())
+    assert result.startswith("MCITY-AREAS-FAILED reason=route_known")
+    assert "cmd=mcity-move-area central-plaza" in result.partition("\n")[0]
+
+
+def test_the_map_is_readable_again_after_the_pause(control):
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
+    mc._ROUTE.update({"text": "cmd=mcity-move-area central-plaza",
+                      "at_ms": mc._now_ms()})
+    _check(mc.areas())
+    mc._last_areas_read_ms = mc._now_ms() - (mc._ROSTER_RECHECK_MS + 1000)
+    assert _check(mc.areas()).startswith("MCITY-AREAS-OK")
+
+
+def test_the_map_is_never_withheld_when_somebody_waits(control):
+    """A person owed a reply outranks a journey."""
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
+    mc._ROUTE.update({"text": "cmd=mcity-move-area central-plaza",
+                      "at_ms": mc._now_ms()})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-abc"]})
+    _check(mc.areas())
+    assert _check(mc.areas()).startswith("MCITY-AREAS-OK")

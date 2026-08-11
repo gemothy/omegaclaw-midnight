@@ -427,6 +427,7 @@ _ROSTER_RECHECK_MS = 30000     # how often a roster re-read is worth a turn
 # appended to EVERY result and the computation costs a read or two.
 _ROUTE = {"text": None, "at_ms": 0}
 _ROUTE_TTL_MS = 60000
+_last_areas_read_ms = 0
 _last_roster_read_ms = 0
 _AWAKE_PLACES = {}
 _AWAKE_PLACES_TTL_MS = 120000
@@ -477,7 +478,8 @@ def reset_runtime_state():
                      _can_speak_refreshing=False, _waiting_refresh_at_ms=0,
                      _waiting_refreshing=False, _last_self_probe_ms=0,
                      _dnd_streak=0, _last_rich_nudge_ms=0,
-                     _worksite_busy_until_ms=0, _last_roster_read_ms=0)
+                     _worksite_busy_until_ms=0, _last_roster_read_ms=0,
+                     _last_areas_read_ms=0)
 
 
 def _harvest_vitals(payload):
@@ -2363,6 +2365,27 @@ def needs():
 
 @_guard("AREAS")
 def areas():
+    # Reading the map while the route is already known is looking instead of
+    # going. The route has ridden on the vitals line for a full deploy and the
+    # agent did not take it: every cmd= it has ever acted on was in the HEAD line
+    # of a refusal, never trailing at the end of a result. mcity-areas is its
+    # most frequent call - 22 in a four-minute window - so this is where the
+    # instruction reaches it.
+    #
+    # Rate-limited, not blocked: one read always goes through every
+    # _ROSTER_RECHECK_MS so the agent can still explore, and the refusal
+    # disappears the moment there is nowhere better to be.
+    global _last_areas_read_ms
+    route = _cached_route() if (_REACHABLE["n"] == 0
+                                and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS) else ""
+    if (route and not _someone_is_waiting() and not _needs_to_eat()
+            and (_now_ms() - _last_areas_read_ms) < _ROSTER_RECHECK_MS):
+        return _promote_command(
+            _failed("AREAS", "route_known",
+                    "you already know where the free agents are and reading the "
+                    "map again does not move you"),
+            route)
+    _last_areas_read_ms = _now_ms()
     payload, error = _skill_read("AREAS", "areas")
     if error is not None:
         return error
