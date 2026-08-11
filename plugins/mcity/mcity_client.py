@@ -601,6 +601,12 @@ def _vitals_line():
     # earn on evidence we did not have - 36 of 152 samples in one window.
     if _VITALS.get("items"):
         parts.append("earned=enough" if _rich_enough() else "earned=keep-going")
+    # Say the worksite is shut before the agent spends a turn finding out. NOT
+    # nested under the holdings check above: whether work is paused has nothing
+    # to do with whether we happen to know what is in the bag.
+    if _now_ms() < _worksite_busy_until_ms:
+        left = int((_worksite_busy_until_ms - _now_ms()) / 1000) + 1
+        parts.append(f"work=paused({left}s)")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -3271,10 +3277,15 @@ def work():
     global _worksite_busy_until_ms
     if _now_ms() < _worksite_busy_until_ms:
         left = int((_worksite_busy_until_ms - _now_ms()) / 1000) + 1
-        return _failed("WORK", "worksite_busy",
-                       f"every worksite here was taken moments ago; waiting {left}s "
-                       "before asking again rather than spending a call the world "
-                       "has just answered")
+        # Carry a command. The backoff fired 38 times in eight minutes and each
+        # one cost a whole turn to discover; every other refusal in this plugin
+        # hands over the next move instead of only saying no.
+        return _promote_command(
+            _failed("WORK", "worksite_busy",
+                    f"every worksite here was taken moments ago, so this is "
+                    f"paused for another {left}s rather than spending a call the "
+                    "world has just answered"),
+            _reachable_opener() or _next_action_command())
     result = _mutate("WORK", lambda: ({"kind": "perform_job"}, None))
     if "no available" in (result or "").lower() and "worksite" in (result or "").lower():
         _worksite_busy_until_ms = _now_ms() + _WORKSITE_BACKOFF_MS

@@ -1825,3 +1825,33 @@ def test_nothing_known_and_nobody_waiting_still_prints_nothing(control):
     mc._VITALS["at_ms"] = 0
     mc._WAITING.update({"at_ms": 0, "ids": []})
     assert mc._vitals_line() is None
+
+
+def test_the_backoff_is_visible_before_the_agent_spends_a_turn(control):
+    """worksite_busy fired 38 times in eight minutes, each costing a turn to
+    discover. The vitals line says it up front."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    mc._worksite_busy_until_ms = mc._now_ms() + 12000
+    assert "work=paused(" in mc._vitals_line()
+    mc._worksite_busy_until_ms = 0
+    assert "work=paused" not in mc._vitals_line()
+
+
+def test_the_backoff_state_does_not_depend_on_knowing_the_bag(control):
+    """It was briefly nested under the holdings check: whether work is paused has
+    nothing to do with whether we know what is being carried."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)", "items": None})
+    mc._worksite_busy_until_ms = mc._now_ms() + 5000
+    assert "work=paused(" in mc._vitals_line()
+
+
+def test_the_backoff_refusal_hands_over_the_next_move(control):
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="perform_job",
+              reason="no available hacker worksite")]
+    _check(mc.work())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)",
+                       "items": "meme_coin=5"})
+    result = _check(mc.work())
+    assert result.startswith("MCITY-WORK-FAILED reason=worksite_busy")
+    assert "cmd=mcity-" in result.partition("\n")[0], "every refusal names a next move"
