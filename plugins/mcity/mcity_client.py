@@ -382,6 +382,10 @@ _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
 # people wait.
 _ASLEEP = {}
 _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
+# The world's own canSpeak verdict per agent: {id: (bool, at_ms)}. Harvested
+# free from any mcity-agents read, since the field already rides along.
+_CAN_SPEAK = {}
+_CAN_SPEAK_TTL_MS = 120000     # the city changes; do not trust an old verdict
 
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
@@ -1178,6 +1182,32 @@ def _project(head, name, ranking, rows):
     return Budgeter().render([source], TurnState(now_ms=_now_ms()), budget)
 
 
+def _note_can_speak(entry):
+    """Remember the world's own verdict on whether an agent can be spoken to.
+
+    canSpeak is authoritative and is NOT implied by status: a live roster showed
+    41 busy agents with canSpeak true and 22 busy with it false, while 165 of 285
+    were asleep with it false. Status was therefore never a usable proxy, which
+    is what two earlier speak rules got wrong in opposite directions."""
+    try:
+        agent_id, can = entry.get("id"), entry.get("can_speak")
+        if agent_id and isinstance(can, bool):
+            _CAN_SPEAK[agent_id] = (can, _now_ms())
+    except Exception:      # noqa: BLE001 - grounding must never break a read
+        pass
+
+
+def _can_be_reached(agent_id):
+    """True / False / None (unknown), from the freshest evidence we hold."""
+    at = _ASLEEP.get(agent_id)
+    if at and (_now_ms() - at) <= _ASLEEP_TTL_MS:
+        return False
+    known = _CAN_SPEAK.get(agent_id)
+    if known and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
+        return known[0]
+    return None
+
+
 def _parse_agent(item):
     """The wire fields of one /agents entry, gathered in one place."""
     return {
@@ -1217,15 +1247,20 @@ def _agent_observation(entry, now_ms):
 
 
 def _agent_row(entry, spoke_count):
-    """One roster row. `status` and the open/talking indicators are mandatory:
-    the system prompt says to speak to an agent whose status is idle, which
-    the model can only follow if the row actually carries them."""
+    """One roster row.
+
+    can-speak replaces the old open= indicator. isOpenToTalk was true for 283 of
+    285 agents on a live roster - including all 165 who were asleep - so it cost
+    characters and carried no signal, while canSpeak is the world's own verdict
+    on whether a message can be delivered at all. status stays because it is
+    useful colour, but it decides nothing: the same roster had 41 busy agents who
+    could be spoken to and 22 busy who could not."""
     status = entry["status"]
     return _row((
         ("id", _plain(entry["id"])),
         ("name", _plain(entry["name"])),
         ("status", _plain(status) if _text(status) else "unknown"),
-        ("open", _yn(entry["open"])),
+        ("can-speak", _yn(entry["can_speak"])),
         ("talking", "yes" if _yn(entry["talking"]) == "yes" else None),
         ("dist", _plain(entry["dist"])),
         ("prof", _plain(entry["profession"])),
@@ -1879,6 +1914,7 @@ def agents():
         if not isinstance(item, dict):
             continue
         entry = _parse_agent(item)
+        _note_can_speak(entry)
         if isinstance(entry["name"], str):
             _remember_inbound(entry["name"])
         roster.append(entry)
@@ -2176,10 +2212,11 @@ def threads(_ignored=None):
                     mine = "no"          # they opened it, we have never replied
         asleep = False
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
-            at = _ASLEEP.get(others[0])
-            asleep = bool(at and (_now_ms() - at) <= _ASLEEP_TTL_MS)
-            # A sleeping counterpart is still waiting, but cannot hear us yet, so
-            # it must not be what the agent spends the turn on.
+            # False only when the world has actually said so; unknown counts as
+            # reachable, because refusing on a guess is what silenced the agent
+            # before. A counterpart who cannot hear us is still waiting, but must
+            # not be what the turn is spent on.
+            asleep = _can_be_reached(others[0]) is False
             if not asleep:
                 waiting_ids.append(others[0])
         # An unreachable person ranks below a reachable one: the budget should
@@ -2824,16 +2861,15 @@ def speak(arg=None):
         # never the blocker, so gating on it silenced the agent for nothing.
         # What IS worth remembering is who was asleep, so the agent does not
         # spend turn after turn on someone who cannot hear it.
-        asleep_at = _ASLEEP.get(parts[0])
-        if asleep_at and (_now_ms() - asleep_at) <= _ASLEEP_TTL_MS:
-            ago = int((_now_ms() - asleep_at) / 1000)
-            others = [i for i in _someone_is_waiting() if i != parts[0]
-                      and not _ASLEEP.get(i)]
-            alt = (f" Someone else is waiting and awake: {others[0]}" if others
-                   else " Nobody else is waiting, so take a world action instead")
-            return None, _failed("SPEAK", "target_asleep",
-                                 f"the world said {parts[0]} was sleeping {ago}s "
-                                 f"ago, and a sleeping agent cannot hear you.{alt}")
+        if _can_be_reached(parts[0]) is False:
+            others = [i for i in _someone_is_waiting()
+                      if i != parts[0] and _can_be_reached(i) is not False]
+            alt = (f" {others[0]} is waiting and CAN be reached - answer them "
+                   "instead" if others else
+                   " Nobody reachable is waiting, so take a world action instead")
+            return None, _failed("SPEAK", "unreachable",
+                                 f"the world reports {parts[0]} cannot receive a "
+                                 f"message right now (asleep or away).{alt}")
         sent["agent_id"], sent["text"] = parts[0], text
         # The text is NOT sanitised beyond the whitespace collapse of
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
@@ -2885,6 +2921,8 @@ def _speak_candidates(limit=3):
         return None
     now = _now_ms()
     roster = [_parse_agent(item) for item in items if isinstance(item, dict)]
+    for entry in roster:
+        _note_can_speak(entry)
     reachable = {entry["id"]: entry for entry in roster if entry["id"]}
     if AgentObservation is not None:
         observed = [_agent_observation(entry, now) for entry in roster if entry["id"]]
@@ -2895,13 +2933,18 @@ def _speak_candidates(limit=3):
                                            cooldown_ms=SPEAK_COOLDOWN_MS,
                                            limit=limit),
             default=[])
-        ids = [row.agent_id for row in (ranked or []) if row.agent_id in reachable]
+        ids = [row.agent_id for row in (ranked or [])
+               if row.agent_id in reachable
+               and reachable[row.agent_id].get("can_speak") is not False]
     else:
         ids = []
     if not ids:
-        # Store unavailable: fall back to the live flags, which are just as good
-        # for this one decision - open to talk, then nearest.
-        usable = [e for e in roster if e["id"] and _yn(e.get("open")) == "yes"]
+        # Store unavailable: fall back to the live flags. Filter on canSpeak, NOT
+        # on isOpenToTalk - a live roster had isOpenToTalk true for 283 of 285
+        # agents including all 165 who were asleep, so suggesting on it handed
+        # the agent a list of people who could not hear it either.
+        usable = [e for e in roster
+                  if e["id"] and e.get("can_speak") is not False]
         usable.sort(key=lambda e: _number(e["dist"], float("inf"), 0.0, float("inf")))
         ids = [e["id"] for e in usable[:limit]]
     if not ids:

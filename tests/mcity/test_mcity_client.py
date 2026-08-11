@@ -965,8 +965,8 @@ def test_a_sleeping_target_is_remembered_and_not_retried(control):
     mc._ASLEEP["user-agent-abc"] = mc._now_ms()      # as the failure path records
     before = len(control.actions)
     again = _check(mc.speak("user-agent-abc are you there"))
-    assert again.startswith("MCITY-SPEAK-FAILED reason=target_asleep")
-    assert "cannot hear you" in again
+    assert again.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert "cannot receive a message" in again
     assert len(control.actions) == before, "no round trip for a sleeping target"
 
 
@@ -992,3 +992,33 @@ def test_a_stale_sleep_record_expires(control):
     mc._ASLEEP["user-agent-abc"] = mc._now_ms() - (mc._ASLEEP_TTL_MS + 1000)
     _check(mc.speak("user-agent-abc good morning"))
     assert control.actions, "an expired sleep record must not block the attempt"
+
+
+def test_candidates_are_filtered_on_can_speak_not_on_open_to_talk(control):
+    """A live roster had isOpenToTalk true for 283 of 285 agents, including all
+    165 who were asleep, so suggesting on it handed the agent a list of people
+    who could not hear it either. canSpeak is the world's real verdict."""
+    roster = {"agents": [
+        {"agentId": "user-agent-sleeper", "name": "Sleeper", "distance": 1,
+         "isOpenToTalk": True, "canSpeak": False, "status": "sleeping"},
+        {"agentId": "user-agent-awake", "name": "Awake", "distance": 90,
+         "isOpenToTalk": True, "canSpeak": True, "status": "busy"},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    suggestion = mc._speak_candidates()
+    assert suggestion and "user-agent-awake" in suggestion
+    assert "user-agent-sleeper" not in suggestion, "never suggest someone asleep"
+
+
+def test_the_world_verdict_beats_our_own_status(control):
+    """Status was never a usable proxy: the same roster had 41 busy agents with
+    canSpeak true and 22 busy with it false. Only the world's verdict decides."""
+    roster = {"agents": [{"agentId": "user-agent-busytalker", "name": "Busy",
+                          "distance": 1, "isOpenToTalk": True,
+                          "canSpeak": True, "status": "busy"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert mc._can_be_reached("user-agent-busytalker") is True
+    control.on_action = lambda action: []
+    _check(mc.speak("user-agent-busytalker hello there"))
+    assert control.actions, "a busy but reachable target must be spoken to"

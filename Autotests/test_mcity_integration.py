@@ -277,12 +277,16 @@ def test_talking_agent_outranks_every_nearer_agent(monkeypatch):
     assert "talking=yes" in rows[0]
 
 
-def test_roster_rows_carry_status_and_talk_indicators(monkeypatch):
+def test_roster_rows_carry_status_and_reachability(monkeypatch):
+    """can-speak replaced open=. isOpenToTalk was true for 283 of 285 agents on a
+    live roster, including all 165 asleep, so it carried no signal; canSpeak is
+    the world's own verdict on whether a message can be delivered."""
     _install_http(monkeypatch, _agents_routes())
     rows = _body_rows(_check(mc.agents()))
     for row in rows:
         assert " status=" in row, f"status missing from: {row}"
-        assert " open=" in row, f"open indicator missing from: {row}"
+        assert " can-speak=" in row, f"reachability missing from: {row}"
+        assert " open=" not in row, f"the no-signal indicator is back: {row}"
     assert any("status=idle" in row for row in rows)
     assert sum("talking=yes" in row for row in rows) == 1
 
