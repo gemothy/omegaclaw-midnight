@@ -360,7 +360,7 @@ def _cap(text):
 
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-           "status": None}
+           "status": None, "busy_for": None}
 _VITALS_STALE_MS = 120000
 VITALS_REFRESH_MS = 30000      # re-read vitals at most this often
 _vitals_refreshing = False     # guards the refresh path against reentry via _out
@@ -388,6 +388,21 @@ def _harvest_vitals(payload):
                 _VITALS["space"] = str(position["spaceId"])
             if agent.get("status"):
                 _VITALS["status"] = str(agent["status"])
+            # How long we stay busy. The world refuses mcity-speak outright while
+            # the speaker has an action running - it answers "speaker is in do not
+            # disturb mode" - and 6 of 6 observed speak failures were at
+            # status=busy. Without the countdown the agent cannot tell that simply
+            # waiting would work, so it falls through to starting ANOTHER action
+            # and stays unreachable.
+            action = agent.get("activeAction")
+            _VITALS["busy_for"] = None
+            if isinstance(action, dict) and action.get("endsAtMs"):
+                try:
+                    left = int(action["endsAtMs"]) - _now_ms()
+                    if left > 0:
+                        _VITALS["busy_for"] = int(left / 1000)
+                except (TypeError, ValueError):
+                    pass
         if isinstance(items, dict):
             _VITALS["items"] = " ".join(f"{k}={v}" for k, v in sorted(items.items()))
         if _VITALS["hunger"] or _VITALS["space"] or _VITALS["items"]:
@@ -444,6 +459,9 @@ def _vitals_line():
         parts.append(f"at={_VITALS['space']}")
     if _VITALS["status"]:
         parts.append(f"status={_VITALS['status']}")
+    if _VITALS.get("busy_for"):
+        parts.append(f"busy-for={_VITALS['busy_for']}s"
+                     " (cannot speak until this ends)")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -2611,6 +2629,19 @@ def speak(arg=None):
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
         return {"kind": "speak", "targetAgentId": parts[0], "text": text}, None
 
+    # Refuse locally while an action is running. The world rejects it anyway with
+    # "speaker is in do not disturb mode" - 6 of 6 observed failures were at
+    # status=busy - so the round trip buys nothing, and the refusal can say the one
+    # thing the world's answer does not: how long to wait.
+    if (_VITALS.get("status") == "busy" and _VITALS.get("at_ms")
+            and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS):
+        wait = _VITALS.get("busy_for")
+        detail = (f"you are mid-action for another {wait}s" if wait
+                  else "you are mid-action")
+        return _out(_failed("SPEAK", "busy",
+                            f"{detail}; the world refuses speech from a busy "
+                            "agent, so wait for it to finish rather than starting "
+                            "another action"))
     result = _mutate("SPEAK", build)
     if sent and result.startswith("MCITY-SPEAK-OK") \
             and "outcome=delivered" in result.partition("\n")[0]:

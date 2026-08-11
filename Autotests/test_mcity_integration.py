@@ -769,3 +769,29 @@ def test_vitals_refresh_never_recurses(monkeypatch):
     mc._VITALS.update({"at_ms": 0}); mc._vitals_refreshing = False
     mc._out("MCITY-THREADS-OK")
     assert depth["max"] <= 1
+
+
+def test_speak_is_refused_while_busy(monkeypatch):
+    """6 of 6 observed speak failures were at status=busy - the world rejects
+    speech from a mid-action agent with 'speaker is in do not disturb mode'. The
+    world's answer never says how long to wait, so the agent kept falling through
+    to starting ANOTHER action and stayed unreachable."""
+    called = []
+    monkeypatch.setattr(mc, "_mutate", lambda v, b: called.append(v) or "MCITY-SPEAK-OK")
+    mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy", "busy_for": 42,
+                       "hunger": "normal(1)", "space": "central", "items": None})
+    out = mc.speak("user-agent-x hello there")
+    assert "reason=busy" in out
+    assert "42s" in out                  # the wait time the world never tells it
+    assert called == []                  # no pointless world round trip
+
+    # Idle goes through untouched.
+    mc._VITALS.update({"status": "idle", "busy_for": None})
+    mc.speak("user-agent-x hello there")
+    assert called == ["SPEAK"]
+
+    # Stale vitals must never block a legitimate attempt.
+    called.clear()
+    mc._VITALS.update({"status": "busy", "at_ms": mc._now_ms() - (mc._VITALS_STALE_MS + 1000)})
+    mc.speak("user-agent-x hello there")
+    assert called == ["SPEAK"]
