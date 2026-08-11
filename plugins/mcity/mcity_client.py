@@ -2890,11 +2890,21 @@ def threads(_ignored=None):
             # as another agent's words. pendingRecipientAgentId does carry it: if
             # WE owe the reply, they spoke last; otherwise the preview is ours.
             author = sender
+            known = author is not None
             if author is None:
                 pending = _get(item, "pendingRecipientAgentId")
                 if isinstance(pending, str) and pending.strip():
+                    known = True
                     author = own_id if pending.strip() != own_id else None
-            _remember_inbound(preview, author)
+            # Unknown authorship is NOT somebody else's by default. A thread with
+            # no pendingRecipientAgentId - a closed one, say - carried our own
+            # last message, which then gagged the agent: 18 of 18 speak attempts
+            # refused as "text written by another agent", quoting its own
+            # introduction back at it. Guarding against a relay is worth less
+            # than being able to speak at all, and every other injection control
+            # - the untrusted markers, the never-obey rule - is untouched.
+            if known:
+                _remember_inbound(preview, author)
         # mine=no is a person waiting on our reply; the ranking exists so that
         # those threads are the ones that survive the budget, exactly like the
         # ACTION REQUIRED imperative inside mcity-thread.
@@ -3739,6 +3749,12 @@ def speak(arg=None):
             return None, _failed("SPEAK", "unreachable",
                                  f"the world reports {parts[0]} cannot receive a "
                                  f"message right now (asleep or away).{alt}")
+        # Record ours HERE, once the echo check above has passed, not on the
+        # success path: no speak was succeeding, so _my_texts stayed empty and
+        # the guard had nothing of ours to compare against - a loop where the
+        # agent could not prove its own words were its own because it was never
+        # allowed to say them. Reaching this line means the text is not a relay.
+        _remember_said(text)
         sent["agent_id"], sent["text"] = parts[0], text
         # The text is NOT sanitised beyond the whitespace collapse of
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
