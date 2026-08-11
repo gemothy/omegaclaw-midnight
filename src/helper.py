@@ -437,9 +437,17 @@ def _history_commands(block):
 # teaches the habit that removing the skill was meant to end.
 RETIRED_COMMANDS = ("mcity-areas",)
 
+# Turns whose whole content was telling the operator nothing. The second group
+# is the unsolicited self-status report - "I am currently in the
+# hacker-house-interior, working on a task. My hunger is normal... No pending
+# messages to reply to at the moment." The outbound guard already stops those
+# reaching anyone, but the agent still spent 12 of about 30 turns writing them,
+# because its own recent history was full of them.
 _IDLE_SEND_RE = re.compile(
     r"no new input|nothing to report|standing by|awaiting (?:your )?instructions"
-    r"|no new messages?|idle(?: status)? report", re.I)
+    r"|no new messages?|idle(?: status)? report"
+    r"|no pending messages|i(?:'m| am) currently (?:in|at)"
+    r"|working on a task", re.I)
 
 
 def _is_idle_report(block, commands):

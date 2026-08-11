@@ -137,3 +137,40 @@ def test_a_retired_name_passed_as_an_argument_is_dropped(tmp_path):
         '("2026-08-11 10:00:00" \n ((mcity-agents "mcity-areas")) \n)\n',
         encoding="utf-8")
     assert "mcity-areas" not in helper.rankedHistory(str(history), 30000)
+
+
+def test_an_unsolicited_self_report_is_not_taught_back(tmp_path):
+    """The outbound guard stops these reaching anyone, but the agent still spent
+    12 of about 30 turns writing them because its own history was full of them."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        + '("2026-08-11 10:00:10" \n ((send "I am currently in the '
+          'hacker-house-interior, working on a task. My hunger is normal, and I '
+          'have earned enough resources. No pending messages to reply to.")) \n)\n' * 8,
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "currently in the hacker-house" not in body
+    assert "mcity-work" in body
+
+
+def test_a_real_report_of_an_outcome_is_still_taught(tmp_path):
+    """Reporting a confirmed world action is one of the two things send is for."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((send "Sold 50 crystal to Central Mart, '
+        'confirmed by the world; holding 21k meme_coin")) \n)\n',
+        encoding="utf-8")
+    assert "Sold 50 crystal" in helper.rankedHistory(str(history), 30000)
+
+
+def test_answering_a_person_is_still_taught(tmp_path):
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((send "Yes - the shipment cleared customs '
+        'an hour ago, I watched it settle")) \n)\n',
+        encoding="utf-8")
+    assert "shipment cleared" in helper.rankedHistory(str(history), 30000)
