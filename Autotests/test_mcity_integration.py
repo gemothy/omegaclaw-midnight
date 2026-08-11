@@ -947,7 +947,7 @@ def test_busy_city_refuses_the_unreachable_and_redirects(monkeypatch):
     result = _check(mc.speak("user-agent-engaged are you free yet"))
     assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
     assert "user-agent-awake is waiting" in result
-    assert "cmd=mcity-threads" in result
+    assert "(mcity-threads)" in result
 
 
 def test_the_areas_skill_is_not_offered_to_the_agent():

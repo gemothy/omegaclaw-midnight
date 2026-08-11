@@ -885,7 +885,7 @@ def test_a_look_only_loop_is_eventually_refused(control):
     it cannot mistake for progress."""
     seen = [_check(mc.threads()) for _ in range(mc._REPEAT_REFUSE_AT + 1)]
     assert seen[-1].startswith("MCITY-THREADS-FAILED reason=repeat")
-    assert "cmd=mcity-" in seen[-1].partition(" -- ")[0], \
+    assert "(mcity-" in seen[-1].partition(" -- ")[0], \
         "the refusal must lead with a command the agent can copy"
     assert "reading again cannot change anything" in seen[-1]
     assert not any(s.startswith("MCITY-THREADS-FAILED") for s in seen[:2]), \
@@ -1071,7 +1071,7 @@ def test_the_speaker_side_refusal_is_named_as_such(control):
         result = mc.speak("user-agent-abc hello there")
     assert "note=" in result and "about YOU" in result
     assert "trying someone else will not help" in result
-    assert "cmd=mcity-move-area" in result, "the hint must be copyable"
+    assert "(mcity-move-area" in result, "the hint must be copyable"
 
 
 def test_the_streak_resets_once_a_reply_lands(control):
@@ -1095,7 +1095,7 @@ def test_the_escape_hint_carries_a_copyable_command(control):
               reason="speaker is in do not disturb mode")]
     for _ in range(mc._DND_STREAK_HINT):
         result = mc.speak("user-agent-abc hello there")
-    assert "cmd=mcity-move-area forest-worksite" in result, result
+    assert "(mcity-move-area _quote_forest-worksite_quote_)" in result, result
     assert "mines-worksite" not in result, "moveAreaAvailable=false must be skipped"
 
 
@@ -1149,7 +1149,7 @@ def test_the_repeat_refusal_points_at_someone_reachable(control):
     assert result.startswith("MCITY-THREADS-FAILED reason=repeat")
     assert "nobody waiting can hear you" in result
     head = result.partition("\n")[0]
-    assert "cmd=mcity-agents" in head, \
+    assert "(mcity-agents)" in head, \
         "the command must lead, not trail: the agent reads the head"
     assert "user-agent-awake" in result, "and it must still name who is free"
 
@@ -1166,7 +1166,7 @@ def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(contro
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
     result = _check(mc.threads())
     assert mc._WAITING["ids"] == ["agent-2"]
-    assert "cmd=mcity-speak agent-2" in result
+    assert "(mcity-speak _quote_agent-2" in result
     assert "nobody waiting can hear you" not in result
 
 
@@ -1183,7 +1183,7 @@ def test_the_opener_fetches_a_name_when_it_has_none(control):
     opener = mc._reachable_opener()
     # The suggestion is mcity-agents, not a speak with a placeholder sentence:
     # a command that cannot be copied verbatim does not get used.
-    assert "user-agent-awake" in opener and "cmd=mcity-agents" in opener
+    assert "user-agent-awake" in opener and "(mcity-agents)" in opener
 
 
 def test_an_engaged_target_is_unreachable_despite_can_speak(control):
@@ -1227,7 +1227,7 @@ def test_the_opener_admits_when_nobody_can_be_reached(control):
                   json.dumps({"agents": []}).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
     assert mc._reachable_opener() is None
-    assert "cmd=mcity-" in mc._next_action_command()
+    assert "(mcity-" in mc._next_action_command()
 
 
 def test_an_unreachable_refusal_hands_over_a_command(control):
@@ -1239,7 +1239,7 @@ def test_an_unreachable_refusal_hands_over_a_command(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     result = _check(mc.speak("user-agent-abc hello there"))
     assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
-    assert "cmd=mcity-work" in result
+    assert "(mcity-work)" in result
 
 
 def test_the_command_is_eat_only_when_actually_hungry(control):
@@ -1247,7 +1247,7 @@ def test_the_command_is_eat_only_when_actually_hungry(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(2)",
                        "items": "to_go_food=2"})
-    assert "cmd=mcity-eat" in _check(mc.speak("user-agent-abc hello there"))
+    assert "(mcity-eat)" in _check(mc.speak("user-agent-abc hello there"))
 
 
 def test_a_reachable_waiting_person_is_named_as_a_command(control):
@@ -1258,7 +1258,7 @@ def test_a_reachable_waiting_person_is_named_as_a_command(control):
     # A standalone command, not a speak template: mcity-threads lands on the
     # waiting row and carries what they said, which the reply needs anyway.
     assert "user-agent-awake is waiting" in result
-    assert "cmd=mcity-threads" in result
+    assert "(mcity-threads)" in result
 
 
 def test_our_own_engagement_stops_a_doomed_reply(control):
@@ -1379,7 +1379,7 @@ def test_the_agent_is_sent_where_the_free_people_are(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
     opener = mc._reachable_opener()
     assert "2 free agents are at central" in opener
-    assert "cmd=mcity-" in opener and "central" in opener
+    assert "(mcity-" in opener and "central" in opener
 
 
 def test_no_travel_hint_when_the_free_people_are_already_here(control):
@@ -1393,7 +1393,7 @@ def test_no_travel_hint_when_the_free_people_are_already_here(control):
     _check(mc.agents())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
     opener = mc._reachable_opener()
-    assert "user-agent-here" in opener and "cmd=mcity-agents" in opener, opener
+    assert "user-agent-here" in opener and "(mcity-agents)" in opener, opener
     assert "free agents are at" not in opener
 
 
@@ -1416,7 +1416,7 @@ def test_a_contended_worksite_points_at_somewhere_better(control):
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-FAILED")
     assert "free agents are at central" in result
-    assert "cmd=mcity-" in result
+    assert "(mcity-" in result
 
 
 def test_the_travel_command_lands_in_the_head_line(control):
@@ -1436,8 +1436,8 @@ def test_the_travel_command_lands_in_the_head_line(control):
               reason="no available hacker worksite")]
     result = _check(mc.work())
     head = result.partition("\n")[0]
-    assert "cmd=mcity-" in head and "central" in head, head
-    assert head.index("cmd=mcity-") < 60, "the command must be near the front"
+    assert "(mcity-" in head and "central" in head, head
+    assert head.index("(mcity-") < 60, "the command must be near the front"
     assert "no available hacker worksite" in result, "the world's words survive"
 
 
@@ -1455,7 +1455,7 @@ def test_work_stops_once_the_mission_says_it_is_enough(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-FAILED reason=rich_enough")
-    assert "cmd=mcity-" in result.partition("\n")[0]
+    assert "(mcity-" in result.partition("\n")[0]
     assert not control.actions
 
 
@@ -1478,9 +1478,9 @@ def test_promoting_a_command_never_breaks_the_result_prefix(control):
     that; the suite's own invariant caught it."""
     promoted = mc._promote_command(
         "MCITY-WORK-FAILED reason=rich_enough detail=enough already",
-        "cmd=mcity-agents")
-    assert promoted.startswith("MCITY-WORK-FAILED reason=rich_enough cmd=mcity-agents")
-    assert promoted.count("cmd=mcity-agents") == 1, "the command must not duplicate"
+        "(mcity-agents)")
+    assert promoted.startswith("MCITY-WORK-FAILED reason=rich_enough (mcity-agents)")
+    assert promoted.count("(mcity-agents)") == 1, "the command must not duplicate"
     assert "enough already" in promoted
 
 
@@ -1494,7 +1494,7 @@ def test_a_suggested_command_is_always_complete_and_copyable(control):
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     opener = mc._reachable_opener()
     assert "<" not in opener and ">" not in opener, f"placeholder survived: {opener}"
-    assert "cmd=mcity-agents" in opener
+    assert "(mcity-agents)" in opener
     assert "user-agent-free" in opener, "the name still has to reach the agent"
 
 
@@ -1565,7 +1565,7 @@ def test_being_indoors_is_told_to_use_the_door_not_the_map(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
                        "space_kind": "interior"})
     hint = mc._travel_to_people_command()
-    assert "cmd=mcity-exit-building" in hint, hint
+    assert "(mcity-exit-building)" in hint, hint
     assert "travel-district" not in hint, "that call is refused when already there"
 
 
@@ -1580,7 +1580,7 @@ def test_a_genuinely_different_district_still_gets_a_travel_command(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central",
                        "space_kind": "district"})
     hint = mc._travel_to_people_command()
-    assert "harbour" in hint and "cmd=mcity-" in hint
+    assert "harbour" in hint and "(mcity-" in hint
 
 
 def test_the_space_kind_is_harvested_from_the_world(control):
@@ -1666,7 +1666,7 @@ def test_an_unreachable_send_is_redirected_to_the_person_waiting(control):
     result = _check(mc.speak("user-agent-asleep hello there"))
     assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
     assert "user-agent-waiting is waiting" in result
-    assert "cmd=mcity-threads" in result
+    assert "(mcity-threads)" in result
     assert "<" not in result and ">" not in result, "no placeholder may survive"
 
 
@@ -1683,7 +1683,7 @@ def test_the_same_words_are_not_sent_to_the_same_person_twice(control):
     before = len(control.actions)
     again = _check(mc.speak(line))
     assert again.startswith("MCITY-SPEAK-FAILED reason=already_said")
-    assert "cmd=mcity-threads" in again
+    assert "(mcity-threads)" in again
     assert len(control.actions) == before, "the repeat must not reach the world"
 
 
@@ -1783,7 +1783,7 @@ def test_a_hungry_agent_eats_before_starting_a_long_job(control):
                        "items": "crystal=10 to_go_food=2"})
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-FAILED reason=eat_first")
-    assert "cmd=mcity-eat" in result.partition("\n")[0]
+    assert "(mcity-eat)" in result.partition("\n")[0]
     assert not control.actions, "no long action may start while hungry with food"
 
 
@@ -1848,7 +1848,7 @@ def test_the_backoff_refusal_hands_over_the_next_move(control):
                        "items": "meme_coin=5"})
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-FAILED reason=worksite_busy")
-    assert "cmd=mcity-" in result.partition("\n")[0], "every refusal names a next move"
+    assert "(mcity-" in result.partition("\n")[0], "every refusal names a next move"
 
 
 def test_suggestions_never_name_someone_the_harness_would_refuse(control):
@@ -1911,7 +1911,7 @@ def test_the_roster_is_not_re_read_when_it_just_said_nobody(control):
                        "items": "meme_coin=5"})
     result = _check(mc.agents())
     assert result.startswith("MCITY-AGENTS-FAILED reason=nobody_reachable")
-    assert "cmd=mcity-" in result.partition("\n")[0]
+    assert "(mcity-" in result.partition("\n")[0]
 
 
 def test_the_roster_is_re_read_once_the_pause_ends(control):
@@ -1957,7 +1957,7 @@ def test_the_route_is_found_through_the_area_anchor(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
                        "space_kind": "interior"})
     hint = mc._travel_to_people_command()
-    assert "cmd=mcity-move-area central-plaza" in hint, hint
+    assert "(mcity-move-area _quote_central-plaza_quote_)" in hint, hint
 
 
 def test_an_unreachable_area_is_not_offered(control):
@@ -2003,7 +2003,7 @@ def test_a_scan_that_found_people_still_names_them(control):
 
 def test_nobody_here_points_at_where_people_are(control):
     """'Nobody can be reached' is true of HERE. It fired 22 times in a window
-    while 55 free agents stood in central, handing over cmd=mcity-work each time
+    while 55 free agents stood in central, handing over (mcity-work) each time
     - the one instruction that guarantees the agent never finds them."""
     roster = {"agents": [
         {"agentId": "user-agent-away", "name": "Away", "distance": None,
@@ -2021,7 +2021,7 @@ def test_nobody_here_points_at_where_people_are(control):
     control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
     result = _check(mc.agents())
     assert result.startswith("MCITY-AGENTS-FAILED reason=nobody_reachable")
-    assert "cmd=mcity-move-area central-plaza" in result.partition("\n")[0], result
+    assert "(mcity-move-area _quote_central-plaza_quote_)" in result.partition("\n")[0], result
 
 
 def test_stale_place_knowledge_is_refreshed_not_ignored(control):
@@ -2065,12 +2065,12 @@ def test_the_route_rides_on_the_line_the_agent_always_reads(control):
                        "space_kind": "interior", "hunger": "normal(9)"})
     line = mc._vitals_line()
     assert "reachable=0" in line
-    assert "cmd=mcity-move-area central-plaza" in line, line
+    assert "(mcity-move-area _quote_central-plaza_quote_)" in line, line
 
 
 def test_the_route_is_computed_at_most_once_per_window(control):
     """vitals is appended to every result; the lookup costs two reads."""
-    mc._ROUTE.update({"text": "cmd=mcity-move-area central-plaza",
+    mc._ROUTE.update({"text": "(mcity-move-area _quote_central-plaza_quote_)",
                       "at_ms": mc._now_ms()})
     control.requests.clear()
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
@@ -2087,7 +2087,7 @@ def test_no_route_token_when_somebody_is_reachable_here(control):
 
 
 def test_the_route_prefers_somewhere_outdoors(control):
-    """The first live route was cmd=mcity-move-area ada-arena, a building:
+    """The first live route was (mcity-move-area _quote_ada-arena_quote_), a building:
     following it would have put the agent indoors again - the exact trap it is
     leaving, where it can neither see areas that reach elsewhere nor use the
     door, because this building's exit is a teleport."""
@@ -2349,7 +2349,7 @@ def test_a_door_that_does_not_open_is_not_tried_again(control):
     again = _check(mc.exit_building())
     assert again.startswith("MCITY-EXIT-BUILDING-FAILED reason=no_link_exit")
     assert len(control.actions) == before, "no second request for a known answer"
-    assert "cmd=mcity-" in again.partition("\n")[0]
+    assert "(mcity-" in again.partition("\n")[0]
 
 
 def test_the_door_is_tried_again_once_the_memory_expires(control):

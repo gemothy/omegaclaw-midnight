@@ -174,3 +174,18 @@ def test_answering_a_person_is_still_taught(tmp_path):
         'an hour ago, I watched it settle")) \n)\n',
         encoding="utf-8")
     assert "shipment cleared" in helper.rankedHistory(str(history), 30000)
+
+
+def test_the_malformed_cmd_form_is_not_taught_back(tmp_path):
+    """The agent copied the cmd= label as part of the command name and emitted
+    (cmd=work) - 90 of 111 decisions in one window were that no-op. The label is
+    gone from the harness, but its examples remain in history."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        + '("2026-08-11 10:00:10" \n ((cmd=work)) \n)\n' * 10,
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "cmd=work" not in body
+    assert "mcity-work" in body

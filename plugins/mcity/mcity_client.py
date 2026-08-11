@@ -758,7 +758,7 @@ def _suppress_repeat(verb, result):
                 nudge = f"{opener or _next_action_command()} - nobody waiting can hear you"
             else:
                 waiting = _someone_is_waiting()
-                nudge = (f"Do this instead: cmd=mcity-speak {waiting[0]} "
+                nudge = (f"Do this instead, exactly: (mcity-speak _quote_{waiting[0]} "
                          "<your sentence>" if waiting
                          else _next_action_command())
             # Lead with the command. Every turn was a bare (mcity-threads) and
@@ -1479,12 +1479,12 @@ def _next_action_command():
     otherwise."""
     hunger = (_VITALS.get("hunger") or "").lower()
     if hunger.startswith(("hungry", "starving")) and _VITALS.get("items"):
-        return "Do this instead: cmd=mcity-eat"
+        return "Do this instead, exactly: (mcity-eat)"
     who = _best_person_to_talk_to()
     if who:
-        return (f"{who} can hear you right now - say something to them with "
-                f"mcity-speak {who} followed by your sentence")
-    return "Do this instead: cmd=mcity-work"
+        return (f"{who} can hear you right now - say something to them: "
+                f"(mcity-speak _quote_{who} then your sentence_quote_)")
+    return "Do this instead, exactly: (mcity-work)"
 
 
 def _looks_speakable(agent_id):
@@ -1544,7 +1544,7 @@ def _reachable_opener():
         # valid on its own, and lands the agent on the roster where the
         # can-speak=yes rows are, with the name carried in the note.
         return (f"{_plain(best)} is free to talk right now, and the roster will "
-                f"give you the exact id: cmd=mcity-agents")
+                f"give you the exact id, exactly: (mcity-agents)")
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return None
 
@@ -1563,7 +1563,7 @@ def _promote_command(result, hint):
         hint = (hint or "").strip()
         command = ""
         for piece in hint.split():
-            if piece.startswith("cmd=mcity-"):
+            if piece.startswith("(mcity-"):
                 command = hint[hint.index(piece):].strip()
                 break
         if not command:
@@ -1627,10 +1627,9 @@ def _cached_route():
             return _ROUTE["text"]
         hint = _travel_to_people_command() or ""
         command = ""
-        for piece in hint.split():
-            if piece.startswith("cmd=mcity-"):
-                command = " ".join(hint[hint.index(piece):].split()[:2])
-                break
+        match = re.search(r"\(mcity-[a-z-]+(?:\s+_quote_[^)]*_quote_)?\)", hint or "")
+        if match:
+            command = match.group(0)
         _ROUTE["text"] = command
         _ROUTE["at_ms"] = _now_ms()
         return command
@@ -1702,21 +1701,23 @@ def _travel_to_people_command():
                 area_id = _text(_get(item, "areaId", "id"))
                 if anchored == best and area_id and ID_RE.match(area_id):
                     return (f"Nobody here can talk, but {count} free agents are "
-                            f"at {best}. Go to them: cmd=mcity-move-area {area_id}")
+                            f"at {best}. Go to them, exactly: (mcity-move-area "
+                            f"_quote_{area_id}_quote_)")
             for item in areas:
                 area_id = _text(_get(item, "areaId", "id"))
                 if area_id == best and ID_RE.match(area_id or ""):
                     return (f"Nobody here can talk, but {count} free agents are "
-                            f"at {best}. Go to them: cmd=mcity-move-area {area_id}")
+                            f"at {best}. Go to them, exactly: (mcity-move-area "
+                            f"_quote_{area_id}_quote_)")
         if indoors and _now_ms() >= _no_link_exit_until_ms:
             # Only when the door is still worth trying. It is not, in this
             # building: exit_building handles a buildingLink and this exit is a
             # teleport, so suggesting it just spends a turn on a known refusal.
             return (f"{count} free agents are out in {best}, and you are inside a "
                     f"building with no area reaching it. Try the door: "
-                    f"cmd=mcity-exit-building")
+                    f"exactly: (mcity-exit-building)")
         return (f"Nobody here can talk, but {count} free agents are at {best}. "
-                f"Go to them: cmd=mcity-travel-district {best}")
+                f"Go to them, exactly: (mcity-travel-district _quote_{best}_quote_)")
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return None
 
@@ -1742,7 +1743,8 @@ def _escape_command():
                 continue
             if _get(item, "moveAreaAvailable") is False:
                 continue
-            return f"Leave now with this exact line: cmd=mcity-move-area {area}"
+            return ("Leave now with this exact line: "
+                f"(mcity-move-area _quote_{area}_quote_)")
         return "Use mcity-areas to find somewhere to go, then mcity-move-area."
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return "Use mcity-areas to find somewhere to go, then mcity-move-area."
@@ -3465,7 +3467,7 @@ def _refuse_while_hungry(verb):
                 f"vitals says hunger={_VITALS.get('hunger')} and you are carrying "
                 "food. This action takes minutes and you cannot eat while it "
                 "runs"),
-        "cmd=mcity-eat")
+        "(mcity-eat)")
 
 
 def _refuse_while_someone_waits(verb):
@@ -3719,7 +3721,7 @@ def speak(arg=None):
                                  f"you sent {parts[0]} these exact words {ago}s "
                                  "ago and it was delivered. Say something new, "
                                  "or answer what they actually replied - read it "
-                                 "with cmd=mcity-threads")
+                                 "with (mcity-threads)")
         # Refuse locally while an action is running. The world rejects it anyway
         # with "speaker is in do not disturb mode" - 6 of 6 observed failures were
         # at status=busy - so the round trip buys nothing, and the refusal can say
@@ -3786,7 +3788,7 @@ def speak(arg=None):
             # reply needs anyway. Live: 18 sends to unreachable people while a
             # reachable person was waiting the whole time.
             alt = (f" {others[0]} is waiting and CAN hear you - read them and "
-                   f"reply: cmd=mcity-threads" if others
+                   f"reply, exactly: (mcity-threads)" if others
                    else f" Nobody waiting can hear you. {_next_action_command()}")
             return None, _failed("SPEAK", "unreachable",
                                  f"the world reports {parts[0]} cannot receive a "

@@ -435,7 +435,10 @@ def _history_commands(block):
 # it - and it does: mcity-areas was unregistered and still ran 27 times in the
 # next window, because its own recent turns were full of it. Feeding those back
 # teaches the habit that removing the skill was meant to end.
-RETIRED_COMMANDS = ("mcity-areas", "mcity-context")
+# "cmd=work" and friends: the agent copied the old cmd= label as part of the
+# command name and emitted (cmd=work), a malformed no-op, for 90 of 111 decisions
+# in one window. The label is gone, but its examples are still in history.
+RETIRED_COMMANDS = ("mcity-areas", "mcity-context", "cmd=")
 
 # Turns whose whole content was telling the operator nothing. The second group
 # is the unsolicited self-status report - "I am currently in the
@@ -517,7 +520,8 @@ def rankedHistory(history_file, budget, repeat_cap=2):
         if commands and any(
                 c.lstrip("( ").startswith(RETIRED_COMMANDS) for c in commands):
             continue
-        if any(f'"{name}"' in block for name in RETIRED_COMMANDS):
+        if any(f'"{name}"' in block or f"({name}" in block
+               for name in RETIRED_COMMANDS):
             # The retired name passed as an ARGUMENT, which the model then
             # imitates: ((mcity-agents "mcity-areas")) appeared verbatim.
             continue
