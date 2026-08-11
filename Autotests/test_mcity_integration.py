@@ -939,3 +939,18 @@ def test_busy_city_refuses_the_unreachable_and_redirects(monkeypatch):
     assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
     assert "user-agent-awake is waiting" in result
     assert "cmd=mcity-threads" in result
+
+
+def test_the_areas_skill_is_not_offered_to_the_agent():
+    """mcity-areas appeared in no step of the mission, its results were never
+    acted on - the one journey the agent made came from the harness's own route -
+    and it accounted for most of the read-repeat refusals at roughly 31KB a call.
+    The plugin still reads areas internally to build that route; the agent simply
+    is not handed a skill it only ever spends turns on."""
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    metta = (repo / "plugins" / "mcity" / "mcity.metta").read_text()
+    assert "add-skill mcity-areas" not in metta
+    assert "(= (mcity-areas)" in metta, "the binding stays: history may still call it"
+    assert 'VITALS", "areas"' in (repo / "plugins" / "mcity" / "mcity_client.py").read_text(), \
+        "the harness must still read areas to compute a route"
