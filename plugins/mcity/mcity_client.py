@@ -1538,14 +1538,14 @@ def _reachable_opener():
             # which command the agent was given - it fell back to cmd=mcity-work
             # while somebody was standing there free to talk.
             return _travel_to_people_command()
-        # NOT "cmd=mcity-speak <id> <your sentence>". A command with a
-        # placeholder in it cannot be copied verbatim, which is the only thing
-        # this agent reliably does: that exact form was emitted 63 times in
-        # three minutes and produced one speak. mcity-agents is complete and
-        # valid on its own, and lands the agent on the roster where the
-        # can-speak=yes rows are, with the name carried in the note.
-        return (f"{_plain(best)} is free to talk right now, and the roster will "
-                f"give you the exact id, exactly: (mcity-agents)")
+        # Point at the conversation, not at a lookup. This used to hand over
+        # (mcity-agents) so the agent could find an id - but vitals already
+        # carries talk-to= with that id, so the roster read is a turn spent
+        # learning what it was just told. Measured while it did: 99 of 102
+        # commands were mcity-work and not one was a speak, with a reachable
+        # person named on every vitals line.
+        return (f"{_plain(best)} is free to talk right now: "
+                f"(mcity-speak _quote_{best} then your sentence_quote_)")
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return None
 

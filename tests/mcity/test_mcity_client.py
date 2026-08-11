@@ -1149,9 +1149,8 @@ def test_the_repeat_refusal_points_at_someone_reachable(control):
     assert result.startswith("MCITY-THREADS-FAILED reason=repeat")
     assert "nobody waiting can hear you" in result
     head = result.partition("\n")[0]
-    assert "(mcity-agents)" in head, \
-        "the command must lead, not trail: the agent reads the head"
-    assert "user-agent-awake" in result, "and it must still name who is free"
+    assert "(mcity-speak _quote_user-agent-awake" in head, \
+        "the command must lead, and must be the conversation, not a lookup"
 
 
 def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(control):
@@ -1183,7 +1182,7 @@ def test_the_opener_fetches_a_name_when_it_has_none(control):
     opener = mc._reachable_opener()
     # The suggestion is mcity-agents, not a speak with a placeholder sentence:
     # a command that cannot be copied verbatim does not get used.
-    assert "user-agent-awake" in opener and "(mcity-agents)" in opener
+    assert "(mcity-speak _quote_user-agent-awake" in opener
 
 
 def test_an_engaged_target_is_unreachable_despite_can_speak(control):
@@ -1393,7 +1392,7 @@ def test_no_travel_hint_when_the_free_people_are_already_here(control):
     _check(mc.agents())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
     opener = mc._reachable_opener()
-    assert "user-agent-here" in opener and "(mcity-agents)" in opener, opener
+    assert "(mcity-speak _quote_user-agent-here" in opener, opener
     assert "free agents are at" not in opener
 
 
@@ -1494,8 +1493,7 @@ def test_a_suggested_command_is_always_complete_and_copyable(control):
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     opener = mc._reachable_opener()
     assert "<" not in opener and ">" not in opener, f"placeholder survived: {opener}"
-    assert "(mcity-agents)" in opener
-    assert "user-agent-free" in opener, "the name still has to reach the agent"
+    assert "(mcity-speak _quote_user-agent-free" in opener, opener
 
 
 def test_an_unusable_agent_id_is_never_suggested(control):
