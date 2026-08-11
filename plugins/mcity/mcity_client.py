@@ -3353,6 +3353,15 @@ def _destination_action(verb, arg, key, usage):
         value = _norm_arg(arg)
         if not value or not ID_RE.match(value):
             return None, _failed(verb, "bad_args", usage)
+        # Going where we already are. The world answers "area not found: central"
+        # because a space is not an area, and the agent reaches for the name it
+        # can see on the vitals line - at=central - which is exactly the one that
+        # cannot work.
+        here = _VITALS.get("space")
+        if here and value == here and _VITALS.get("at_ms"):
+            return None, _failed(verb, "already_here",
+                                 f"you are already at {here}; that is the name of "
+                                 "where you are standing, not somewhere to go")
         return {"kind": "move_to", "destination": {key: value}}, None
     return _mutate(verb, build)
 

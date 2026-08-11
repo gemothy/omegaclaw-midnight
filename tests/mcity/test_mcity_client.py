@@ -2377,3 +2377,21 @@ def test_the_route_stops_offering_a_door_that_does_not_open(control):
                        "space_kind": "interior"})
     mc._no_link_exit_until_ms = mc._now_ms() + 60000
     assert "exit-building" not in (mc._travel_to_people_command() or "")
+
+
+def test_moving_to_where_we_already_are_is_refused(control):
+    """The world answers 'area not found: central' - a space is not an area - and
+    the agent reaches for the name it can see on the vitals line, at=central,
+    which is exactly the one that cannot work."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
+    result = _check(mc.move_area("central"))
+    assert result.startswith("MCITY-MOVE-AREA-FAILED reason=already_here")
+    assert not control.actions
+
+
+def test_moving_somewhere_else_is_untouched(control):
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
+    _check(mc.move_area("bison-valley"))
+    assert control.actions
