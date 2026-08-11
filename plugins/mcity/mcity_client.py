@@ -601,16 +601,23 @@ def _suppress_repeat(verb, result):
             # the way the merchant cmd= and the escape hint do.
             if verb == "THREADS" and not _WAITING.get("ids"):
                 opener = _reachable_opener()
-                nudge = (f"Nobody waiting can hear you. {opener}" if opener
-                         else f"Nobody waiting can hear you. {_next_action_command()}")
+                nudge = (opener if opener and opener.startswith("Start")
+                         else _next_action_command())
+                nudge = f"{nudge} - nobody waiting can hear you"
             else:
-                nudge = ("Take a world action now: answer a row whose mine=no "
-                         "with mcity-speak, or eat, work or trade")
+                waiting = _someone_is_waiting()
+                nudge = (f"Do this instead: cmd=mcity-speak {waiting[0]} "
+                         "<your sentence>" if waiting
+                         else _next_action_command())
+            # Lead with the command. Every turn was a bare (mcity-threads) and
+            # nothing else, and its own history - all mcity-threads - is what it
+            # pattern-matches next. The instruction sat two hundred characters
+            # into the line, past the point it reads. So the command comes first
+            # and the explanation follows it.
             return _failed(verb, "repeat",
-                           f"{head} and it has not changed for {age}s across "
-                           f"{prev['n'] + 1} reads - this read is refused because "
-                           f"looking again cannot change it. {nudge}. Reading is "
-                           "not one of the choices")
+                           f"{nudge} -- unchanged for {age}s across "
+                           f"{prev['n'] + 1} identical reads, so reading again "
+                           f"cannot change anything. {head}")
         return (f"{head} unchanged for {age}s across {prev['n'] + 1} reads; "
                 "re-reading cannot change it, so act instead of looking again")
     except Exception:      # noqa: BLE001 - never break a skill over an optimisation

@@ -885,7 +885,9 @@ def test_a_look_only_loop_is_eventually_refused(control):
     it cannot mistake for progress."""
     seen = [_check(mc.threads()) for _ in range(mc._REPEAT_REFUSE_AT + 1)]
     assert seen[-1].startswith("MCITY-THREADS-FAILED reason=repeat")
-    assert "Reading is not one of the choices" in seen[-1]
+    assert "cmd=mcity-" in seen[-1].partition(" -- ")[0], \
+        "the refusal must lead with a command the agent can copy"
+    assert "reading again cannot change anything" in seen[-1]
     assert not any(s.startswith("MCITY-THREADS-FAILED") for s in seen[:2]), \
         "the first reads must be answered normally"
 
@@ -1142,8 +1144,10 @@ def test_the_repeat_refusal_points_at_someone_reachable(control):
         mc.threads()
     result = _check(mc.threads())
     assert result.startswith("MCITY-THREADS-FAILED reason=repeat")
-    assert "Nobody waiting can hear you" in result
-    assert "cmd=mcity-speak user-agent-awake" in result
+    assert "nobody waiting can hear you" in result
+    head = result.partition(" -- ")[0]
+    assert "cmd=mcity-speak user-agent-awake" in head, \
+        "the command must lead, not trail: the agent reads the head"
 
 
 def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(control):
@@ -1158,8 +1162,8 @@ def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(contro
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
     result = _check(mc.threads())
     assert mc._WAITING["ids"] == ["agent-2"]
-    assert "answer a row whose mine=no" in result
-    assert "Nobody waiting can hear you" not in result
+    assert "cmd=mcity-speak agent-2" in result
+    assert "nobody waiting can hear you" not in result
 
 
 def test_the_opener_fetches_a_name_when_it_has_none(control):
