@@ -575,3 +575,29 @@ def test_vitals_survive_truncation(monkeypatch):
     assert out.endswith(mc._vitals_line())     # vitals kept
     assert "...TRUNCATED" in out               # body was the thing cut
     assert len(out) <= 200 + len(mc._vitals_line()) + 20
+
+
+def test_eat_is_refused_when_not_hungry(monkeypatch):
+    """Once fed, the agent issued eat 88 times in ten minutes against
+    'agent is not hungry', and the holding= hint made it worse by confirming it
+    still had food. Eating when not hungry cannot succeed, so it is refused from
+    our own vitals without a world call."""
+    called = []
+    monkeypatch.setattr(mc, "_mutate", lambda verb, build: called.append(verb) or "MCITY-EAT-OK")
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(1)",
+                       "space": "central", "items": "to_go_food=3", "status": "idle"})
+    out = mc.eat()
+    assert "not_hungry" in out
+    assert called == []                       # no world call at all
+
+    # Starving still goes through to the world.
+    mc._VITALS["hunger"] = "starving(100)"
+    mc.eat()
+    assert called == ["EAT"]
+
+    # Stale vitals must not block a legitimate attempt.
+    called.clear()
+    mc._VITALS.update({"hunger": "normal(1)",
+                       "at_ms": mc._now_ms() - (mc._VITALS_STALE_MS + 1000)})
+    mc.eat()
+    assert called == ["EAT"]

@@ -2417,7 +2417,19 @@ def eat():
 
     So we restate the fact in TRUSTED harness text, derived from our own
     inventory read rather than from anything the world said. `holding=` is
-    ground truth the agent may act on; the world's prose stays quarantined."""
+    ground truth the agent may act on; the world's prose stays quarantined.
+
+    The opposite failure then appeared: once fed, it issued eat 88 times in ten
+    minutes against "agent is not hungry", and the holding= hint made it worse
+    by confirming it still had food. Eating when not hungry cannot succeed, so
+    it is refused here from our own vitals - no world call, and the reason is
+    stated in trusted text rather than quarantined prose."""
+    hunger = _VITALS.get("hunger") or ""
+    fresh = _VITALS.get("at_ms") and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS
+    if fresh and hunger.startswith(("normal", "full", "fed")):
+        return _out(_failed("EAT", "not_hungry",
+                            f"vitals says hunger={hunger}; eating only works when "
+                            "hungry or starving, so do something else this turn"))
     result = _mutate("EAT", lambda: ({"kind": "eat"}, None))
     if "MCITY-EAT-FAILED" not in (result or ""):
         return result
