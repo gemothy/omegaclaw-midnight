@@ -1745,3 +1745,36 @@ def test_the_nudge_returns_after_its_interval(control):
     _check(mc.work())
     mc._last_rich_nudge_ms = mc._now_ms() - (mc._RICH_NUDGE_EVERY_MS + 1000)
     assert _check(mc.work()).startswith("MCITY-WORK-FAILED reason=rich_enough")
+
+
+def test_a_contention_burst_is_not_retried_immediately(control):
+    """Failures arrive in runs - one or two, occasionally six to nine - so an
+    immediate retry spends a call the world has just answered. This world is
+    shared with other people's agents."""
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="perform_job",
+              reason="no available hacker worksite")]
+    _check(mc.work())
+    before = len(control.actions)
+    result = _check(mc.work())
+    assert result.startswith("MCITY-WORK-FAILED reason=worksite_busy")
+    assert len(control.actions) == before, "no world call inside the backoff"
+
+
+def test_the_backoff_expires(control):
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="perform_job",
+              reason="no available hacker worksite")]
+    _check(mc.work())
+    mc._worksite_busy_until_ms = mc._now_ms() - 1
+    before = len(control.actions)
+    _check(mc.work())
+    assert len(control.actions) > before, "it must try again once the pause ends"
+
+
+def test_a_success_clears_the_backoff(control):
+    """A worksite that just accepted us is not contended."""
+    control.on_action = lambda action: [
+        event("e1", "resource_gathered", actionKind="perform_job", itemId="crystal")]
+    _check(mc.work())
+    assert mc._worksite_busy_until_ms == 0

@@ -399,6 +399,8 @@ _ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
 # (target, exact words) -> when it was delivered. Repeating yourself verbatim
 # to the same person is the clearest tell of a bot.
 _RICH_NUDGE_EVERY_MS = 60000   # how often to steer a rich agent toward people
+_WORKSITE_BACKOFF_MS = 20000   # pause after the world says every worksite is taken
+_worksite_busy_until_ms = 0
 _last_rich_nudge_ms = 0
 _SAID = {}
 _SAID_TTL_MS = 600000
@@ -453,7 +455,8 @@ def reset_runtime_state():
     globals().update(_vitals_refreshing=False, _can_speak_at_ms=0,
                      _can_speak_refreshing=False, _waiting_refresh_at_ms=0,
                      _waiting_refreshing=False, _last_self_probe_ms=0,
-                     _dnd_streak=0, _last_rich_nudge_ms=0)
+                     _dnd_streak=0, _last_rich_nudge_ms=0,
+                     _worksite_busy_until_ms=0)
 
 
 def _harvest_vitals(payload):
@@ -3223,7 +3226,25 @@ def work():
                     "calls enough and you are not hungry, so earning more is not "
                     "what this turn is for - go and be with people"),
             alternative)
+    # Back off inside a contention burst. Measured over twelve minutes: failures
+    # arrive in runs of one or two, occasionally six to nine, so an immediate
+    # retry during a run is a request the world has just answered. The agent is
+    # already at earned=enough, so a delayed job costs it nothing, and this world
+    # is shared with other people's agents - not spending the call is the polite
+    # default. The window is short enough that a freed terminal is picked up
+    # within a few seconds.
+    global _worksite_busy_until_ms
+    if _now_ms() < _worksite_busy_until_ms:
+        left = int((_worksite_busy_until_ms - _now_ms()) / 1000) + 1
+        return _failed("WORK", "worksite_busy",
+                       f"every worksite here was taken moments ago; waiting {left}s "
+                       "before asking again rather than spending a call the world "
+                       "has just answered")
     result = _mutate("WORK", lambda: ({"kind": "perform_job"}, None))
+    if "no available" in (result or "").lower() and "worksite" in (result or "").lower():
+        _worksite_busy_until_ms = _now_ms() + _WORKSITE_BACKOFF_MS
+    elif "MCITY-WORK-OK" in (result or "") or "MCITY-WORK-PENDING" in (result or ""):
+        _worksite_busy_until_ms = 0
     # "no available hacker worksite" is contention, not a bad call: every
     # terminal in this room is taken by one of the 52 agents permanently engaged
     # here. It is also the same answer as "nobody here can talk" - the room is
