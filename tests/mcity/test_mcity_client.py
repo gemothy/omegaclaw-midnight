@@ -1145,9 +1145,10 @@ def test_the_repeat_refusal_points_at_someone_reachable(control):
     result = _check(mc.threads())
     assert result.startswith("MCITY-THREADS-FAILED reason=repeat")
     assert "nobody waiting can hear you" in result
-    head = result.partition(" -- ")[0]
-    assert "cmd=mcity-speak user-agent-awake" in head, \
+    head = result.partition("\n")[0]
+    assert "cmd=mcity-agents" in head, \
         "the command must lead, not trail: the agent reads the head"
+    assert "user-agent-awake" in result, "and it must still name who is free"
 
 
 def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(control):
@@ -1176,7 +1177,9 @@ def test_the_opener_fetches_a_name_when_it_has_none(control):
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     assert not mc._CAN_SPEAK
     opener = mc._reachable_opener()
-    assert "cmd=mcity-speak user-agent-awake" in opener
+    # The suggestion is mcity-agents, not a speak with a placeholder sentence:
+    # a command that cannot be copied verbatim does not get used.
+    assert "user-agent-awake" in opener and "cmd=mcity-agents" in opener
 
 
 def test_an_engaged_target_is_unreachable_despite_can_speak(control):
@@ -1382,7 +1385,7 @@ def test_no_travel_hint_when_the_free_people_are_already_here(control):
     _check(mc.agents())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
     opener = mc._reachable_opener()
-    assert "cmd=mcity-speak user-agent-here" in opener, opener
+    assert "user-agent-here" in opener and "cmd=mcity-agents" in opener, opener
     assert "free agents are at" not in opener
 
 
@@ -1467,3 +1470,26 @@ def test_promoting_a_command_never_breaks_the_result_prefix(control):
     assert promoted.startswith("MCITY-WORK-FAILED reason=rich_enough cmd=mcity-agents")
     assert promoted.count("cmd=mcity-agents") == 1, "the command must not duplicate"
     assert "enough already" in promoted
+
+
+def test_a_suggested_command_is_always_complete_and_copyable(control):
+    """'cmd=mcity-speak <id> <your sentence>' was emitted 63 times in three
+    minutes and produced one speak: a command with a placeholder cannot be copied
+    verbatim, which is the only thing this agent reliably does."""
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "isOpenToTalk": True, "canSpeak": True, "status": "idle"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    opener = mc._reachable_opener()
+    assert "<" not in opener and ">" not in opener, f"placeholder survived: {opener}"
+    assert "cmd=mcity-agents" in opener
+    assert "user-agent-free" in opener, "the name still has to reach the agent"
+
+
+def test_an_unusable_agent_id_is_never_suggested(control):
+    """The roster carries ids like 'nyx'. mcity-speak rejects anything that is
+    not a user-agent- id, so suggesting one only earns a bad_args refusal."""
+    mc._CAN_SPEAK["nyx"] = (True, mc._now_ms())
+    control.force("/api/skill/agents/agent-1/agents", 200,
+                  json.dumps({"agents": []}).encode())
+    opener = mc._reachable_opener() or ""
+    assert "nyx" not in opener

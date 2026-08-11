@@ -1303,6 +1303,17 @@ def _next_action_command():
     return "Do this instead: cmd=mcity-work"
 
 
+def _looks_speakable(agent_id):
+    """ID_RE is a general id pattern and accepts things like "nyx".
+
+    The roster carries such ids - NPCs and system agents, all off-map with
+    canSpeak false - and the skill documents a character id as one starting
+    user-agent-. Suggesting anything else only earns a refusal, so suggestions
+    are held to the documented form even though the argument check is looser."""
+    return bool(agent_id) and ID_RE.match(agent_id) is not None \
+        and agent_id.startswith("user-agent-")
+
+
 def _reachable_opener():
     """A copyable opener aimed at someone who can actually hear it.
 
@@ -1313,7 +1324,11 @@ def _reachable_opener():
     try:
         def _fresh():
             for agent_id, (can, at) in _CAN_SPEAK.items():
-                if can and (_now_ms() - at) <= _CAN_SPEAK_TTL_MS:
+                # ID_RE matters: mcity-speak rejects anything that is not a
+                # user-agent- id, and the roster carries ids like "nyx" that
+                # would be suggested and then refused as bad arguments.
+                if can and _looks_speakable(agent_id) \
+                        and (_now_ms() - at) <= _CAN_SPEAK_TTL_MS:
                     return agent_id
             return None
 
@@ -1330,8 +1345,14 @@ def _reachable_opener():
             return ("Nobody in the city can receive a message right now, so "
                     "conversation is not available this turn: work, eat or "
                     "trade instead and try again later")
-        return (f"Start a conversation with someone who can: "
-                f"cmd=mcity-speak {best} <your sentence>")
+        # NOT "cmd=mcity-speak <id> <your sentence>". A command with a
+        # placeholder in it cannot be copied verbatim, which is the only thing
+        # this agent reliably does: that exact form was emitted 63 times in
+        # three minutes and produced one speak. mcity-agents is complete and
+        # valid on its own, and lands the agent on the roster where the
+        # can-speak=yes rows are, with the name carried in the note.
+        return (f"{_plain(best)} is free to talk right now, and the roster will "
+                f"give you the exact id: cmd=mcity-agents")
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return None
 
