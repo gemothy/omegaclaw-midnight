@@ -1855,3 +1855,22 @@ def test_the_backoff_refusal_hands_over_the_next_move(control):
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-FAILED reason=worksite_busy")
     assert "cmd=mcity-" in result.partition("\n")[0], "every refusal names a next move"
+
+
+def test_suggestions_never_name_someone_the_harness_would_refuse(control):
+    """Third copy of one rule. The rendered column and the cache were unified
+    earlier; _speak_candidates still filtered on raw canSpeak, so try-instead
+    could recommend a mid-engagement agent that the very next check refuses."""
+    roster = {"agents": [
+        {"agentId": "user-agent-engaged", "name": "Engaged", "distance": 1,
+         "isOpenToTalk": True, "canSpeak": True, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active"}},
+        {"agentId": "user-agent-free", "name": "Free", "distance": 40,
+         "isOpenToTalk": True, "canSpeak": True, "status": "idle",
+         "activeAction": None},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    suggestion = mc._speak_candidates()
+    assert suggestion and "user-agent-free" in suggestion
+    assert "user-agent-engaged" not in suggestion, \
+        "never suggest somebody the next check will refuse"

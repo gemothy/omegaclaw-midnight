@@ -3577,16 +3577,17 @@ def _speak_candidates(limit=3):
             default=[])
         ids = [row.agent_id for row in (ranked or [])
                if row.agent_id in reachable
-               and reachable[row.agent_id].get("can_speak") is not False]
+               and _entry_reachable(reachable[row.agent_id])]
     else:
         ids = []
     if not ids:
-        # Store unavailable: fall back to the live flags. Filter on canSpeak, NOT
-        # on isOpenToTalk - a live roster had isOpenToTalk true for 283 of 285
-        # agents including all 165 who were asleep, so suggesting on it handed
-        # the agent a list of people who could not hear it either.
-        usable = [e for e in roster
-                  if e["id"] and e.get("can_speak") is not False]
+        # Store unavailable: fall back to the live flags, through the SAME
+        # verdict the rendered column and the cache use. Filtering on raw
+        # canSpeak here - as this did - suggested agents who were mid-engagement
+        # and would be refused by the very next check; filtering on isOpenToTalk,
+        # as it did before that, was worse still, true for 283 of 285 agents
+        # including all 165 who were asleep. Third copy of one rule, now gone.
+        usable = [e for e in roster if e["id"] and _entry_reachable(e)]
         usable.sort(key=lambda e: _number(e["dist"], float("inf"), 0.0, float("inf")))
         ids = [e["id"] for e in usable[:limit]]
     if not ids:
