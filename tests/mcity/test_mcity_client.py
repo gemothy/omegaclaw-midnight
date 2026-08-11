@@ -2034,3 +2034,25 @@ def test_nobody_here_points_at_where_people_are(control):
     result = _check(mc.agents())
     assert result.startswith("MCITY-AGENTS-FAILED reason=nobody_reachable")
     assert "cmd=mcity-move-area central-plaza" in result.partition("\n")[0], result
+
+
+def test_stale_place_knowledge_is_refreshed_not_ignored(control):
+    """This refreshed only when the places dict was EMPTY, so once filled and
+    aged out it returned None for ever - and the roster rate-limit added later
+    meant the scan that refills it rarely ran. Live symptom: 55 free agents at
+    central and no route offered for three deploys."""
+    mc._AWAKE_PLACES["harbour"] = (3, mc._now_ms() - (mc._AWAKE_PLACES_TTL_MS + 5000))
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [{"id": "central-plaza", "kind": "park",
+                        "moveAreaAvailable": True,
+                        "anchor": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    hint = mc._travel_to_people_command()
+    assert hint and "central-plaza" in hint, hint

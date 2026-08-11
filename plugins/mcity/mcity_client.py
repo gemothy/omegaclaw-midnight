@@ -1536,17 +1536,26 @@ def _travel_to_people_command():
             # needs, so without this the indoor check never had its input.
             _skill_read("VITALS", "context")
         indoors = (_VITALS.get("space_kind") or "").lower() == "interior"
-        if not _AWAKE_PLACES:
-            # Nothing recorded yet: the cache fills from roster reads, and the
-            # agent rarely calls mcity-agents on its own. One bounded read.
+
+        def _pick():
+            now = _now_ms()
+            best, count = None, 0
+            for space, (seen, at) in _AWAKE_PLACES.items():
+                if space == here or (now - at) > _AWAKE_PLACES_TTL_MS:
+                    continue
+                if seen > count:
+                    best, count = space, seen
+            return best, count
+
+        best, count = _pick()
+        if best is None:
+            # STALE counts as missing. This only refreshed when the dict was
+            # empty, so once it had been filled and aged out the function
+            # returned None for ever - and the roster rate-limit added later
+            # meant the scan that refills it rarely ran. Live symptom: 55 free
+            # agents at central, and no route offered for three deploys.
             _refresh_can_speak_if_unknown((), force=True)
-        now = _now_ms()
-        best, count = None, 0
-        for space, (seen, at) in _AWAKE_PLACES.items():
-            if space == here or (now - at) > _AWAKE_PLACES_TTL_MS:
-                continue
-            if seen > count:
-                best, count = space, seen
+            best, count = _pick()
         if not best or not ID_RE.match(best):
             return None
         payload, error = _skill_read("VITALS", "areas")
