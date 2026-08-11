@@ -34,6 +34,8 @@ def _reset_module_state():
     mc._can_speak_at_ms = 0
     mc._dnd_streak = 0
     mc._last_self_probe_ms = 0
+    mc._waiting_refresh_at_ms = 0
+    mc._waiting_refreshing = False
     mc._can_speak_refreshing = False
     mc._LAST_READ.clear()
     mc._WAITING.update({'at_ms': 0, 'ids': []})
@@ -46,6 +48,8 @@ def _reset_module_state():
     mc._can_speak_at_ms = 0
     mc._dnd_streak = 0
     mc._last_self_probe_ms = 0
+    mc._waiting_refresh_at_ms = 0
+    mc._waiting_refreshing = False
     mc._can_speak_refreshing = False
     mc._LAST_READ.clear()
     mc._WAITING.update({'at_ms': 0, 'ids': []})

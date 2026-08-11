@@ -1305,3 +1305,41 @@ def test_pruning_never_drops_a_live_entry(control):
     mc._CAN_SPEAK["user-agent-live"] = (True, fresh)
     mc._prune(mc._CAN_SPEAK, mc._CAN_SPEAK_TTL_MS, lambda v: v[1])
     assert "user-agent-live" in mc._CAN_SPEAK
+
+
+def test_vitals_carries_the_waiting_count(control):
+    """About a third of all turns were mcity-threads returning an unchanged
+    list, because the procedure had to poll to learn whether anyone was waiting.
+    That is the trap vitals already solved for hunger and inventory."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    assert "waiting=0" in mc._vitals_line()
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-abc"]})
+    line = mc._vitals_line()
+    assert "waiting=1" in line and "answer user-agent-abc" in line
+
+
+def test_the_waiting_refresh_is_rate_limited(control):
+    """One GET at most per window, not one per result: vitals is appended to
+    every single skill result."""
+    mc._waiting_refresh_at_ms = 0
+    mc._refresh_waiting_if_stale()
+    mc._refresh_waiting_if_stale()
+    mc._refresh_waiting_if_stale()
+    reads = [r for r in control.requests if "threads" in r[1]]
+    assert len(reads) == 1, f"expected one threads read, saw {len(reads)}"
+
+
+def test_the_waiting_refresh_agrees_with_the_rendered_rows(control):
+    """One implementation, not two: the count on the vitals line and the rows in
+    mcity-threads must never disagree about who is waiting."""
+    waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
+                            "pendingRecipientAgentId": "agent-1",
+                            "preview": "are you around"}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    _check(mc.threads())
+    from_rows = list(mc._WAITING["ids"])
+    mc._waiting_refresh_at_ms = 0
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    mc._refresh_waiting_if_stale()
+    assert mc._WAITING["ids"] == from_rows == ["agent-2"]

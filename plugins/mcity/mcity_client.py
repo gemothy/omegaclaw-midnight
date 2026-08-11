@@ -375,6 +375,9 @@ _REPEATABLE_READS = frozenset((
 # the thread dies. Prose is not enforcement; this is.
 _WAITING = {"at_ms": 0, "ids": []}
 _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
+_WAITING_REFRESH_MS = 20000    # how often vitals re-checks who is waiting
+_waiting_refresh_at_ms = 0
+_waiting_refreshing = False
 # Who the world said was asleep, and when. Measured: the world's actual rejection
 # is "target is sleeping" - the speaker's own busy status was never the blocker,
 # though the harness assumed it was and stayed silent for hours because of it.
@@ -489,6 +492,7 @@ def _refresh_vitals_if_stale():
         _skill_read("VITALS", "needs")
         if not _VITALS.get("items"):
             _skill_read("VITALS", "inventory")
+        _refresh_waiting_if_stale()
     except Exception:  # noqa: BLE001 - grounding must never break a skill
         pass
     finally:
@@ -516,6 +520,13 @@ def _vitals_line():
     if _VITALS.get("busy_for"):
         parts.append(f"busy-for={_VITALS['busy_for']}s"
                      " (cannot speak until this ends)")
+    # waiting= is the whole reason the agent was polling mcity-threads every
+    # turn. Carrying it here removes the reason to look, exactly as hunger and
+    # inventory did: it counts only people who can actually hear a reply, so
+    # zero means there is nothing a thread read could do for you.
+    waiting = _someone_is_waiting()
+    parts.append(f"waiting={len(waiting)}"
+                 + (f" (answer {waiting[0]})" if waiting else ""))
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -2291,6 +2302,82 @@ def recent_events():
     return _line("RECENT-EVENTS", "OK", (("count", len(items)),), rows or ["- none"])
 
 
+def _thread_mine(item, own_id, sender=None):
+    """"yes" if we spoke last, "no" if somebody is waiting on us, else None.
+
+    Extracted so the vitals refresh can reach the same answer as the rendered
+    row: two implementations of this would drift, and this is the flag the whole
+    procedure turns on."""
+    if own_id and isinstance(sender, str) and sender.strip():
+        return "yes" if sender.strip() == own_id else "no"
+    if not own_id:
+        return None
+    # No sender field exists in this world's payload. Two facts do:
+    # pendingRecipientAgentId names whoever owes a reply, and the two message
+    # counts say who has spoken. Either is enough to decide whether somebody is
+    # waiting on us - which is the whole point of the flag, and the reason a
+    # real question sat unanswered.
+    pending = _get(item, "pendingRecipientAgentId")
+    if isinstance(pending, str) and pending.strip():
+        return "no" if pending.strip() == own_id else "yes"
+    recipient = _get(item, "recipientAgentId")
+    ours = _number(_get(item, "recipientMessageCount"), -1, 0, 10 ** 9)
+    theirs = _number(_get(item, "initiatorMessageCount"), -1, 0, 10 ** 9)
+    if (isinstance(recipient, str) and recipient.strip() == own_id
+            and ours == 0 and theirs > 0):
+        return "no"                      # they opened it, we have never replied
+    return None
+
+
+def _refresh_waiting_if_stale():
+    """Keep waiting= current without the agent spending a turn on it.
+
+    Measured: about a third of all turns were mcity-threads returning a list
+    that had not changed, because the procedure had to poll to find out whether
+    anyone was waiting. That is the same trap vitals already solved for hunger
+    and inventory - the fact rides along on every result instead, and the agent
+    only opens the thread list when the count says there is a reason to.
+
+    One GET at most every _WAITING_REFRESH_MS, which is far cheaper than a whole
+    turn. Never raises."""
+    global _waiting_refresh_at_ms, _waiting_refreshing
+    with _lock:
+        if _waiting_refreshing:
+            return
+        if (_waiting_refresh_at_ms
+                and (_now_ms() - _waiting_refresh_at_ms) < _WAITING_REFRESH_MS):
+            return
+        _waiting_refreshing = True
+    try:
+        payload, error = _own_threads("VITALS")
+        if error is not None:
+            return
+        items = _find_list(payload, "threads") or []
+        own_id = _c("agent_id", "")
+        found = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            others = [str(part).strip()
+                      for part in (_get(item, "participants", "participantIds",
+                                        "with") or ())
+                      if isinstance(part, str) and part.strip()
+                      and part.strip() != own_id]
+            if _thread_mine(item, own_id) != "no":
+                continue
+            if len(others) == 1 and ID_RE.match(others[0]) \
+                    and _can_be_reached(others[0]) is not False:
+                found.append(others[0])
+        _WAITING["at_ms"] = _now_ms()
+        _WAITING["ids"] = found
+        _waiting_refresh_at_ms = _now_ms()
+    except Exception:      # noqa: BLE001 - grounding must never break a skill
+        pass
+    finally:
+        with _lock:
+            _waiting_refreshing = False
+
+
 def _own_threads(verb):
     """GET the thread list of our own agent. nginx injects the master token on
     /api/threads/, so this listing is the only thing that pins a thread read to
@@ -2368,25 +2455,7 @@ def threads(_ignored=None):
         # mine=no is a person waiting on our reply; the ranking exists so that
         # those threads are the ones that survive the budget, exactly like the
         # ACTION REQUIRED imperative inside mcity-thread.
-        mine = None
-        if own_id and isinstance(sender, str) and sender.strip():
-            mine = "yes" if sender.strip() == own_id else "no"
-        if mine is None and own_id:
-            # No sender field exists in this world's payload. Two facts do:
-            # pendingRecipientAgentId names whoever owes a reply, and the two
-            # message counts say who has spoken. Either is enough to decide
-            # whether somebody is waiting on us - which is the whole point of
-            # the flag, and the reason a real question sat unanswered.
-            pending = _get(item, "pendingRecipientAgentId")
-            if isinstance(pending, str) and pending.strip():
-                mine = "no" if pending.strip() == own_id else "yes"
-            else:
-                recipient = _get(item, "recipientAgentId")
-                ours = _number(_get(item, "recipientMessageCount"), -1, 0, 10 ** 9)
-                theirs = _number(_get(item, "initiatorMessageCount"), -1, 0, 10 ** 9)
-                if (isinstance(recipient, str) and recipient.strip() == own_id
-                        and ours == 0 and theirs > 0):
-                    mine = "no"          # they opened it, we have never replied
+        mine = _thread_mine(item, own_id, sender)
         asleep = False
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
             # False only when the world has actually said so; unknown counts as
