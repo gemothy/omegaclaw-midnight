@@ -73,14 +73,17 @@ def test_idle_reports_are_not_fed_back_as_examples(tmp_path):
     assert "mcity-work" in body, "the real turn must survive"
 
 
-def test_a_send_that_says_something_is_kept(tmp_path):
-    """Narrow by design: a send answering a real message, or reporting a world
-    outcome, is what the channel exists for."""
+def test_a_send_that_answers_somebody_is_kept(tmp_path):
+    """What distinguishes a send worth imitating is that somebody asked. Both of
+    these answer a real message, so both survive; the same sentences without a
+    HUMAN_MESSAGE would not, which is the point of the structural rule."""
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
-        '("2026-08-11 10:00:00" \n ((send "Traded 50 crystal, confirmed by the world")) \n)\n'
-        '("2026-08-11 10:00:10" \n ((send "Yes - I am at the hacker house tonight")) \n)\n',
+        '("2026-08-11 10:00:00" \nHUMAN_MESSAGE: how did the trade go?\n'
+        ' ((send "Traded 50 crystal, confirmed by the world")) \n)\n'
+        '("2026-08-11 10:00:10" \nHUMAN_MESSAGE: where are you tonight?\n'
+        ' ((send "Yes - I am at the hacker house tonight")) \n)\n',
         encoding="utf-8")
     body = helper.rankedHistory(str(history), 30000)
     assert "Traded 50 crystal" in body
@@ -155,23 +158,30 @@ def test_an_unsolicited_self_report_is_not_taught_back(tmp_path):
     assert "mcity-work" in body
 
 
-def test_a_real_report_of_an_outcome_is_still_taught(tmp_path):
-    """Reporting a confirmed world action is one of the two things send is for."""
+def test_an_unprompted_outcome_report_is_dropped_too(tmp_path):
+    """Reporting a confirmed action is legitimate and the mission still allows
+    it. But it carries no HUMAN_MESSAGE either, so it cannot be told apart from
+    the idle chatter structurally, and this is the accepted cost of not chasing
+    phrasings: history stops teaching the agent to talk to a human who did not
+    speak first, including in the cases where it would have been fine."""
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
         '("2026-08-11 10:00:00" \n ((send "Sold 50 crystal to Central Mart, '
         'confirmed by the world; holding 21k meme_coin")) \n)\n',
         encoding="utf-8")
-    assert "Sold 50 crystal" in helper.rankedHistory(str(history), 30000)
+    assert "Sold 50 crystal" not in helper.rankedHistory(str(history), 30000)
 
 
 def test_answering_a_person_is_still_taught(tmp_path):
+    """A reply to a real message carries HUMAN_MESSAGE, which is exactly what
+    distinguishes it, and it must always survive."""
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
-        '("2026-08-11 10:00:00" \n ((send "Yes - the shipment cleared customs '
-        'an hour ago, I watched it settle")) \n)\n',
+        '("2026-08-11 10:00:00" \nHUMAN_MESSAGE: did the shipment clear?\n'
+        ' ((send "Yes - the shipment cleared customs an hour ago, I watched it '
+        'settle")) \n)\n',
         encoding="utf-8")
     assert "shipment cleared" in helper.rankedHistory(str(history), 30000)
 
@@ -189,3 +199,36 @@ def test_the_malformed_cmd_form_is_not_taught_back(tmp_path):
     body = helper.rankedHistory(str(history), 30000)
     assert "cmd=work" not in body
     assert "mcity-work" in body
+
+
+def test_any_unprompted_send_is_dropped_whatever_it_says(tmp_path):
+    """Phrase matching lost this race. The list caught 'no new input', then 'I am
+    currently in...', and the agent invented 'I'm here and ready to connect' and
+    'heartbeat: operational and awaiting task directives' until sends were 77 of
+    92 turns. loop.metta writes HUMAN_MESSAGE: only when a message actually
+    arrived, so the absence of it is the fact to test."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        '("2026-08-11 10:00:10" \n ((send "heartbeat: operational and awaiting task directives.")) \n)\n'
+        '("2026-08-11 10:00:20" \n ((send "I am here and ready to connect. What is on your mind?")) \n)\n'
+        '("2026-08-11 10:00:30" \n ((send "A wording nobody has thought of yet")) \n)\n',
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "heartbeat" not in body
+    assert "ready to connect" not in body
+    assert "nobody has thought of" not in body
+    assert "mcity-work" in body
+
+
+def test_a_send_answering_a_real_message_is_always_kept(tmp_path):
+    """The one thing that must never be filtered: a reply to a human."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \nHUMAN_MESSAGE: how are the trades going?\n'
+        ' ((send "Sold 50 crystal at Central Mart, confirmed")) \n)\n',
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "Sold 50 crystal" in body

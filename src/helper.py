@@ -454,16 +454,27 @@ _IDLE_SEND_RE = re.compile(
 
 
 def _is_idle_report(block, commands):
-    """True for a turn whose whole content was telling the operator nothing.
+    """True for a turn that talked to the operator without being asked.
 
-    Deliberately narrow: only when EVERY command in the turn is a send, and the
-    text matches one of the known do-nothing phrases. A send that answers a real
-    message, or reports a world outcome, is exactly what the channel is for and
-    must survive."""
+    STRUCTURAL, not phrase-based. The phrase list caught "no new input", then "I
+    am currently in...", and the agent simply invented new wordings - "I'm here
+    and ready to connect", "heartbeat: operational and awaiting task directives"
+    - until sends were 77 of 92 turns. Chasing phrasings cannot win.
+
+    loop.metta writes HUMAN_MESSAGE: into a turn only when a new operator message
+    arrived on it, so a turn whose every command is a send and which has no
+    HUMAN_MESSAGE was unprompted by definition, whatever words it used.
+
+    The cost is accepted deliberately: a send reporting a confirmed world outcome
+    is legitimate and also has no HUMAN_MESSAGE, so those stop appearing as
+    exemplars too. The mission still permits them; history simply stops teaching
+    the agent to talk to a human who did not speak first."""
     # _history_commands keeps the leading paren: "(send \"...\")".
     if not commands or any(not c.lstrip("( ").startswith("send") for c in commands):
         return False
-    return bool(_IDLE_SEND_RE.search(block))
+    if "HUMAN_MESSAGE:" in block:
+        return False                      # answering a real message: always kept
+    return True
 
 
 def rankedHistory(history_file, budget, repeat_cap=2):
