@@ -399,6 +399,12 @@ _ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
 # (target, exact words) -> when it was delivered. Repeating yourself verbatim
 # to the same person is the clearest tell of a bot.
 _RICH_NUDGE_EVERY_MS = 60000   # how often to steer a rich agent toward people
+# What counts as edible in the holding= list. Deliberately a substring match on
+# "food": the world's item ids seen so far are to_go_food and raw_food, and a new
+# one should fail toward letting the agent try to eat rather than starving it on
+# a vocabulary gap. eat() still checks with the world, so a wrong guess costs one
+# refused call.
+FOOD_ITEMS = ("food",)
 _WORKSITE_BACKOFF_MS = 20000   # pause after the world says every worksite is taken
 _worksite_busy_until_ms = 0
 _last_rich_nudge_ms = 0
@@ -3164,6 +3170,18 @@ def _someone_is_waiting():
     return list(_WAITING["ids"])
 
 
+def _refuse_while_hungry(verb):
+    """A long action while hungry with food in the bag is never the right move."""
+    if not _needs_to_eat():
+        return None
+    return _promote_command(
+        _failed(verb, "eat_first",
+                f"vitals says hunger={_VITALS.get('hunger')} and you are carrying "
+                "food. This action takes minutes and you cannot eat while it "
+                "runs"),
+        "cmd=mcity-eat")
+
+
 def _refuse_while_someone_waits(verb):
     """Long actions are refused while a real person is waiting on a reply.
 
@@ -3185,6 +3203,19 @@ def _refuse_while_someone_waits(verb):
                    f"{who} <your sentence>, then come back to this")
 
 
+def _needs_to_eat():
+    """True when the agent is hungry and is carrying something edible.
+
+    Hunger climbed from 9 to 36 across a session in which the agent ate exactly
+    zero times, because eating is step three and it rarely got past step two.
+    Nothing in the harness protected it: the same enforcement that holds work
+    back for a waiting person should hold it back for this."""
+    hunger = (_VITALS.get("hunger") or "").lower()
+    if not hunger.startswith(("hungry", "starving")):
+        return False
+    return any(food in (_VITALS.get("items") or "") for food in FOOD_ITEMS)
+
+
 def _rich_enough():
     """True when the mission's own step four says to stop earning.
 
@@ -3202,7 +3233,7 @@ def _rich_enough():
 
 @_guard("WORK")
 def work():
-    blocked = _refuse_while_someone_waits("WORK")
+    blocked = _refuse_while_hungry("WORK") or _refuse_while_someone_waits("WORK")
     if blocked is not None:
         return blocked
     # Only stop earning when there is genuinely something better to do. The
@@ -3315,7 +3346,7 @@ def sleep_action(arg=None):
 
 @_guard("HARVEST")
 def harvest(arg=None):
-    blocked = _refuse_while_someone_waits("HARVEST")
+    blocked = _refuse_while_hungry("HARVEST") or _refuse_while_someone_waits("HARVEST")
     if blocked is not None:
         return blocked
 

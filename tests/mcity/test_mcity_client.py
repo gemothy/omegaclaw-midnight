@@ -1778,3 +1778,34 @@ def test_a_success_clears_the_backoff(control):
         event("e1", "resource_gathered", actionKind="perform_job", itemId="crystal")]
     _check(mc.work())
     assert mc._worksite_busy_until_ms == 0
+
+
+def test_a_hungry_agent_eats_before_starting_a_long_job(control):
+    """Hunger climbed from 9 to 36 across a session in which the agent ate
+    exactly zero times: eating is step three and it rarely got past step two.
+    Nothing in the harness protected it."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(61)",
+                       "items": "crystal=10 to_go_food=2"})
+    result = _check(mc.work())
+    assert result.startswith("MCITY-WORK-FAILED reason=eat_first")
+    assert "cmd=mcity-eat" in result.partition("\n")[0]
+    assert not control.actions, "no long action may start while hungry with food"
+
+
+def test_hunger_does_not_block_work_without_food(control):
+    """With nothing edible, refusing work would leave the agent no way to buy
+    food - the refusal must not become a trap."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "starving(90)",
+                       "items": "crystal=10"})
+    _check(mc.work())
+    assert control.actions, "with no food, earning must stay available"
+
+
+def test_a_fed_agent_is_not_told_to_eat(control):
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(36)",
+                       "items": "to_go_food=2"})
+    _check(mc.work())
+    assert control.actions
