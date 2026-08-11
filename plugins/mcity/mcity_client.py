@@ -1538,20 +1538,34 @@ def _travel_to_people_command():
                 best, count = space, seen
         if not best or not ID_RE.match(best):
             return None
-        if indoors:
-            # Nowhere outside is in the areas list while we are in an interior -
-            # measured: 'central' held 55 free agents and did not appear at all -
-            # and travelling from indoors is refused. The door comes first.
-            return (f"{count} free agents are out in {best}, and you are inside a "
-                    f"building. Step outside first: cmd=mcity-exit-building")
         payload, error = _skill_read("VITALS", "areas")
         if error is None:
-            for item in (_find_list(payload, "areas") or []):
-                if isinstance(item, dict) and _text(_get(item, "areaId", "id")) == best:
-                    if _get(item, "moveAreaAvailable") is not False:
-                        return (f"Nobody here can talk, but {count} free agents are "
-                                f"at {best}. Go to them: cmd=mcity-move-area {best}")
-                    break
+            areas = [item for item in (_find_list(payload, "areas") or [])
+                     if isinstance(item, dict)
+                     and _get(item, "moveAreaAvailable") is not False]
+            # Match on the area's ANCHOR, not its id. A space holding people -
+            # 'central' - is not itself an area and never appears in this list;
+            # what appears are the areas anchored in it, like central-plaza and
+            # bison-valley. Matching on id found nothing, so the fallback fired
+            # and sent the agent at travel-district and exit-building, both of
+            # which the world refuses from here: travelDistricts is empty
+            # indoors, and this building's exit is a teleport rather than a link.
+            for item in areas:
+                anchor = _get(item, "anchor")
+                anchored = (anchor or {}).get("spaceId") if isinstance(anchor, dict) else None
+                area_id = _text(_get(item, "areaId", "id"))
+                if anchored == best and area_id and ID_RE.match(area_id):
+                    return (f"Nobody here can talk, but {count} free agents are "
+                            f"at {best}. Go to them: cmd=mcity-move-area {area_id}")
+            for item in areas:
+                area_id = _text(_get(item, "areaId", "id"))
+                if area_id == best and ID_RE.match(area_id or ""):
+                    return (f"Nobody here can talk, but {count} free agents are "
+                            f"at {best}. Go to them: cmd=mcity-move-area {area_id}")
+        if indoors:
+            return (f"{count} free agents are out in {best}, and you are inside a "
+                    f"building with no area reaching it. Try the door: "
+                    f"cmd=mcity-exit-building")
         return (f"Nobody here can talk, but {count} free agents are at {best}. "
                 f"Go to them: cmd=mcity-travel-district {best}")
     except Exception:      # noqa: BLE001 - a hint must never break a skill

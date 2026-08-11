@@ -1941,3 +1941,48 @@ def test_a_roster_with_somebody_on_it_is_never_refused(control):
     _check(mc.agents())
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     assert _check(mc.agents()).startswith("MCITY-AGENTS-OK")
+
+
+def test_the_route_is_found_through_the_area_anchor(control):
+    """A space holding people - 'central' - is not itself an area and never
+    appears in the areas list; what appears are areas anchored in it, like
+    central-plaza. Matching on id found nothing, so the agent was sent at
+    travel-district and exit-building, both refused from indoors: travelDistricts
+    is empty there and this building's exit is a teleport, not a link."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [
+        {"id": "hacker-house-terminal-20", "kind": "building",
+         "moveAreaAvailable": True, "anchor": {"spaceId": "hacker-house-interior"}},
+        {"id": "central-plaza", "kind": "park",
+         "moveAreaAvailable": True, "anchor": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    hint = mc._travel_to_people_command()
+    assert "cmd=mcity-move-area central-plaza" in hint, hint
+
+
+def test_an_unreachable_area_is_not_offered(control):
+    """moveAreaAvailable=false means the world will refuse it."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [{"id": "central-plaza", "kind": "park",
+                        "moveAreaAvailable": False,
+                        "anchor": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    hint = mc._travel_to_people_command() or ""
+    assert "central-plaza" not in hint
