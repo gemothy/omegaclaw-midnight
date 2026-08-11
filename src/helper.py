@@ -168,9 +168,18 @@ def split_toplevel_groups(text):
     peeled, then the groups inside are separated. Returns [text] unchanged when
     there is nothing to split, so well-formed single commands are untouched."""
     t = (text or "").strip()
-    if not (t.startswith("((") and t.endswith("))")):
+    if not t.startswith("("):
         return [text]
-    inner = t[1:-1].strip()
+    # The extra wrapper is optional. Both of these arrive from the model:
+    #   ((send "...") (mcity-threads))     wrapped
+    #   (mcity-threads) (mcity-work)       bare
+    # Requiring the wrapper missed the bare form, which then parsed as
+    #   (mcity-threads) "(mcity-work"
+    # - the second command swallowed as a quoted argument of the first.
+    if t.startswith("((") and t.endswith("))"):
+        inner = t[1:-1].strip()
+    else:
+        inner = t
     groups, depth, start, in_str, esc = [], 0, None, False, False
     for i, ch in enumerate(inner):
         if in_str:

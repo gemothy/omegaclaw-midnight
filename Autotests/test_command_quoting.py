@@ -80,3 +80,22 @@ def test_single_command_keeps_working():
     assert helper.split_toplevel_groups('(send "one")') == ['(send "one")']
     assert helper.balance_parentheses('(send "one")') == '((send "one"))'
     assert helper.balance_parentheses('mcity-eat') == '((mcity-eat))'
+
+
+def test_bare_multi_command_line_is_split():
+    """Captured live after the wrapped case was fixed. The wrapper is optional:
+
+        (mcity-threads) (mcity-work)
+
+    Requiring '((' missed this, and it parsed as
+        (mcity-threads) "(mcity-work"
+    with the second command swallowed as a quoted argument of the first."""
+    assert helper.balance_parentheses('(mcity-threads) (mcity-work)') \
+        == '((mcity-threads) (mcity-work))'
+    assert helper.balance_parentheses('((mcity-threads) (mcity-work))') \
+        == '((mcity-threads) (mcity-work))'
+
+
+def test_a_lone_group_is_not_disturbed():
+    assert helper.balance_parentheses('(send "one")') == '((send "one"))'
+    assert helper.balance_parentheses('(mcity-eat)') == '((mcity-eat))'
