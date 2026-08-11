@@ -718,3 +718,54 @@ def test_mine_flag_uses_pending_recipient_when_present(monkeypatch):
         item = dict(base, pendingRecipientAgentId=pending)
         monkeypatch.setattr(mc, "_own_threads", lambda v, i=item: ({"threads": [i]}, None))
         assert want in mc.threads()
+
+
+def test_vitals_refresh_is_self_sustaining(monkeypatch):
+    """_harvest_vitals only fires inside _skill_read, and the mission text tells
+    the agent never to call mcity-needs or mcity-inventory BECAUSE vitals carries
+    that data. Together those starved the feature: a session that only called
+    mcity-threads and mcity-speak emitted zero vitals lines."""
+    calls = []
+
+    def fake_read(verb, endpoint):
+        calls.append(endpoint)
+        mc._harvest_vitals({"agent": {"position": {"spaceId": "central"},
+                                      "status": "busy"},
+                            "hunger": {"state": "normal", "value": 1},
+                            "inventory": {"crystal": 10}})
+        return {}, None
+
+    monkeypatch.setattr(mc, "_skill_read", fake_read)
+    mc._VITALS.update({"at_ms": 0, "hunger": None, "space": None,
+                       "items": None, "status": None})
+    mc._vitals_refreshing = False
+
+    out = mc._out("MCITY-THREADS-OK count=1")     # a path that never harvests
+    assert "vitals hunger=normal" in out
+    assert "status=busy" in out
+    assert calls, "a stale vitals cache must trigger exactly one bounded read"
+
+    # Inside the refresh window it must not read again.
+    before = len(calls)
+    mc._out("MCITY-THREADS-OK count=1")
+    assert len(calls) == before
+
+
+def test_vitals_refresh_never_recurses(monkeypatch):
+    """_skill_read's failure path routes through _out, which is what calls the
+    refresh - without a guard that is unbounded recursion."""
+    depth = {"n": 0, "max": 0}
+
+    def reentrant_read(verb, endpoint):
+        depth["n"] += 1
+        depth["max"] = max(depth["max"], depth["n"])
+        try:
+            mc._out("MCITY-X-FAILED reason=boom")   # the recursion hazard
+        finally:
+            depth["n"] -= 1
+        return {}, None
+
+    monkeypatch.setattr(mc, "_skill_read", reentrant_read)
+    mc._VITALS.update({"at_ms": 0}); mc._vitals_refreshing = False
+    mc._out("MCITY-THREADS-OK")
+    assert depth["max"] <= 1

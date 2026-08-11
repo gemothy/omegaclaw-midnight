@@ -362,6 +362,8 @@ def _cap(text):
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
            "status": None}
 _VITALS_STALE_MS = 120000
+VITALS_REFRESH_MS = 30000      # re-read vitals at most this often
+_vitals_refreshing = False     # guards the refresh path against reentry via _out
 
 
 def _harvest_vitals(payload):
@@ -394,6 +396,37 @@ def _harvest_vitals(payload):
         pass
 
 
+def _refresh_vitals_if_stale():
+    """Keep vitals populated without depending on the agent asking for them.
+
+    _harvest_vitals only fires inside _skill_read, and the mission text now tells
+    the agent never to spend a turn on mcity-needs or mcity-inventory precisely
+    BECAUSE vitals carries that data. Those two facts together starved the
+    feature: a session that only called mcity-threads and mcity-speak produced
+    zero vitals lines, so the grounding the procedure depends on was silently
+    absent. One bounded read closes the loop.
+
+    Reentrancy-guarded: _skill_read's failure path routes through _out, which is
+    what calls this."""
+    global _vitals_refreshing
+    with _lock:
+        if _vitals_refreshing:
+            return
+        age = _now_ms() - (_VITALS["at_ms"] or 0)
+        if _VITALS["at_ms"] and age < VITALS_REFRESH_MS:
+            return
+        _vitals_refreshing = True
+    try:
+        _skill_read("VITALS", "needs")
+        if not _VITALS.get("items"):
+            _skill_read("VITALS", "inventory")
+    except Exception:  # noqa: BLE001 - grounding must never break a skill
+        pass
+    finally:
+        with _lock:
+            _vitals_refreshing = False
+
+
 def _vitals_line():
     """One trusted line of current state, or None.
 
@@ -424,6 +457,7 @@ def _out(text):
     """The single exit point of every public function."""
     try:
         body = _redact(text)
+        _refresh_vitals_if_stale()
         vitals = _vitals_line()
         if not vitals or "\nvitals " in body:
             return _cap(body)
