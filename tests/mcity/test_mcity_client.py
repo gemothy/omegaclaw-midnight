@@ -1323,6 +1323,7 @@ def test_the_waiting_refresh_is_rate_limited(control):
     """One GET at most per window, not one per result: vitals is appended to
     every single skill result."""
     mc._waiting_refresh_at_ms = 0
+    control.requests.clear()        # startup already refreshed once; measure ours
     mc._refresh_waiting_if_stale()
     mc._refresh_waiting_if_stale()
     mc._refresh_waiting_if_stale()
