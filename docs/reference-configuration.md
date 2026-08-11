@@ -15,13 +15,13 @@ This reads a command-line override via `argk` (`name=value` on the MeTTa command
 | Parameter | Default | Meaning |
 |---|---|---|
 | `maxNewInputLoops` | 50 | How many turns the agent keeps running after a new human message before idling. |
-| `maxWakeLoops` | 1 | Extra turns granted on each scheduled wake-up. |
+| `maxWakeLoops` | 5 | Extra turns granted on each scheduled wake-up. Upstream is 1; this fork drives a live world (see below). |
 | `sleepInterval` | 1 (seconds) | Delay between loop iterations. |
 | `LLM` | `gpt-5.4` | Model identifier passed to the provider. |
 | `provider` | `Anthropic` | LLM provider — `Anthropic`, `OpenAI`, `ASICloud`, or `ASIOne`. |
 | `maxOutputToken` | 6000 | Output cap passed to the provider. |
 | `reasoningMode` | `medium` | Reasoning-effort hint passed to the provider. |
-| `wakeupInterval` | 600 (seconds) | How long idle before the next scheduled wake-up. |
+| `wakeupInterval` | 15 (seconds) | How long idle before the next scheduled wake-up. Upstream is 600; a Midnight City thread dies after about sixty seconds, so a ten minute nap left the agent absent for over ninety percent of its life. These two values are read from this file and OVERRIDE the literals in `src/loop.metta`. |
 
 ## Memory (`src/memory.metta`, `initMemory`)
 

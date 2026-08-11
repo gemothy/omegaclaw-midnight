@@ -812,3 +812,23 @@ def test_the_loop_cadence_suits_a_live_world():
     cfg = (repo / "config" / "config.yaml").read_text()
     assert "wakeupInterval: 15" in cfg, "the literal in loop.metta is not the knob"
     assert "maxWakeLoops: 5" in cfg
+
+
+def test_the_documented_cadence_matches_the_shipped_cadence():
+    """The config reference claimed maxWakeLoops 1 and wakeupInterval 600 for
+    several days after the fork changed them to 5 and 15 - the exact values that
+    decide how much of its life the agent is awake for. Docs that describe the
+    upstream defaults are worse than no docs, because they are believed."""
+    import pathlib
+    import re
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    cfg = (repo / "config" / "config.yaml").read_text()
+    doc = (repo / "docs" / "reference-configuration.md").read_text()
+    for key in ("maxWakeLoops", "wakeupInterval"):
+        actual = re.search(rf"^{key}:\s*(\d+)", cfg, re.M)
+        assert actual, f"{key} missing from config.yaml"
+        documented = re.search(rf"\|\s*`{key}`\s*\|\s*(\d+)", doc)
+        assert documented, f"{key} missing from the configuration reference"
+        assert documented.group(1) == actual.group(1), (
+            f"{key} is {actual.group(1)} in config.yaml but the reference says "
+            f"{documented.group(1)}")

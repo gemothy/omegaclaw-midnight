@@ -160,6 +160,14 @@ MCITY-<VERB>-FAILED  reason=<code> [detail=<short text>]
 `action_failed`, plus `internal` for the never-expected case where the client
 itself failed.
 
+The plugin also refuses some calls locally, before any world request, when it
+already knows the world will reject them: `unreachable` (that agent cannot
+receive a message), `self_engaged` (we are mid-action and the world refuses
+speech from a mid-action agent), `someone_waiting` (a long action would make us
+unreachable while a person waits), `already_said` (those exact words were
+delivered to that person recently), `rich_enough` (a periodic steer away from
+earning), and `repeat` (an identical read, several times over).
+
 Three semantics worth knowing before reading the output:
 
 * success for `speak` is `outcome=delivered`, not `confirmed`;
@@ -171,6 +179,45 @@ Three semantics worth knowing before reading the output:
 
 `PENDING` means the world had not confirmed within `mcityConfirmTimeout`
 (default 8 s) — not that the action failed.
+
+## The grounding contract
+
+Three ideas carry most of the plugin's behaviour. They were each arrived at by
+measuring the live agent, and the reasoning is recorded in the git history.
+
+**State the conclusion, never ask for the derivation.** Every result ends in a
+`vitals` line, and each token there replaced a judgement the model was not
+reliably making:
+
+| token | replaces |
+|---|---|
+| `hunger=` | a `mcity-needs` call every turn |
+| `holding=` | a `mcity-inventory` call every turn |
+| `waiting=N (answer <id>)` | polling `mcity-threads` to find out if anyone is owed a reply |
+| `earned=enough` / `keep-going` | comparing a holding against a threshold |
+| `status=`, `busy-for=` | guessing whether an action is still running |
+
+`waiting=` counts only people who can actually hear a reply, so `waiting=0`
+means a thread read cannot help. `earned=` is omitted entirely when holdings are
+unknown rather than guessing.
+
+**Reachability is the world's verdict, not ours.** A message lands only if the
+target has `canSpeak` **and** no live `activeAction`. `canSpeak` is effectively
+"on the same map"; an `activeAction` of kind `engage` puts an agent in
+do-not-disturb, and that applies to us as speaker exactly as it does to them as
+target. `isOpenToTalk` is not a useful filter - on a live roster it was true for
+283 of 285 agents including all 165 who were asleep. The same verdict feeds the
+`can-speak=` column, the `asleep=` flag on thread rows, the `try-instead=`
+suggestions and the local `unreachable` refusal, through one function, because
+two implementations of it drifted apart once already.
+
+**A suggestion is a whole command or it is nothing.** Where the plugin knows
+what to do next it emits `cmd=<complete command>` in the **head line** of the
+result. Measured repeatedly: a command placed lower in the result, or one
+containing a placeholder such as `<your sentence>`, is ignored - one such form
+was emitted 63 times and produced a single action. `cmd=` is therefore only
+emitted when the plugin has already checked the command is valid and correct,
+which is what lets the prompt say "emit it verbatim".
 
 ## Configuration reference
 
