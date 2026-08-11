@@ -1217,12 +1217,13 @@ def test_a_friends_only_refusal_is_remembered_too(control):
 
 def test_the_opener_admits_when_nobody_can_be_reached(control):
     """A live roster had zero of 285 agents both able to speak and free of an
-    action. Sending the agent hunting for one is advice that cannot succeed."""
+    action. Rather than inventing advice that cannot succeed, it returns nothing
+    and the caller falls back to something the agent can actually do."""
     control.force("/api/skill/agents/agent-1/agents", 200,
                   json.dumps({"agents": []}).encode())
-    opener = mc._reachable_opener()
-    assert "Nobody in the city can receive a message" in opener
-    assert "work, eat or trade" in opener
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
+    assert mc._reachable_opener() is None
+    assert "cmd=mcity-" in mc._next_action_command()
 
 
 def test_an_unreachable_refusal_hands_over_a_command(control):
@@ -1438,6 +1439,10 @@ def test_work_stops_once_the_mission_says_it_is_enough(control):
     meme_coin, skip earning and go to step five.' The agent held 18383 and kept
     grinding work - prose again, so it was not followed."""
     control.on_action = lambda action: []
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "isOpenToTalk": True, "canSpeak": True, "status": "idle"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())                     # somebody is genuinely free to talk
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
                        "items": "crystal=13800 meme_coin=18383"})
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
@@ -1493,3 +1498,26 @@ def test_an_unusable_agent_id_is_never_suggested(control):
                   json.dumps({"agents": []}).encode())
     opener = mc._reachable_opener() or ""
     assert "nyx" not in opener
+
+
+def test_work_is_not_blocked_when_there_is_nothing_better_to_do(control):
+    """Refusing on wealth alone produced 68 refused turns in three minutes with
+    nothing accomplished, where the agent had been completing 27 work actions.
+    Blocking the only available action is a dead end, not a priority."""
+    control.on_action = lambda action: []
+    control.force("/api/skill/agents/agent-1/agents", 200,
+                  json.dumps({"agents": []}).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
+                       "space": "central", "items": "meme_coin=18383"})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    _check(mc.work())
+    assert control.actions, "with nobody to talk to, earning must stay available"
+
+
+def test_the_opener_returns_nothing_rather_than_prose_to_sniff(control):
+    """Callers used to test the returned sentence with startswith('Start'), so
+    rewording it silently changed which command the agent was handed."""
+    control.force("/api/skill/agents/agent-1/agents", 200,
+                  json.dumps({"agents": []}).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
+    assert mc._reachable_opener() is None

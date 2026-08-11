@@ -622,9 +622,7 @@ def _suppress_repeat(verb, result):
             # the way the merchant cmd= and the escape hint do.
             if verb == "THREADS" and not _WAITING.get("ids"):
                 opener = _reachable_opener()
-                nudge = (opener if opener and opener.startswith("Start")
-                         else _next_action_command())
-                nudge = f"{nudge} - nobody waiting can hear you"
+                nudge = f"{opener or _next_action_command()} - nobody waiting can hear you"
             else:
                 waiting = _someone_is_waiting()
                 nudge = (f"Do this instead: cmd=mcity-speak {waiting[0]} "
@@ -1337,14 +1335,11 @@ def _reachable_opener():
             _refresh_can_speak_if_unknown((), force=True)
             best = _fresh()
         if best is None:
-            go = _travel_to_people_command()
-            if go:
-                return go
-            # Do not send it hunting for someone who is not there. A live roster
-            # had zero of 285 agents both able to speak and free of an action.
-            return ("Nobody in the city can receive a message right now, so "
-                    "conversation is not available this turn: work, eat or "
-                    "trade instead and try again later")
+            # None, not prose. Callers used to sniff the returned sentence with
+            # startswith("Start"), so rewording the sentence silently changed
+            # which command the agent was given - it fell back to cmd=mcity-work
+            # while somebody was standing there free to talk.
+            return _travel_to_people_command()
         # NOT "cmd=mcity-speak <id> <your sentence>". A command with a
         # placeholder in it cannot be copied verbatim, which is the only thing
         # this agent reliably does: that exact form was emitted 63 times in
@@ -3119,15 +3114,19 @@ def work():
     blocked = _refuse_while_someone_waits("WORK")
     if blocked is not None:
         return blocked
-    if _rich_enough() and not _someone_is_waiting():
-        nxt = _reachable_opener() or ""
-        command = nxt if "cmd=mcity-" in nxt else ""
+    # Only stop earning when there is genuinely something better to do. The
+    # first version refused on wealth alone and produced 68 refused turns in
+    # three minutes with nothing accomplished, where the agent had been
+    # completing 27 work actions - strictly worse. Blocking the only available
+    # action is not a priority, it is a dead end.
+    alternative = _reachable_opener() if _rich_enough() else None
+    if alternative and not _someone_is_waiting():
         return _promote_command(
             _failed("WORK", "rich_enough",
                     "you hold well over the two hundred meme_coin the mission "
                     "calls enough and you are not hungry, so earning more is not "
                     "what this turn is for - go and be with people"),
-            command or "cmd=mcity-agents")
+            alternative)
     result = _mutate("WORK", lambda: ({"kind": "perform_job"}, None))
     # "no available hacker worksite" is contention, not a bad call: every
     # terminal in this room is taken by one of the 52 agents permanently engaged
