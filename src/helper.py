@@ -89,6 +89,35 @@ def around_time(needle_time_str, k):
         ret += f"{lineno}:{line}"
     return ret
 
+def strip_redundant_quotes(x):
+    """Undo the model quoting an argument that is already quoted.
+
+    Observed live: over one hour the agent produced 51 usable decisions and 65
+    syntax errors - more than half of every turn discarded before anything ran -
+    and the failures were all one shape:
+
+        send "\\"Awaiting input.\\""      ->  (send "\\"Awaiting input.\\"")
+
+    The escaped quotes survive into the s-expression and MeTTa rejects the form.
+    The prompt already asks for "a real quote"; the model does not comply, and a
+    turn thrown away for punctuation is a turn the agent never gets back. This is
+    the same forgiveness the client applies to the underscore-shaped trade
+    argument, applied to quoting."""
+    if not isinstance(x, str):
+        return x
+    text = x.strip()
+    # "\"...\"" -> "..."   (a quoted string whose whole content is quoted again)
+    while len(text) >= 4 and text.startswith('"') and text.endswith('"'):
+        inner = text[1:-1].strip()
+        if inner.startswith('\\"') and inner.endswith('\\"') and len(inner) >= 4:
+            text = '"' + inner[2:-2] + '"'
+            continue
+        break
+    # \"...\" with no outer quotes at all
+    if text.startswith('\\"') and text.endswith('\\"') and len(text) >= 4:
+        text = '"' + text[2:-2] + '"'
+    return text
+
 def quote_arg(x):
     if x.startswith('"') and x.endswith('"') and "\n" not in x:
         return x
@@ -177,7 +206,7 @@ def balance_parentheses(s):
                 sexprs.append(f"({cmd} {filename})")
             continue
         if rest:
-            sexprs.append(f"({cmd} {quote_arg(rest)})")
+            sexprs.append(f"({cmd} {quote_arg(strip_redundant_quotes(rest))})")
         else:
             sexprs.append(f"({cmd})")
     ret = " ".join(sexprs)

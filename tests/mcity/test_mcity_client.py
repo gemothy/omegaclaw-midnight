@@ -223,7 +223,15 @@ def test_results_are_capped(control):
                            "text": "spam " * 60} for i in range(200)]}
     control.force("/api/threads/t1/messages", 200, json.dumps(flood).encode())
     result = _check(mc.thread("t1"))
-    assert result.endswith("...TRUNCATED")
+    # The truncation must still be announced, but it is no longer the LAST thing
+    # in the result: the vitals line is appended after the body is capped, on
+    # purpose. _cap truncates the tail, so appending vitals before capping would
+    # chop the grounding off exactly on the long results that most need it.
+    # Asserting both properties is stricter than the original endswith().
+    assert "...TRUNCATED" in result
+    body, _, last = result.rpartition("\n")
+    assert last.startswith("vitals ")
+    assert body.endswith("...TRUNCATED")
 
 
 def test_thread_rejects_a_path_traversal_argument(control):
