@@ -19,7 +19,8 @@ for _path in (os.path.join(_REPO, "plugins", "mcity"), _HERE):
 import mcity_client as mc                       # noqa: E402
 
 _PRISTINE_VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-                    "status": None, "busy_for": None}
+                    "status": None, "busy_for": None,
+                    "engaged": False}
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,7 @@ def _reset_module_state():
     mc._CAN_SPEAK.clear()
     mc._can_speak_at_ms = 0
     mc._dnd_streak = 0
+    mc._last_self_probe_ms = 0
     mc._can_speak_refreshing = False
     mc._LAST_READ.clear()
     mc._WAITING.update({'at_ms': 0, 'ids': []})
@@ -43,6 +45,7 @@ def _reset_module_state():
     mc._CAN_SPEAK.clear()
     mc._can_speak_at_ms = 0
     mc._dnd_streak = 0
+    mc._last_self_probe_ms = 0
     mc._can_speak_refreshing = False
     mc._LAST_READ.clear()
     mc._WAITING.update({'at_ms': 0, 'ids': []})

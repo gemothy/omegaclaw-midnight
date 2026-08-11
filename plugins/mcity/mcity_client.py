@@ -402,7 +402,9 @@ _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-           "status": None, "busy_for": None}
+           "status": None, "busy_for": None, "engaged": False}
+_SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
+_last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
 VITALS_REFRESH_MS = 30000      # re-read vitals at most this often
 _vitals_refreshing = False     # guards the refresh path against reentry via _out
@@ -438,6 +440,10 @@ def _harvest_vitals(payload):
             # and stays unreachable.
             action = agent.get("activeAction")
             _VITALS["busy_for"] = None
+            # Our own engagement, recorded the same way we record everyone
+            # else's. The world refused 50 of 50 replies with "speaker is in do
+            # not disturb mode" while this was set, and zero once it cleared.
+            _VITALS["engaged"] = isinstance(action, dict) and bool(action)
             if isinstance(action, dict) and action.get("endsAtMs"):
                 try:
                     left = int(action["endsAtMs"]) - _now_ms()
@@ -3015,6 +3021,25 @@ def speak(arg=None):
         # never the blocker, so gating on it silenced the agent for nothing.
         # What IS worth remembering is who was asleep, so the agent does not
         # spend turn after turn on someone who cannot hear it.
+        # Symmetry: an agent inside a live engagement cannot be reached, and
+        # that includes us. Two safety valves, because the last time a rule like
+        # this existed it silenced the agent for hours: it never applies when
+        # somebody reachable is waiting on a reply, and it always lets an attempt
+        # through every _SELF_PROBE_MS so the world can prove us wrong.
+        global _last_self_probe_ms
+        if (_VITALS.get("engaged") and _VITALS.get("at_ms")
+                and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS
+                and not _someone_is_waiting()
+                and (_now_ms() - _last_self_probe_ms) < _SELF_PROBE_MS):
+            wait = _VITALS.get("busy_for")
+            when = f" for another {wait}s" if wait else ""
+            return None, _failed("SPEAK", "self_engaged",
+                                 f"you are mid-action{when} and the world refuses "
+                                 "speech from a mid-action agent, measured 50 "
+                                 "times out of 50. Let it finish, or leave with "
+                                 f"{_escape_command()}")
+        if _VITALS.get("engaged"):
+            _last_self_probe_ms = _now_ms()
         if _can_be_reached(parts[0]) is False:
             others = [i for i in _someone_is_waiting()
                       if i != parts[0] and _can_be_reached(i) is not False]

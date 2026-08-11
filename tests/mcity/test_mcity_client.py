@@ -1248,3 +1248,37 @@ def test_a_reachable_waiting_person_is_named_as_a_command(control):
     mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
     result = _check(mc.speak("user-agent-abc hello there"))
     assert "cmd=mcity-speak user-agent-awake" in result
+
+
+def test_our_own_engagement_stops_a_doomed_reply(control):
+    """Symmetry: an agent inside a live engagement cannot be reached, and that
+    includes us - 50 of 50 replies refused as speaker do-not-disturb while it was
+    set, zero once it cleared."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "engaged": True, "busy_for": 12})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._last_self_probe_ms = mc._now_ms()
+    result = _check(mc.speak("user-agent-abc hello there"))
+    assert result.startswith("MCITY-SPEAK-FAILED reason=self_engaged")
+    assert "another 12s" in result
+    assert not control.actions
+
+
+def test_our_own_engagement_never_blocks_answering_someone_waiting(control):
+    """The last rule like this silenced the agent for hours. A person who can
+    hear us always outranks it."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "engaged": True})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-abc"]})
+    mc._last_self_probe_ms = mc._now_ms()
+    _check(mc.speak("user-agent-abc hello there"))
+    assert control.actions, "a waiting person outranks our own rule"
+
+
+def test_the_world_always_gets_a_chance_to_prove_the_rule_wrong(control):
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "engaged": True})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._last_self_probe_ms = mc._now_ms() - (mc._SELF_PROBE_MS + 1000)
+    _check(mc.speak("user-agent-abc hello there"))
+    assert control.actions, "the probe must let one attempt through"
