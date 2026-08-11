@@ -901,18 +901,15 @@ def test_acting_clears_the_repeat_refusal(control):
     assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
 
 
-def test_a_busy_agent_is_never_refused_its_only_legal_move(control):
-    """While an action runs the world rejects speech and the mission forbids
-    starting a second action, so a read is the ONLY thing the agent can legally
-    emit. Refusing that too left every option refused - the look-only loop was
-    the harness obeying itself."""
+def test_a_busy_agent_in_a_look_only_loop_is_still_refused(control):
+    """This asserted the opposite. The exemption assumed a busy agent had no
+    legal move, because the harness believed busy blocked speech - the world's
+    own canSpeak field disproved that. A busy agent can speak to anyone
+    reachable, and can work, eat and trade, so its loop is a real loop."""
     for _ in range(mc._REPEAT_REFUSE_AT + 2):
         mc.threads()
     mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy"})
-    result = _check(mc.threads())
-    assert result.startswith("MCITY-THREADS-OK"), "waiting must not be punished"
-    assert "Waiting is the correct move" in result
-    assert "do not start another action" in result
+    assert _check(mc.threads()).startswith("MCITY-THREADS-FAILED reason=repeat")
 
 
 def test_an_idle_agent_is_still_refused_a_look_only_loop(control):
