@@ -2180,3 +2180,22 @@ def test_naming_somebody_costs_no_request(control):
     for _ in range(5):
         mc._vitals_line()
     assert not control.requests
+
+
+def test_work_stands_aside_while_somebody_can_hear_us(control):
+    """Reinstated on new evidence. When first tried the agent never spoke, so
+    removing work only left it idle and the honest response was to give work
+    back. It now emits mcity-speak about nine times a window, and twelve of those
+    were refused as self_engaged - mid-work-action, which the world will not take
+    speech from. Work is what stands between it and the conversation."""
+    control.on_action = lambda action: []
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "status": "idle", "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(50)",
+                       "items": "meme_coin=21088"})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
+    mc._last_rich_nudge_ms = mc._now_ms()          # a reminder just fired
+    assert _check(mc.work()).startswith("MCITY-WORK-FAILED reason=rich_enough")
+    assert not control.actions

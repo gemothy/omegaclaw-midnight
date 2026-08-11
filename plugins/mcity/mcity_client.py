@@ -3461,8 +3461,21 @@ def work():
     # waiting= - and does not open a conversation, whatever the harness offers.
     # That is a fact about the model, and blocking its one useful activity to
     # protest it only makes the agent useless as well as quiet.
+    # Reinstated on new evidence, not on a change of mind. When this was tried
+    # before, the agent never spoke at all, so removing work only left it idle -
+    # 55 refusals, 0 speaks - and the honest response was to give work back.
+    # Since the self-status reports stopped being fed back as exemplars it emits
+    # mcity-speak about nine times a window, and twelve of those were refused as
+    # self_engaged: it was mid-work-action, and the world will not take speech
+    # from a mid-action agent. Work is now the thing standing between it and the
+    # conversation it is finally attempting.
+    #
+    # Still only while somebody can actually hear it; with nobody reachable the
+    # reminder stays a once-a-minute reminder, because that case is unchanged.
     global _last_rich_nudge_ms
-    due = (_now_ms() - _last_rich_nudge_ms) >= _RICH_NUDGE_EVERY_MS
+    someone_here = (_REACHABLE["n"] or 0) > 0 and (
+        _now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS
+    due = someone_here or (_now_ms() - _last_rich_nudge_ms) >= _RICH_NUDGE_EVERY_MS
     alternative = _reachable_opener() if (due and _rich_enough()) else None
     if alternative and not _someone_is_waiting():
         _last_rich_nudge_ms = _now_ms()
