@@ -1173,3 +1173,23 @@ def test_the_opener_fetches_a_name_when_it_has_none(control):
     assert not mc._CAN_SPEAK
     opener = mc._reachable_opener()
     assert "cmd=mcity-speak user-agent-awake" in opener
+
+
+def test_an_engaged_target_is_unreachable_despite_can_speak(control):
+    """Three targets that refused with 'target is in do not disturb mode' all
+    carried canSpeak true while running an activeAction of kind engage. It is the
+    same state the world put us in, and ours cleared the moment we went idle, so
+    the rule is symmetric."""
+    roster = {"agents": [
+        {"agentId": "user-agent-engaged", "name": "Busy", "distance": 1,
+         "canSpeak": True, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active",
+                          "activity": "trade_crypto"}},
+        {"agentId": "user-agent-free", "name": "Free", "distance": 50,
+         "canSpeak": True, "status": "idle"},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert mc._can_be_reached("user-agent-engaged") is False
+    assert mc._can_be_reached("user-agent-free") is True
+    assert "user-agent-free" in (mc._reachable_opener() or "")

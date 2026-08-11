@@ -1203,8 +1203,17 @@ def _note_can_speak(entry):
     is what two earlier speak rules got wrong in opposite directions."""
     try:
         agent_id, can = entry.get("id"), entry.get("can_speak")
-        if agent_id and isinstance(can, bool):
-            _CAN_SPEAK[agent_id] = (can, _now_ms())
+        if not agent_id or not isinstance(can, bool):
+            return
+        # canSpeak alone is NOT enough. Three targets that refused with "target
+        # is in do not disturb mode" all carried canSpeak true while running an
+        # activeAction of kind engage, phase active. That is the same state the
+        # world put US in - speaker-side do-not-disturb vanished the moment we
+        # moved away and went idle - so the rule is symmetric: an agent inside a
+        # live engagement cannot be reached, whatever the flag says.
+        action = entry.get("action")
+        engaged = isinstance(action, dict) and bool(action)
+        _CAN_SPEAK[agent_id] = (can and not engaged, _now_ms())
     except Exception:      # noqa: BLE001 - grounding must never break a read
         pass
 
@@ -1324,6 +1333,7 @@ def _parse_agent(item):
         "open": _get(item, "isOpenToTalk"),
         "talking": _get(item, "isTalkingToYou"),
         "can_speak": _get(item, "canSpeak"),
+        "action": _get(item, "activeAction"),
         "same_map": _get(item, "isOnSameMap"),
         "dist": _get(item, "distance", "dist"),
         "profession": _get(item, "profession"),
