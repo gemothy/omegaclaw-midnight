@@ -73,7 +73,8 @@ def _reset_mcity_module_state():
         return
     pristine = {"at_ms": 0, "hunger": None, "space": None, "items": None,
                 "status": None, "busy_for": None,
-                    "engaged": False}
+                    "engaged": False,
+                    "district": None}
     mc._ASLEEP.clear()
     mc._CAN_SPEAK.clear()
     mc._AWAKE_PLACES.clear()

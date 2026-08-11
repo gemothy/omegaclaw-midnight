@@ -20,7 +20,8 @@ import mcity_client as mc                       # noqa: E402
 
 _PRISTINE_VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
                     "status": None, "busy_for": None,
-                    "engaged": False}
+                    "engaged": False,
+                    "district": None}
 
 
 @pytest.fixture(autouse=True)

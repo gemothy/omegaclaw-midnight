@@ -1555,3 +1555,43 @@ def test_the_roster_column_and_the_cache_agree_on_reachability(control):
     assert "can-speak=yes" in free_row, free_row
     assert mc._can_be_reached("user-agent-engaged") is False
     assert mc._can_be_reached("user-agent-free") is True
+
+
+def test_being_indoors_is_told_to_use_the_door_not_the_map(control):
+    """position.spaceId is the building while currentSpace is still the district,
+    so the harness told the agent to travel to central while it was already in
+    central and the world answered 'agent is already in district central'."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "district": "central"})
+    hint = mc._travel_to_people_command()
+    assert "cmd=mcity-exit-building" in hint, hint
+    assert "travel-district" not in hint, "that call is refused when already there"
+
+
+def test_a_genuinely_different_district_still_gets_a_travel_command(control):
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "harbour"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central",
+                       "district": "central"})
+    hint = mc._travel_to_people_command()
+    assert "harbour" in hint and "cmd=mcity-" in hint
+
+
+def test_the_district_is_harvested_from_the_world(control):
+    mc._VITALS["district"] = None
+    mc._harvest_vitals({"agent": {"position": {"spaceId": "hacker-house-interior"}},
+                        "currentSpace": {"id": "central", "kind": "district"}})
+    assert mc._VITALS["district"] == "central"
+    assert mc._VITALS["space"] == "hacker-house-interior", "the two are distinct"

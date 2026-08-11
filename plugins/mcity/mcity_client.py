@@ -409,7 +409,7 @@ _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-           "status": None, "busy_for": None, "engaged": False}
+           "status": None, "busy_for": None, "engaged": False, "district": None}
 _SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
 _last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
@@ -429,6 +429,14 @@ def _harvest_vitals(payload):
         agent = payload.get("agent")
         hunger = payload.get("hunger")
         items = payload.get("inventory")
+        # The district we are standing in, which is NOT the same as our space:
+        # inside a building position.spaceId is the building while currentSpace
+        # is still the district. Without this the harness told the agent to
+        # travel to central while it was already in central, and the world
+        # answered "agent is already in district central".
+        space_now = payload.get("currentSpace")
+        if isinstance(space_now, dict) and space_now.get("id"):
+            _VITALS["district"] = str(space_now["id"])
         if isinstance(hunger, dict) and hunger.get("state"):
             _VITALS["hunger"] = str(hunger.get("state"))
             if hunger.get("value") is not None:
@@ -1422,6 +1430,7 @@ def _travel_to_people_command():
     spaceId, so this turns that into an instruction."""
     try:
         here = _VITALS.get("space")
+        district = _VITALS.get("district")
         if not _AWAKE_PLACES:
             # Nothing recorded yet: the cache fills from roster reads, and the
             # agent rarely calls mcity-agents on its own. One bounded read.
@@ -1435,6 +1444,12 @@ def _travel_to_people_command():
                 best, count = space, seen
         if not best or not ID_RE.match(best):
             return None
+        if best == district:
+            # Already in that district, just not in that space - we are indoors.
+            # Travelling would be refused with "agent is already in district X";
+            # the way out of a building is the door.
+            return (f"{count} free agents are out in {best}, but you are inside a "
+                    f"building. Step outside: cmd=mcity-exit-building")
         payload, error = _skill_read("VITALS", "areas")
         if error is None:
             for item in (_find_list(payload, "areas") or []):
