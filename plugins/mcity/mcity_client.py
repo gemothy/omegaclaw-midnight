@@ -1449,6 +1449,17 @@ def _reachable_opener():
                     return agent_id
             return None
 
+        # The last FULL roster scan outranks any per-agent cache entry. They
+        # disagreed live and the agent was whipsawed between two refusals:
+        #   WORK-FAILED  worksite_busy    cmd=mcity-agents -- <id> is free to talk
+        #   AGENTS-FAILED nobody_reachable cmd=mcity-work  -- nobody can receive
+        # one telling it to go and look, the other telling it not to, 36 times in
+        # six minutes. A cached entry can outlive the scan that supersedes it, so
+        # when the newest scan counted nobody, there is nobody.
+        scan_fresh = (_REACHABLE["n"] is not None
+                      and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS)
+        if scan_fresh and _REACHABLE["n"] == 0:
+            return _travel_to_people_command()
         best = _fresh()
         if best is None:
             _refresh_can_speak_if_unknown((), force=True)

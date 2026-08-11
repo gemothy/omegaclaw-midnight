@@ -1139,9 +1139,12 @@ def test_the_repeat_refusal_points_at_someone_reachable(control):
     trapped the agent: it looped on threads while 56 reachable agents stood
     nearby, because everyone owing it a reply was asleep or in do-not-disturb."""
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
-    mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
     for _ in range(mc._REPEAT_REFUSE_AT + 2):
         mc.threads()
+    # Both sources must agree, which is the point of the scan-wins rule: a
+    # cached entry alone no longer earns a name.
+    mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
+    mc._REACHABLE.update({"n": 1, "at_ms": mc._now_ms()})
     result = _check(mc.threads())
     assert result.startswith("MCITY-THREADS-FAILED reason=repeat")
     assert "nobody waiting can hear you" in result
@@ -1986,3 +1989,25 @@ def test_an_unreachable_area_is_not_offered(control):
                        "space_kind": "interior"})
     hint = mc._travel_to_people_command() or ""
     assert "central-plaza" not in hint
+
+
+def test_the_opener_never_contradicts_the_roster_count(control):
+    """Live, two refusals disagreed 36 times in six minutes: one said an agent
+    was free and to read the roster, the other said nobody could be reached and
+    to go back to work. A cached per-agent entry can outlive the full scan that
+    supersedes it, so the scan wins."""
+    mc._CAN_SPEAK["user-agent-stale"] = (True, mc._now_ms())   # cache says free
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})      # scan says nobody
+    control.force("/api/skill/agents/agent-1/areas", 200,
+                  json.dumps({"areas": []}).encode())
+    opener = mc._reachable_opener()
+    assert "user-agent-stale" not in (opener or ""), opener
+
+
+def test_a_scan_that_found_people_still_names_them(control):
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "status": "idle", "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert mc._REACHABLE["n"] == 1
+    assert "user-agent-free" in (mc._reachable_opener() or "")
