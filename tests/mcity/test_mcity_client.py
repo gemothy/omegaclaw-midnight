@@ -888,3 +888,25 @@ def test_acting_clears_the_repeat_refusal(control):
     control.on_action = lambda action: []
     _check(mc.work())                      # any action at all
     assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
+
+
+def test_a_busy_agent_is_never_refused_its_only_legal_move(control):
+    """While an action runs the world rejects speech and the mission forbids
+    starting a second action, so a read is the ONLY thing the agent can legally
+    emit. Refusing that too left every option refused - the look-only loop was
+    the harness obeying itself."""
+    for _ in range(mc._REPEAT_REFUSE_AT + 2):
+        mc.threads()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy"})
+    result = _check(mc.threads())
+    assert result.startswith("MCITY-THREADS-OK"), "waiting must not be punished"
+    assert "Waiting is the correct move" in result
+    assert "do not start another action" in result
+
+
+def test_an_idle_agent_is_still_refused_a_look_only_loop(control):
+    """The exemption is for having no legal move, not for looking in general."""
+    for _ in range(mc._REPEAT_REFUSE_AT + 2):
+        mc.threads()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "status": "idle"})
+    assert _check(mc.threads()).startswith("MCITY-THREADS-FAILED reason=repeat")

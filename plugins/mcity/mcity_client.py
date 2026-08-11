@@ -551,6 +551,22 @@ def _suppress_repeat(verb, result):
             return result
         age = int((now - prev["at"]) / 1000)
         head = result.partition("\n")[0]
+        # Never refuse the read when the agent has no legal action left. While an
+        # action is running the world rejects speech, and the mission tells it not
+        # to start a second action, so a read is the ONLY thing it can legally
+        # emit. Refusing that too left every option refused - the loop it was
+        # stuck in was the harness obeying itself. Say plainly that waiting is
+        # correct instead of demanding an action that cannot be taken.
+        blocked = (_VITALS.get("status") in ("busy", "traveling")
+                   and _VITALS.get("at_ms")
+                   and (now - _VITALS["at_ms"]) <= _VITALS_STALE_MS)
+        if blocked:
+            waiting = " Someone is waiting: answer them the moment it clears." \
+                if "mine=no" in result else ""
+            return (f"{head} unchanged for {age}s, and you are mid-action so the "
+                    f"world will refuse speech until it ends.{waiting} Waiting is "
+                    "the correct move right now - do not start another action, "
+                    "because that would only extend how long you stay unreachable")
         if prev["n"] >= _REPEAT_REFUSE_AT:
             # Shortening the answer was not enough. Measured: with suppression
             # live the agent still spent 48 of 48 decisions on mcity-threads,
