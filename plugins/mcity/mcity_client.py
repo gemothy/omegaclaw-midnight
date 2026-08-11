@@ -1029,9 +1029,18 @@ def _oldest_tail(items, count, *names):
     return ordered[-count:]
 
 
-def _remember_inbound(text):
-    """Keep a bounded memory of world text so the echo guard can refuse to let
-    the agent repeat an injected instruction back into the world."""
+def _remember_inbound(text, sender=None):
+    """Keep a bounded memory of OTHER agents' text so the echo guard can refuse
+    to let the agent repeat an injected instruction back into the world.
+
+    sender matters. Every thread preview was remembered regardless of who wrote
+    it, so once the agent spoke last its own words became the preview, were
+    filed as world text, and the guard then refused its own future writing -
+    "do not repeat text written by another agent" against lines the agent had
+    written itself. The guard is about somebody else's words."""
+    own_id = _c("agent_id", "")
+    if sender is not None and own_id and _text(sender).strip() == own_id:
+        return
     normalised = _norm_arg(text).lower()
     if len(normalised) < 8:
         return
@@ -2448,7 +2457,7 @@ def recent_events():
         event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
         text = event_payload.get("text")
         if isinstance(text, str):
-            _remember_inbound(text)
+            _remember_inbound(text, event_payload.get("agentId"))
         event_id = _text(event.get("eventId"))
         rows.append(_row((
             ("ev", event_id[:8] or None),
@@ -2609,7 +2618,7 @@ def threads(_ignored=None):
                 sender = _get(preview, "senderAgentId", "agentId", "fromAgentId")
             preview = preview.get("text")
         if isinstance(preview, str):
-            _remember_inbound(preview)
+            _remember_inbound(preview, sender)
         # mine=no is a person waiting on our reply; the ranking exists so that
         # those threads are the ones that survive the budget, exactly like the
         # ACTION REQUIRED imperative inside mcity-thread.
@@ -2713,7 +2722,7 @@ def thread(arg=None):
                       "senderId")
         recipient = _get(message, "recipientAgentId", "toAgentId")
         if isinstance(text, str):
-            _remember_inbound(text)
+            _remember_inbound(text, sender)
         if text is None and sender is None:
             # The message exists (count says so) but uses field names we do not
             # know, and an empty row renders as a bare "-": the agent then sees
