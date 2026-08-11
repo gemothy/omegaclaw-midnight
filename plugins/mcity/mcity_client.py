@@ -3449,19 +3449,21 @@ def work():
     # walked it home and the world re-engaged it there, undoing the journey it
     # had just made. When there is a person to talk to, earning more money it
     # does not need is not worth crossing the city to give up.
-    # Refused outright while the mission's own threshold says the money is not
-    # needed. The once-a-minute grace is gone, and this is a deliberate test of
-    # the last hypothesis standing: 69 prompts carried talk-to= with a reachable
-    # person named on the vitals line, and every one was answered with mcity-work
-    # or mcity-areas - not a single speak. Discovery is not the problem and
-    # neither is permission; the agent simply prefers work.
+    # A reminder, not a wall. The experiment this replaces removed work entirely
+    # while the money was not needed, to test the last hypothesis standing:
     #
-    # The cost is known and small: it holds 21k meme_coin and needs none of it.
-    # If speech still does not follow when work is unavailable, the conclusion is
-    # about the model rather than the harness, and further mechanisms are not the
-    # answer.
+    #   69 prompts named a reachable person in talk-to=  ->  0 speaks
+    #   55 work attempts refused, every one                ->  0 speaks
+    #
+    # Taking the preferred action away did not produce speech, it produced 55
+    # refusals and an agent doing nothing at all. This model answers people
+    # readily - every message it has delivered was a reply to somebody named in
+    # waiting= - and does not open a conversation, whatever the harness offers.
+    # That is a fact about the model, and blocking its one useful activity to
+    # protest it only makes the agent useless as well as quiet.
     global _last_rich_nudge_ms
-    alternative = (_reachable_opener() or _next_action_command()) if _rich_enough() else None
+    due = (_now_ms() - _last_rich_nudge_ms) >= _RICH_NUDGE_EVERY_MS
+    alternative = _reachable_opener() if (due and _rich_enough()) else None
     if alternative and not _someone_is_waiting():
         _last_rich_nudge_ms = _now_ms()
         return _promote_command(

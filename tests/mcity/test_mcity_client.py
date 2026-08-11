@@ -1706,12 +1706,11 @@ def test_earned_is_silent_when_holdings_are_unknown(control):
     assert "earned=enough" in mc._vitals_line()
 
 
-def test_work_is_refused_while_the_money_is_not_needed(control):
-    """Deliberate: the once-a-minute grace is gone. 69 prompts carried talk-to=
-    with a reachable person named, and every one was answered with mcity-work or
-    mcity-areas - not one speak. Discovery is not the problem and neither is
-    permission, so the preferred action is removed while the mission's own
-    threshold says the money is not needed."""
+def test_the_wealth_reminder_does_not_stop_the_agent_working(control):
+    """The experiment this replaces removed work entirely while the money was not
+    needed: 55 attempts refused, 0 speaks, and an agent doing nothing at all. It
+    answers people readily and does not open conversations, whatever is offered,
+    so blocking its one useful activity only makes it useless as well as quiet."""
     control.on_action = lambda action: []
     control.force("/api/skill/agents/agent-1/agents", 200,
                   json.dumps({"agents": []}).encode())
@@ -1719,10 +1718,11 @@ def test_work_is_refused_while_the_money_is_not_needed(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(27)",
                        "items": "meme_coin=21427"})
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
-    for _ in range(3):
-        result = _check(mc.work())
-        assert result.startswith("MCITY-WORK-FAILED reason=rich_enough"), result
-    assert not control.actions
+    mc._last_rich_nudge_ms = 0
+    _check(mc.work())                      # at most one reminder per window
+    before = len(control.actions)
+    _check(mc.work())
+    assert len(control.actions) > before, "earning must stay available"
 
 
 def test_the_nudge_returns_after_its_interval(control):
@@ -2129,11 +2129,11 @@ def test_a_building_is_still_offered_when_it_is_the_only_way(control):
 
 
 
-def test_work_is_refused_every_turn_while_somebody_is_reachable(control):
-    """The agent took the route, reached central with reachable=2, then called
-    mcity-work - and a hacker's worksite is the crypto terminal back inside the
-    hacker house. Work walked it home and the world re-engaged it there, undoing
-    the journey it had just made."""
+def test_the_reminder_still_names_a_reachable_person(control):
+    """Refusing work every turn while somebody was reachable was tried and
+    dropped with the rest of the experiment: it produced refusals, not speech.
+    The reminder still fires periodically and still names who can hear us, which
+    costs the agent nothing when it ignores it."""
     control.on_action = lambda action: []
     roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
                           "canSpeak": True, "status": "idle", "activeAction": None}]}
@@ -2142,10 +2142,10 @@ def test_work_is_refused_every_turn_while_somebody_is_reachable(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(50)",
                        "items": "meme_coin=21088"})
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
-    mc._last_rich_nudge_ms = mc._now_ms()        # a nudge just fired
+    mc._last_rich_nudge_ms = 0
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=rich_enough"), result
-    assert not control.actions
+    assert result.startswith("MCITY-WORK-FAILED reason=rich_enough")
+    assert "user-agent-free" in result
 
 
 def test_vitals_names_somebody_to_talk_to(control):
