@@ -601,3 +601,35 @@ def test_eat_is_refused_when_not_hungry(monkeypatch):
                        "at_ms": mc._now_ms() - (mc._VITALS_STALE_MS + 1000)})
     mc.eat()
     assert called == ["EAT"]
+
+
+def test_speak_failure_offers_reachable_targets(monkeypatch):
+    """A speak failure was a dead end: the agent held one id from an old thread,
+    the world said 'target is sleeping', and it retried the same sleeping target
+    six times because nothing told it who else was there."""
+    payload = {"agents": [
+        {"id": "user-agent-awake", "name": "Masha", "isOpenToTalk": True,
+         "canSpeak": True, "isOnSameMap": True, "distance": 3, "status": "idle"},
+        {"id": "user-agent-far", "name": "Zed", "isOpenToTalk": True,
+         "canSpeak": True, "isOnSameMap": True, "distance": 40, "status": "idle"},
+        {"id": "user-agent-shut", "name": "Sleeper", "isOpenToTalk": False,
+         "canSpeak": False, "isOnSameMap": True, "distance": 1, "status": "sleeping"},
+    ]}
+    monkeypatch.setattr(mc, "_skill_read", lambda verb, ep: (payload, None))
+    monkeypatch.setattr(mc, "_store_call", lambda op, default=None: (default, True))
+    out = mc._speak_candidates()
+    assert "user-agent-awake" in out
+    assert "user-agent-shut" not in out          # not open to talk
+    assert out.index("user-agent-awake") < out.index("user-agent-far")  # nearest first
+    assert "MC_UNTRUSTED" not in out             # must stay copy-ready
+
+
+def test_speak_candidates_never_leak_quarantined_names(monkeypatch):
+    payload = {"agents": [{"id": "user-agent-x", "name": "Two Words",
+                           "isOpenToTalk": True, "canSpeak": True,
+                           "isOnSameMap": True, "distance": 1, "status": "idle"}]}
+    monkeypatch.setattr(mc, "_skill_read", lambda verb, ep: (payload, None))
+    monkeypatch.setattr(mc, "_store_call", lambda op, default=None: (default, True))
+    out = mc._speak_candidates()
+    assert "user-agent-x" in out
+    assert "MC_UNTRUSTED" not in out             # name dropped, id kept

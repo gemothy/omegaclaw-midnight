@@ -2507,7 +2507,68 @@ def speak(arg=None):
                                             sent["text"]))
         if _degraded(spoken_ok):
             result = _stamp_degraded(result)
+        return result
+    if "MCITY-SPEAK-FAILED" in (result or ""):
+        suggestion = _speak_candidates()
+        if suggestion:
+            result = _out(f"{result}\n{suggestion}")
     return result
+
+
+def _speak_candidates(limit=3):
+    """Trusted, copy-ready ids of people who can actually be spoken to.
+
+    A speak failure was a dead end: the agent held one id from an old thread,
+    the world answered "target is sleeping", and it retried the same sleeping
+    target six times because nothing told it who else was there. It never calls
+    mcity-agents on its own, so the roster stayed empty and the ranking built to
+    answer exactly this question was never asked.
+
+    Failing is now the moment we look: one read, the observations land in the
+    store, and the top candidates come back ranked talking-first then
+    unspoken-oldest-nearest. Ids are rendered plainly so they can be copied
+    verbatim, the way cmd= works for merchants."""
+    payload, error = _skill_read("SPEAK", "agents")
+    if error is not None:
+        return None
+    items = _find_list(payload, "agents")
+    if not items:
+        return None
+    now = _now_ms()
+    roster = [_parse_agent(item) for item in items if isinstance(item, dict)]
+    reachable = {entry["id"]: entry for entry in roster if entry["id"]}
+    if AgentObservation is not None:
+        observed = [_agent_observation(entry, now) for entry in roster if entry["id"]]
+        if observed:
+            _store_call(lambda store: store.upsert_agents(observed))
+        ranked, _ok = _store_call(
+            lambda store: store.candidates(now_ms=now,
+                                           cooldown_ms=SPEAK_COOLDOWN_MS,
+                                           limit=limit),
+            default=[])
+        ids = [row.agent_id for row in (ranked or []) if row.agent_id in reachable]
+    else:
+        ids = []
+    if not ids:
+        # Store unavailable: fall back to the live flags, which are just as good
+        # for this one decision - open to talk, then nearest.
+        usable = [e for e in roster if e["id"] and _yn(e.get("open")) == "yes"]
+        usable.sort(key=lambda e: _number(e["dist"], float("inf"), 0.0, float("inf")))
+        ids = [e["id"] for e in usable[:limit]]
+    if not ids:
+        return None
+    # The id is the part that must be copied; the name is decoration. Player
+    # names are player-authored - a real injection surface, unlike merchant NPC
+    # names - so they are shown only when _plain leaves them alone, never
+    # unwrapped the way _merchant_label does.
+    labels = []
+    for agent_id in ids:
+        label = _plain(agent_id)
+        name = _plain(reachable.get(agent_id, {}).get("name"))
+        if name and "MC_UNTRUSTED" not in str(name):
+            label = f"{label} ({name})"
+        labels.append(label)
+    return "try-instead=" + " | ".join(labels)
 
 
 @_guard("TRADE")
