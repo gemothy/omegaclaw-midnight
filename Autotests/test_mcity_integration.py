@@ -802,16 +802,16 @@ def test_the_loop_cadence_suits_a_live_world():
     import pathlib
     repo = pathlib.Path(__file__).resolve().parent.parent
     loop = (repo / "src" / "loop.metta").read_text()
-    assert "(configure wakeupInterval 15)" in loop
-    assert "(configure maxWakeLoops 5)" in loop
+    assert "(configure wakeupInterval 1)" in loop
+    assert "(configure maxWakeLoops 50)" in loop
     dockerfile = (repo / "Dockerfile").read_text()
     assert "src/loop.metta" in dockerfile, "an unshipped file changes nothing"
     # config.yaml OVERRIDES those literals, so it is the value that actually
     # runs. Editing loop.metta alone left the container on upstream's ten
     # minutes and cost a whole deploy cycle to notice.
     cfg = (repo / "config" / "config.yaml").read_text()
-    assert "wakeupInterval: 15" in cfg, "the literal in loop.metta is not the knob"
-    assert "maxWakeLoops: 5" in cfg
+    assert "wakeupInterval: 1\n" in cfg, "the literal in loop.metta is not the knob"
+    assert "maxWakeLoops: 50" in cfg
 
 
 def test_the_documented_cadence_matches_the_shipped_cadence():

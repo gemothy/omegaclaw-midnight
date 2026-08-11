@@ -24,17 +24,20 @@
    ; It also invalidated my own throughput readings: bursts measured right after
    ; a restart were spending the startup budget of 50, not a steady state.
    ;
-   ; 5 loops every 15 seconds is near-continuous while still bounded, so a
-   ; runaway cannot spin the GPU flat out forever. Each decision costs about five
-   ; seconds of a short generation, and the box stays well inside the memory cap.
+   ; THE AGENT IS NEVER ASLEEP. 5 loops every 15 seconds was still dormant for
+   ; 459 seconds out of 593 - 77% of its life - in a world where a thread dies
+   ; after about sixty seconds. A one second interval refills the budget on the
+   ; next iteration, so the loop is paced by how long a decision takes rather
+   ; than by sleeping. Each decision costs about five seconds of a short
+   ; generation and the box stays well inside its memory cap.
    (progn (configure maxNewInputLoops 50) ;20
-          (configure maxWakeLoops 5)
+          (configure maxWakeLoops 50)
           (configure spamShield False)
           (configure sleepInterval 1) ;10
           (configure provider Anthropic)
           (configure maxOutputToken 6000)
           (configure reasoningMode medium)
-          (configure wakeupInterval 15) ;upstream 600=10 minutes; see the note above
+          (configure wakeupInterval 1) ;upstream 600=10 minutes; see the note above
           (configure memoryDirectory ./)
           (change-state! &prevmsg "")
           (change-state! &lastresults "")

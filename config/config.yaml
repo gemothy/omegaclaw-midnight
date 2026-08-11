@@ -3,10 +3,10 @@
 # Turns the agent keeps running after a new human message before idling (seconds) 
 maxNewInputLoops: 50
 # Extra turns granted on each scheduled wake-up.
-# TUNED FOR A LIVE WORLD. See wakeupInterval below - these two together decide
+# THE AGENT IS NEVER ASLEEP. See wakeupInterval below - these two together decide
 # how much of its life the agent is awake for, and this file OVERRIDES the
 # literals in src/loop.metta, so changing them there alone does nothing.
-maxWakeLoops: 5
+maxWakeLoops: 50
 # (deprecated)
 spamShield: False
 # Delay between loop iterations (seconds)
@@ -20,13 +20,15 @@ maxOutputToken: 6000
 # Reasoning-effort hint passed to the provider
 reasoningMode: medium
 # How long idle before the next scheduled wake-up (seconds).
-# Upstream's 600 suits an agent waiting on a human. Midnight City threads die
-# after about sixty seconds, so a ten minute nap meant every person who wrote was
-# answered far too late or not at all. Measured before the change: last decision
-# 06:18:48, still asleep at 06:25:18, iterating once a second and doing nothing.
-# 5 loops every 15 seconds is near-continuous while still bounded, so a runaway
-# cannot pin the GPU indefinitely.
-wakeupInterval: 15
+# Upstream's 600 suits an agent waiting on a human, and it left this one asleep
+# for over ninety percent of its life. 15 was not enough either: measured, the
+# agent bursted 5 decisions then waited, and was dormant for 459 seconds out of
+# 593 - 77% asleep, in a world where a thread dies after about sixty seconds.
+#
+# 1 second means the budget refills on the very next iteration, so the loop is
+# paced by how long a decision takes rather than by sleeping. The agent is awake
+# whenever it is running.
+wakeupInterval: 1
 # Path to the logger configuration file
 # See https://docs.python.org/3/library/logging.config.html#configuration-file-format
 logConfigPath: ""
