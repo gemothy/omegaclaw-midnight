@@ -2325,11 +2325,16 @@ def threads(_ignored=None):
     if links:
         _unused, link_ok = _store_call(lambda store: store.upsert_agents(links))
 
-    pairs = [("count", len(items))]
+    reachable_waiting = [i for i in waiting_ids if _can_be_reached(i) is not False]
+    # waiting= is the number the procedure turns on, so it must count only the
+    # people who can actually hear a reply. Live: 56 agents were reachable and
+    # the agent still answered nobody, because every row it was told to answer
+    # was someone in do-not-disturb and the rule had no way to fall through.
+    pairs = [("count", len(items)), ("waiting-reachable", len(reachable_waiting))]
     if _degraded(link_ok):
         pairs.append(("store", "degraded"))
     head = _line("THREADS", "OK", pairs)
-    waiting_ids = [i for i in waiting_ids if _can_be_reached(i) is not False]
+    waiting_ids = reachable_waiting
     _WAITING["at_ms"] = _now_ms()
     _WAITING["ids"] = waiting_ids
     body = _project(head, "threads", "waiting-first", rows)

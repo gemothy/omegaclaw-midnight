@@ -1114,3 +1114,19 @@ def test_target_side_and_speaker_side_refusals_are_told_apart(control, reason,
     mc.speak("user-agent-abc hello there")
     assert (mc._can_be_reached("user-agent-abc") is False) is expect_unreachable
     assert (mc._dnd_streak > 0) is (not expect_unreachable)
+
+
+def test_the_header_counts_only_people_who_can_hear_a_reply(control):
+    """56 agents were reachable and the agent answered nobody: every row it was
+    told to answer was someone in do-not-disturb, and the rule had no way to
+    fall through. waiting-reachable is the number the procedure turns on."""
+    waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
+                            "pendingRecipientAgentId": "agent-1",
+                            "preview": "are you around tonight"}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    assert "waiting-reachable=1" in _check(mc.threads())
+    mc._ASLEEP["agent-2"] = mc._now_ms()
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    result = _check(mc.threads())
+    assert "waiting-reachable=0" in result
+    assert "asleep=yes" in result, "the row must still say why"
