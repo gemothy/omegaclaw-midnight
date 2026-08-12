@@ -2647,3 +2647,38 @@ def test_two_looks_and_no_thread_stays_pending(control, monkeypatch):
         control.force("/api/agents/agent-1/threads", 200,
                       json.dumps({"threads": []}).encode())
     assert "MCITY-SPEAK-PENDING" in _check(mc.speak("agent-2 hello there"))
+
+
+def test_the_district_we_are_in_is_learned_from_the_refusal(control):
+    """The district is not the space: inside a building the space is the
+    building, so travelling to the district we are already in looks reasonable
+    from here. The world answered 'agent is already in district central' six
+    times in twelve minutes, and it is the only thing that knows."""
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="travel_to_district",
+              reason="agent is already in district central")]
+    first = _check(mc.travel_district("central"))
+    assert "MCITY-TRAVEL-DISTRICT-FAILED" in first
+    control.on_action = lambda action: []
+    before = len(control.actions)
+    again = _check(mc.travel_district("central"))
+    assert again.startswith("MCITY-TRAVEL-DISTRICT-SKIPPED reason=already_here")
+    assert len(control.actions) == before, "no second call for a known answer"
+
+
+def test_another_district_is_still_reachable(control):
+    control.on_action = lambda action: []
+    mc._VITALS.update({"district_now": "central", "district_at_ms": mc._now_ms(),
+                       "at_ms": mc._now_ms()})
+    _check(mc.travel_district("harbour"))
+    assert control.actions
+
+
+def test_travel_district_sends_the_action_shape_the_world_expects(control):
+    """Sharing _destination_action must not change the wire format: travel uses
+    its own action kind with the id at the top level, not a move_to destination."""
+    control.on_action = lambda action: []
+    _check(mc.travel_district("harbour"))
+    sent = control.actions[-1]
+    assert sent["kind"] == "travel_to_district"
+    assert sent["districtId"] == "harbour"

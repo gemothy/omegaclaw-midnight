@@ -1016,3 +1016,16 @@ def test_the_launcher_and_its_reasoning_name_the_same_model():
     header = launcher.split("set -euo pipefail")[0]
     assert model in header, f"the header does not explain why it serves {model}"
     assert "Revert with:" in header, "a reversed decision must say how to reverse it"
+
+
+def test_recent_events_is_not_offered_to_the_agent():
+    """76 of 136 commands in twelve minutes, and 168 read-cooldown skips behind
+    them. The mission recommended it for checking a PENDING action, but the
+    harness now confirms deliveries itself from the thread list, so the advice
+    was obsolete and the skill was pure attraction."""
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    metta = (repo / "plugins" / "mcity" / "mcity.metta").read_text()
+    assert "add-skill mcity-recent-events" not in metta
+    assert "(= (mcity-recent-events)" in metta, "the binding stays for replayed history"
+    assert "check mcity-recent-events" not in metta, "the stale advice must go too"

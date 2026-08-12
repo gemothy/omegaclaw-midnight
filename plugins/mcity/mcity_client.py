@@ -471,7 +471,8 @@ _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
-           "status": None, "busy_for": None, "engaged": False, "space_kind": None}
+           "status": None, "busy_for": None, "engaged": False, "space_kind": None,
+           "district_now": None, "district_at_ms": 0}
 _SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
 _SELF_ENGAGED_MIN_S = 3        # below this the action ends before the refusal helps
 _THREAD_CONFIRM_RETRY_S = 2.0  # the world creates the thread just after accepting
@@ -500,7 +501,8 @@ def reset_runtime_state():
     _VITALS.clear()
     _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
                     "status": None, "busy_for": None, "engaged": False,
-                    "space_kind": None})
+                    "space_kind": None, "district_now": None,
+                    "district_at_ms": 0})
     globals().update(_vitals_refreshing=False, _can_speak_at_ms=0,
                      _can_speak_refreshing=False, _waiting_refresh_at_ms=0,
                      _waiting_refreshing=False, _last_self_probe_ms=0,
@@ -3463,7 +3465,10 @@ def _mutate(verb, build):
     return _submit(action, verb)
 
 
-def _destination_action(verb, arg, key, usage):
+_DISTRICT_TTL_MS = 120000      # how long to believe "you are already in district X"
+
+
+def _destination_action(verb, arg, key, usage, kind=None):
     def build():
         value = _norm_arg(arg)
         if not value or not ID_RE.match(value):
@@ -3477,8 +3482,25 @@ def _destination_action(verb, arg, key, usage):
             return None, _failed(verb, "already_here",
                                  f"you are already at {here}; that is the name of "
                                  "where you are standing, not somewhere to go")
+        # The district is not the space. Inside a building the space is the
+        # building, so travelling to the district we are already in looks
+        # perfectly reasonable from here and the world answers "agent is already
+        # in district central" - six times in twelve minutes. The world is the
+        # only thing that knows, so remember what it said.
+        if value == _VITALS.get("district_now") and _VITALS.get("district_at_ms") \
+                and (_now_ms() - _VITALS["district_at_ms"]) <= _DISTRICT_TTL_MS:
+            return None, _failed(verb, "already_here",
+                                 f"the world said moments ago that you are already "
+                                 f"in district {value}")
+        if kind:
+            return {"kind": kind, key: value}, None
         return {"kind": "move_to", "destination": {key: value}}, None
-    return _mutate(verb, build)
+    result = _mutate(verb, build)
+    match = re.search(r"already in district ([\w-]+)", (result or "").lower())
+    if match:
+        _VITALS["district_now"] = match.group(1)
+        _VITALS["district_at_ms"] = _now_ms()
+    return result
 
 
 @_guard("MOVE-AREA")
@@ -3520,13 +3542,14 @@ def move_tile(arg=None):
 
 @_guard("TRAVEL-DISTRICT")
 def travel_district(arg=None):
-    def build():
-        value = _norm_arg(arg)
-        if not value or not ID_RE.match(value):
-            return None, _failed("TRAVEL-DISTRICT", "bad_args",
-                                 "give one district id from mcity-navigation")
-        return {"kind": "travel_to_district", "districtId": value}, None
-    return _mutate("TRAVEL-DISTRICT", build)
+    # Goes through _destination_action like every other movement skill. It had
+    # its own copy of the same four lines, so the guards added there - do not
+    # walk to where you are standing, and do not travel to the district the world
+    # just said you are in - never applied to it. Sixth time a rule has been
+    # duplicated into a second caller and drifted apart.
+    return _destination_action("TRAVEL-DISTRICT", arg, "districtId",
+                               "give one district id from mcity-navigation",
+                               kind="travel_to_district")
 
 
 @_guard("ENTER-BUILDING")
