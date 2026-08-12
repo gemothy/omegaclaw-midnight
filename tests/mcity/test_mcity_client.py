@@ -2503,3 +2503,30 @@ def test_delivering_a_message_resets_the_silence(control):
     mc._last_delivered_ms = mc._now_ms() - 60 * 60000
     _check(mc.speak("user-agent-abc hello there friend"))
     assert mc._now_ms() - mc._last_delivered_ms < 5000
+
+
+def test_a_route_is_recomputed_after_the_agent_moves(control):
+    """The agent crossed central, north and the hacker house inside one window,
+    so a minute-old cached route told it to travel to central while vitals read
+    at=central. A route is only valid for the place it was computed from."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [{"id": "central-plaza", "kind": "park",
+                        "moveAreaAvailable": True,
+                        "anchor": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    first = mc._cached_route()
+    assert "central-plaza" in first
+
+    # Arrived. The old route must not be served again.
+    mc._VITALS["space"] = "central"
+    control.force("/api/skill/agents/agent-1/areas", 200,
+                  json.dumps({"areas": []}).encode())
+    assert mc._cached_route() != first
