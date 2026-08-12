@@ -87,3 +87,29 @@ def test_every_movement_skill_shares_the_movement_guards():
         assert "_destination_action" in body, (
             f"{skill} builds its own destination action. travel_district did "
             "that and missed two guards added to _destination_action.")
+
+
+def test_the_worlds_refusals_are_recorded_in_exactly_one_place():
+    """Asleep, gone, closed and unreachable-destination used to be four dicts,
+    each with its own TTL, its own prune and its own reset line. They are one
+    idea, and every duplicated rule in this file has eventually drifted from its
+    copy - which is what the rest of this module exists to catch."""
+    offenders = _callers_touching(
+        r"_REFUSED\[[^\]]+\] =",
+        allowed={"_remember_refusal", "reset_runtime_state"})
+    assert not offenders, (
+        f"{offenders} write the refusal memory directly. Call "
+        "_remember_refusal, which owns the timestamp and the pruning.")
+
+
+def test_no_refusal_kind_exists_without_a_ttl():
+    """A kind with no entry in the table raises KeyError inside the read path,
+    which is the pruning silently never running - the failure the four separate
+    dicts actually had."""
+    source = CLIENT.read_text()
+    table = re.search(r"_REFUSAL_TTL_MS = \{(.*?)\n\}", source, re.S)
+    assert table, "_REFUSAL_TTL_MS not found"
+    declared = set(re.findall(r'"(\w+)":', table.group(1)))
+    used = set(re.findall(r'_(?:remember_refusal|refused_ago_ms|refused_keys)\(\s*"(\w+)"',
+                          source))
+    assert used <= declared, f"{used - declared} have no TTL; they never expire"

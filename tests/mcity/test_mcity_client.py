@@ -899,7 +899,7 @@ def test_a_sleeping_target_is_remembered_and_not_retried(control):
     control.force("/api/actions", 200, b'{"accepted":false,"error":"target is sleeping"}')
     first = _check(mc.speak("user-agent-abc are you there"))
     assert "MCITY-SPEAK" in first
-    mc._ASLEEP["user-agent-abc"] = mc._now_ms()      # as the failure path records
+    mc._REFUSED[("asleep", "user-agent-abc")] = mc._now_ms()      # as the failure path records
     before = len(control.actions)
     again = _check(mc.speak("user-agent-abc are you there"))
     assert again.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
@@ -918,7 +918,7 @@ def test_a_sleeping_counterpart_is_flagged_and_never_counted_as_waiting(control)
     _check(mc.threads())
     assert mc._WAITING["ids"] == [other], "the fixture must have someone waiting"
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
-    mc._ASLEEP[other] = mc._now_ms()
+    mc._REFUSED[("asleep", other)] = mc._now_ms()
     mc._read_at.clear()          # a deliberate second look
     result = _check(mc.threads())
     assert "asleep=yes" in result
@@ -927,7 +927,7 @@ def test_a_sleeping_counterpart_is_flagged_and_never_counted_as_waiting(control)
 
 def test_a_stale_sleep_record_expires(control):
     control.on_action = lambda action: []
-    mc._ASLEEP["user-agent-abc"] = mc._now_ms() - (mc._ASLEEP_TTL_MS + 1000)
+    mc._REFUSED[("asleep", "user-agent-abc")] = mc._now_ms() - (mc._REFUSAL_TTL_MS["asleep"] + 1000)
     _check(mc.speak("user-agent-abc good morning"))
     assert control.actions, "an expired sleep record must not block the attempt"
 
@@ -1065,7 +1065,7 @@ def test_the_header_counts_only_people_who_can_hear_a_reply(control):
                             "preview": "are you around tonight"}]}
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
     assert "waiting-reachable=1" in _check(mc.threads())
-    mc._ASLEEP["agent-2"] = mc._now_ms()
+    mc._REFUSED[("asleep", "agent-2")] = mc._now_ms()
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
     mc._read_at.clear()
     result = _check(mc.threads())
@@ -1137,7 +1137,7 @@ def test_an_unreachable_refusal_hands_over_a_command(control):
     """The row already said asleep=yes and the agent spoke to them anyway: 35
     attempts in one window, every one refused here, every target already
     flagged. It does not act on flags or on prose - it acts on a command."""
-    mc._ASLEEP["user-agent-abc"] = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-abc")] = mc._now_ms()
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     result = _check(mc.speak("user-agent-abc hello there"))
@@ -1146,7 +1146,7 @@ def test_an_unreachable_refusal_hands_over_a_command(control):
 
 
 def test_the_command_is_eat_only_when_actually_hungry(control):
-    mc._ASLEEP["user-agent-abc"] = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-abc")] = mc._now_ms()
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(2)",
                        "items": "to_go_food=2"})
@@ -1154,7 +1154,7 @@ def test_the_command_is_eat_only_when_actually_hungry(control):
 
 
 def test_a_reachable_waiting_person_is_named_as_a_command(control):
-    mc._ASLEEP["user-agent-abc"] = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-abc")] = mc._now_ms()
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-awake"]})
     mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
     result = _check(mc.speak("user-agent-abc hello there"))
@@ -1588,7 +1588,7 @@ def test_an_unreachable_send_is_redirected_to_the_person_waiting(control):
     """18 sends went to unreachable people while a reachable person was waiting
     the whole time. The redirect has to be a command that stands alone - the
     placeholder form was measured at 63 emissions for one speak."""
-    mc._ASLEEP["user-agent-asleep"] = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-asleep")] = mc._now_ms()
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-waiting"]})
     mc._CAN_SPEAK["user-agent-waiting"] = (True, mc._now_ms())
     result = _check(mc.speak("user-agent-asleep hello there"))
@@ -2345,7 +2345,7 @@ def test_an_id_the_world_does_not_know_is_not_tried_twice(control):
 def test_a_gone_id_is_forgotten_eventually(control):
     """Agents come back; the memory is long but not permanent."""
     control.on_action = lambda action: []
-    mc._GONE["user-agent-gone"] = mc._now_ms() - (mc._GONE_TTL_MS + 1000)
+    mc._REFUSED[("gone", "user-agent-gone")] = mc._now_ms() - (mc._REFUSAL_TTL_MS["gone"] + 1000)
     _check(mc.speak("user-agent-gone hello there"))
     assert control.actions
 
@@ -2451,7 +2451,7 @@ def test_the_close_is_also_learned_from_the_world_refusal(control):
 
 def test_the_cooldown_expires_so_people_are_not_written_off(control):
     control.on_action = lambda action: []
-    mc._CLOSED_WITH["user-agent-abc"] = mc._now_ms() - (mc._CLOSED_COOLDOWN_MS + 1000)
+    mc._REFUSED[("closed", "user-agent-abc")] = mc._now_ms() - (mc._REFUSAL_TTL_MS["closed"] + 1000)
     _check(mc.speak("user-agent-abc hello again"))
     assert control.actions
 
@@ -2545,9 +2545,9 @@ def test_talk_to_and_the_skip_can_never_disagree(control):
                             ("closed", "user-agent-closed")):
         mc._CAN_SPEAK[agent_id] = (True, now)      # the cache alone says yes
     mc._REACHABLE.update({"n": 3, "at_ms": now})
-    mc._GONE["user-agent-gone"] = now
-    mc._ASLEEP["user-agent-asleep"] = now
-    mc._CLOSED_WITH["user-agent-closed"] = now
+    mc._REFUSED[("gone", "user-agent-gone")] = now
+    mc._REFUSED[("asleep", "user-agent-asleep")] = now
+    mc._REFUSED[("closed", "user-agent-closed")] = now
     assert mc._best_person_to_talk_to() is None, "none of these can be reached"
     mc._CAN_SPEAK["user-agent-fine"] = (True, now)
     assert mc._best_person_to_talk_to() == "user-agent-fine"
@@ -2794,8 +2794,8 @@ def test_the_memory_is_per_skill_and_per_destination(control):
 
 def test_a_rejected_destination_is_forgiven_eventually(control):
     control.on_action = lambda action: []
-    mc._BAD_DESTINATION[("MOVE-AREA", "central-plaza")] = \
-        mc._now_ms() - (mc._BAD_DESTINATION_TTL_MS + 1000)
+    mc._REFUSED[("destination", ("MOVE-AREA", "central-plaza"))] = \
+        mc._now_ms() - (mc._REFUSAL_TTL_MS["destination"] + 1000)
     _check(mc.move_area("central-plaza"))
     assert control.actions
 

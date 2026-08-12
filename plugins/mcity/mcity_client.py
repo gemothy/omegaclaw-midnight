@@ -389,25 +389,69 @@ _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
 _WAITING_REFRESH_MS = 20000    # how often vitals re-checks who is waiting
 _waiting_refresh_at_ms = 0
 _waiting_refreshing = False
-# Who the world said was asleep, and when. Measured: the world's actual rejection
-# is "target is sleeping" - the speaker's own busy status was never the blocker,
-# though the harness assumed it was and stayed silent for hours because of it.
-# A sleeping agent cannot hear us, so retrying them burns turns while other
-# people wait.
-_ASLEEP = {}
-_ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
-# Ids the world does not know. The agent copies targets out of its own history,
-# and some of those agents have since left: 6 of 14 world speak rejections in one
-# window were "target not found". An id that does not exist will not start
-# existing, so there is no reason to spend a second call on it.
-_GONE = {}
-_GONE_TTL_MS = 1800000
-# Counterparts whose conversation the world has just closed. Every one of the
-# agent's 50 threads is closed with reason stale_timeout - the world shuts a
-# quiet conversation - and speaking into one comes back "conversation recently
-# closed". So a closed thread means: talk to somebody else for now.
-_CLOSED_WITH = {}
-_CLOSED_COOLDOWN_MS = 600000
+# Everything the world has refused, in one place: (kind, key) -> when it said so.
+#
+# These were four separate dicts - asleep, gone, closed, destination - each with
+# its own TTL constant, its own _prune call and its own line in the reset list.
+# They are one idea: the world said no about a specific thing, and that answer is
+# worth believing for a while rather than spending another call to hear it again.
+# Six bugs in this file have been one rule drifting from its copy, so four copies
+# of a memory is four chances to prune one and forget the others.
+#
+# The TTLs differ because the refusals expire for different reasons:
+#   asleep      the world's actual words are "target is sleeping"; the speaker's
+#               own busy status was never the blocker, though the harness assumed
+#               it was and stayed silent for hours over it.
+#   gone        "target not found" - 6 of 14 speak rejections in one window. The
+#               agent copies targets out of its own history and some have left.
+#               An id that does not exist will not start existing.
+#   closed      every one of the agent's 50 threads closed with stale_timeout -
+#               the world shuts a quiet conversation - and speaking into one comes
+#               back "conversation recently closed". So: talk to somebody else.
+#   destination the district is not the space. Inside a building the space is the
+#               building, so travelling to the district we are standing in looks
+#               reasonable from here and the world answers "already in district
+#               central" - six times in twelve minutes. Keyed (verb, value),
+#               because a place one skill cannot reach another often can.
+_REFUSAL_TTL_MS = {
+    "asleep": 300000,          # assume nobody sleeps less than five minutes
+    "gone": 1800000,
+    "closed": 600000,
+    "destination": 900000,
+}
+_REFUSED = {}
+
+
+def _remember_refusal(kind, key, first_only=False):
+    """Record that the world refused this. first_only keeps the earliest stamp,
+    for the thread list, where a closed thread is evidence of when it closed
+    rather than of anything happening now."""
+    if first_only and (kind, key) in _REFUSED:
+        return
+    now = _now_ms()
+    _REFUSED[(kind, key)] = now
+    ttl = _REFUSAL_TTL_MS[kind]
+    for entry, at in list(_REFUSED.items()):
+        if entry[0] == kind and (now - at) > ttl:
+            _REFUSED.pop(entry, None)
+
+
+def _refused_ago_ms(kind, key):
+    """How long ago the world refused this, or None if it never did or the
+    refusal has expired. None means 'no objection', not 'no answer'."""
+    at = _REFUSED.get((kind, key))
+    if at is None:
+        return None
+    ago = _now_ms() - at
+    return ago if ago <= _REFUSAL_TTL_MS[kind] else None
+
+
+def _refused_keys(kind):
+    """Every key the world has refused for this kind, expired or not - used only
+    to recognise ids we have seen before, where a stale one is still a real id."""
+    return {key for (k, key) in _REFUSED if k == kind}
+
+
 _ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
 # (target, exact words) -> when it was delivered. Repeating yourself verbatim
 # to the same person is the clearest tell of a bot.
@@ -498,8 +542,8 @@ def reset_runtime_state():
 
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
-    for cache in (_CAN_SPEAK, _ASLEEP, _GONE, _CLOSED_WITH, _BAD_DESTINATION,
-                  _LAST_READ, _SAID, _AWAKE_PLACES, _inbound, _my_texts, _read_at):
+    for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES,
+                  _inbound, _my_texts, _read_at):
         cache.clear()
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
@@ -1541,14 +1585,8 @@ def _note_can_speak(entry, at_ms=None):
 
 def _can_be_reached(agent_id):
     """True / False / None (unknown), from the freshest evidence we hold."""
-    gone = _GONE.get(agent_id)
-    if gone and (_now_ms() - gone) <= _GONE_TTL_MS:
-        return False
-    closed = _CLOSED_WITH.get(agent_id)
-    if closed and (_now_ms() - closed) <= _CLOSED_COOLDOWN_MS:
-        return False
-    at = _ASLEEP.get(agent_id)
-    if at and (_now_ms() - at) <= _ASLEEP_TTL_MS:
+    if any(_refused_ago_ms(kind, agent_id) is not None
+           for kind in ("gone", "closed", "asleep")):
         return False
     known = _CAN_SPEAK.get(agent_id)
     if known and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
@@ -1591,7 +1629,7 @@ def _resolve_target(agent_id):
     try:
         if not agent_id:
             return agent_id
-        known = set(_CAN_SPEAK) | set(_ASLEEP) | set(_GONE)
+        known = set(_CAN_SPEAK) | _refused_keys("asleep") | _refused_keys("gone")
         if agent_id in known:
             return agent_id
         stem = agent_id.split()[0].strip("()")
@@ -3097,7 +3135,7 @@ def threads(_ignored=None):
         status = _text(_get(item, "threadStatus"))
         if status and status != "open" and len(others) == 1 and ID_RE.match(others[0]):
             # Learned before spending a call on it.
-            _CLOSED_WITH.setdefault(others[0], _now_ms())
+            _remember_refusal("closed", others[0], first_only=True)
         asleep = False
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
             # False only when the world has actually said so; unknown counts as
@@ -3528,8 +3566,6 @@ _DISTRICT_TTL_MS = 120000      # how long to believe "you are already in distric
 # long as it stays in the window. Measured: "district gateway not found:
 # bison-valley" six times and "area not found: central" four times in one window,
 # after the harness had stopped suggesting either.
-_BAD_DESTINATION = {}
-_BAD_DESTINATION_TTL_MS = 900000
 _DESTINATION_REJECTIONS = ("area not found", "district gateway not found",
                            "not a valid destination", "unknown area")
 
@@ -3553,9 +3589,9 @@ def _destination_action(verb, arg, key, usage, kind=None):
         # perfectly reasonable from here and the world answers "agent is already
         # in district central" - six times in twelve minutes. The world is the
         # only thing that knows, so remember what it said.
-        rejected = _BAD_DESTINATION.get((verb, value))
-        if rejected and (_now_ms() - rejected) <= _BAD_DESTINATION_TTL_MS:
-            ago = int((_now_ms() - rejected) / 60000)
+        rejected = _refused_ago_ms("destination", (verb, value))
+        if rejected is not None:
+            ago = int(rejected / 60000)
             return None, _failed(verb, "known_bad_destination",
                                  f"the world rejected {value} for this skill "
                                  f"{ago}m ago; it is in your history but it does "
@@ -3572,8 +3608,7 @@ def _destination_action(verb, arg, key, usage, kind=None):
     lowered = (result or "").lower()
     value = _norm_arg(arg)
     if value and any(phrase in lowered for phrase in _DESTINATION_REJECTIONS):
-        _BAD_DESTINATION[(verb, value)] = _now_ms()
-        _prune(_BAD_DESTINATION, _BAD_DESTINATION_TTL_MS, lambda v: v)
+        _remember_refusal("destination", (verb, value))
     match = re.search(r"already in district ([\w-]+)", (result or "").lower())
     if match:
         _VITALS["district_now"] = match.group(1)
@@ -4106,16 +4141,13 @@ def speak(arg=None):
         # temporal, so it will not clear on its own - all the more reason not to
         # spend another turn on that person.
         if sent.get("agent_id") and "conversation recently closed" in lowered:
-            _CLOSED_WITH[sent["agent_id"]] = _now_ms()
-            _prune(_CLOSED_WITH, _CLOSED_COOLDOWN_MS, lambda v: v)
+            _remember_refusal("closed", sent["agent_id"])
         elif sent.get("agent_id") and "target not found" in lowered:
-            _GONE[sent["agent_id"]] = _now_ms()
-            _prune(_GONE, _GONE_TTL_MS, lambda v: v)
+            _remember_refusal("gone", sent["agent_id"])
         elif sent.get("agent_id") and ("target is sleeping" in lowered
                                        or "target is in do not disturb" in lowered
                                        or "only talks to friends" in lowered):
-            _ASLEEP[sent["agent_id"]] = _now_ms()
-            _prune(_ASLEEP, _ASLEEP_TTL_MS, lambda v: v)
+            _remember_refusal("asleep", sent["agent_id"])
         elif "speaker is in do not disturb" in lowered:
             # Speaker-side: a different target cannot fix it, so the candidate
             # list below would be misleading on its own.
