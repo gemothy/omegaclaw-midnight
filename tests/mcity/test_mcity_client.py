@@ -2798,3 +2798,23 @@ def test_a_rejected_destination_is_forgiven_eventually(control):
         mc._now_ms() - (mc._BAD_DESTINATION_TTL_MS + 1000)
     _check(mc.move_area("central-plaza"))
     assert control.actions
+
+
+def test_vitals_says_when_the_next_action_is_allowed(control):
+    """The world permits twelve writes a minute and the client paces at three
+    seconds, but the agent now decides about every two - so it attempted actions
+    it could not make, was refused 90 times in six minutes, and filled those
+    turns with prose. Being told the wait up front turns 'try and be refused'
+    into 'wait'."""
+    import time as _time
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    mc._cfg["action_min_gap"] = 3.0
+    mc._last_mutation_at = _time.monotonic()      # an action just went out
+    line = mc._vitals_line() or ""
+    assert "action-in=" in line, line
+
+
+def test_no_wait_is_advertised_once_the_gap_has_passed(control):
+    mc._cfg["action_min_gap"] = 0.0
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    assert "action-in=" not in (mc._vitals_line() or "")

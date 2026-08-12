@@ -669,6 +669,14 @@ def _vitals_line():
     # earn on evidence we did not have - 36 of 152 samples in one window.
     if _VITALS.get("items"):
         parts.append("earned=enough" if _rich_enough() else "earned=keep-going")
+    # When the next action is allowed. The world permits twelve writes a minute
+    # and the client paces at three seconds, but the agent now decides about
+    # every two - so it was attempting actions it could not make, being refused
+    # 90 times in six minutes, and filling those turns with prose. Being told the
+    # wait up front turns "try and be refused" into "wait".
+    waiting_for = _pace()
+    if waiting_for:
+        parts.append("action-in=" + waiting_for.replace("wait ", ""))
     # Say the worksite is shut before the agent spends a turn finding out. NOT
     # nested under the holdings check above: whether work is paused has nothing
     # to do with whether we happen to know what is in the bag.
