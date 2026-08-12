@@ -2836,3 +2836,34 @@ def test_the_same_read_back_to_back_is_still_skipped(control):
     """The cooldown still has to stop the same read twice in a row."""
     _check(mc.threads())
     assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=just_read")
+
+
+def test_a_cooled_read_points_at_one_that_is_available(control):
+    """The mission tells the agent to spend a waiting turn learning something and
+    then this refused the read it picked - 120 skips in six minutes, two of my own
+    instructions arguing with each other. Naming an available read turns the
+    refusal into a rotation."""
+    _check(mc.threads())
+    result = _check(mc.threads())
+    assert result.startswith("MCITY-THREADS-SKIPPED reason=just_read")
+    head = result.partition("\n")[0]
+    # the refused read appears in do-NOT-repeat, the alternative in do-THIS
+    suggested = head.partition("do-THIS=")[2]
+    assert suggested.startswith("(mcity-"), head
+    assert "(mcity-threads)" not in suggested, head
+
+
+def test_it_never_points_back_at_the_read_it_just_refused(control):
+    _check(mc.agents())
+    result = _check(mc.agents())
+    suggested = result.partition("\n")[0].partition("do-THIS=")[2]
+    assert "(mcity-agents)" not in suggested, result
+
+
+def test_with_every_read_cooled_it_falls_back_to_an_action(control):
+    """When there is nothing left to read, the honest answer is the action
+    fallback rather than a read that will also be refused."""
+    now = mc._now_ms()
+    for name in mc._READ_SKILLS:
+        mc._read_at[name] = now
+    assert mc._another_read_than("THREADS") is None

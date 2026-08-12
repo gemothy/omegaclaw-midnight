@@ -797,6 +797,30 @@ def _failed(verb, reason, detail=""):
 # answer happens to be identical.
 
 
+_READ_SKILLS = {"THREADS": "(mcity-threads)", "AGENTS": "(mcity-agents)",
+                "MERCHANTS": "(mcity-merchants)", "NAVIGATION": "(mcity-navigation)",
+                "STATUS": "(mcity-status)"}
+
+
+def _another_read_than(verb):
+    """A read that is not on cooldown, least recently used first.
+
+    The agent decides about every two seconds and the world accepts twelve
+    writes a minute, so most turns cannot carry an action and the mission sends
+    them to a read instead. Refusing that read without naming an alternative just
+    moves the dead end."""
+    try:
+        now = _now_ms()
+        options = [(_read_at.get(name, 0), command)
+                   for name, command in _READ_SKILLS.items()
+                   if name != verb and now - _read_at.get(name, 0) >= _READ_COOLDOWN_MS]
+        if not options:
+            return None
+        return "Do this instead, exactly: " + min(options)[1]
+    except Exception:      # noqa: BLE001 - a hint must never break a skill
+        return None
+
+
 def _guard(verb):
     """Wrap a skill so it can never raise into the agent loop and can never
     return an empty result (an empty COMMAND_RETURN row vanishes entirely)."""
@@ -824,12 +848,17 @@ def _guard(verb):
                 since = _now_ms() - _read_at.get(verb, 0)
                 if _read_at.get(verb) and since < _READ_COOLDOWN_MS:
                     wait = int((_READ_COOLDOWN_MS - since) / 1000) + 1
+                    # Name a read it CAN make. The mission tells it to spend a
+                    # waiting turn learning something, and then this refused the
+                    # one it picked - 120 skips in six minutes, my own two
+                    # instructions arguing with each other. Pointing at an
+                    # available read turns the refusal into a rotation.
                     return _out(_promote_command(
                         _failed(verb, "just_read",
                                 f"you read this {int(since / 1000)}s ago and it "
                                 f"cannot have changed much; it is worth another "
                                 f"look in {wait}s"),
-                        _next_action_command()))
+                        _another_read_than(verb) or _next_action_command()))
                 _read_at[verb] = _now_ms()
             try:
                 result = func(*args, **kwargs)
