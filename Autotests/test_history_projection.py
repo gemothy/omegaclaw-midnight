@@ -232,3 +232,18 @@ def test_a_send_answering_a_real_message_is_always_kept(tmp_path):
         encoding="utf-8")
     body = helper.rankedHistory(str(history), 30000)
     assert "Sold 50 crystal" in body
+
+
+def test_a_turn_that_did_nothing_is_not_taught_back(tmp_path):
+    """(No "action needed.") was 133 of 143 turns. The loop rejects it as
+    malformed, but every one of them sat in history teaching the next turn to do
+    the same nothing."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-11 10:00:00" \n ((mcity-threads)) \n)\n'
+        + '("2026-08-11 10:00:10" \n ((No "action needed.")) \n)\n' * 12,
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "action needed" not in body
+    assert "mcity-threads" in body

@@ -2481,3 +2481,25 @@ def test_a_thread_that_has_not_moved_stays_pending(control):
     control.force("/api/agents/agent-1/threads", 200, json.dumps(stale).encode())
     result = _check(mc.speak("agent-2 hello there"))
     assert "MCITY-SPEAK-PENDING" in result
+
+
+def test_vitals_says_how_long_the_agent_has_been_silent(control):
+    """With work retired, nothing owed and money enough, the agent answered "No
+    action needed" 133 times in twenty minutes while four people stood there able
+    to hear it. Silence is a fact about the agent, and stating it is what makes
+    speaking something due rather than optional."""
+    mc._CAN_SPEAK["user-agent-free"] = (True, mc._now_ms())
+    mc._REACHABLE.update({"n": 1, "at_ms": mc._now_ms()})
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
+    assert "silent-for=never-spoken" in mc._vitals_line()
+    mc._last_delivered_ms = mc._now_ms() - 7 * 60000
+    assert "silent-for=7m" in mc._vitals_line()
+
+
+def test_delivering_a_message_resets_the_silence(control):
+    control.on_action = lambda action: [
+        event("e1", "agent_spoke", targetAgentId="user-agent-abc",
+              text="hello there friend", threadId="t1", messageId="m1", sequenceNo=1)]
+    mc._last_delivered_ms = mc._now_ms() - 60 * 60000
+    _check(mc.speak("user-agent-abc hello there friend"))
+    assert mc._now_ms() - mc._last_delivered_ms < 5000

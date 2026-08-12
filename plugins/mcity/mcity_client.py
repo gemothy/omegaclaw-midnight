@@ -417,6 +417,7 @@ _NO_LINK_EXIT_MS = 300000      # how long to believe 'no linked exit here'
 _no_link_exit_until_ms = 0
 _worksite_busy_until_ms = 0
 _last_rich_nudge_ms = 0
+_last_delivered_ms = 0         # when we last got a message to anybody
 _SAID = {}
 _SAID_TTL_MS = 600000
 _DND_STREAK_HINT = 3           # refusals before we point out the pattern
@@ -490,7 +491,8 @@ def reset_runtime_state():
                      _waiting_refreshing=False, _last_self_probe_ms=0,
                      _dnd_streak=0, _last_rich_nudge_ms=0,
                      _worksite_busy_until_ms=0, _last_roster_read_ms=0,
-                     _last_areas_read_ms=0, _no_link_exit_until_ms=0)
+                     _last_areas_read_ms=0, _no_link_exit_until_ms=0,
+                     _last_delivered_ms=0)
 
 
 def _harvest_vitals(payload):
@@ -671,6 +673,16 @@ def _vitals_line():
             who = _best_person_to_talk_to()
             if who:
                 parts.append(f"talk-to={who}")
+                # How long since anybody heard from us. Without it the agent
+                # answered "No action needed" 133 times in twenty minutes:
+                # nothing was owed, the money was enough and work was retired, so
+                # by its own reading there was nothing to do - while four people
+                # stood there able to hear it. Silence is a fact about the agent,
+                # and stating it is what turns speaking into something due.
+                if _last_delivered_ms:
+                    parts.append(f"silent-for={int((_now_ms() - _last_delivered_ms) / 60000)}m")
+                else:
+                    parts.append("silent-for=never-spoken")
     if _VITALS["items"]:
         parts.append(f"holding={_VITALS['items']}")
     if not parts:
@@ -3898,6 +3910,7 @@ def speak(arg=None):
         # Ground the delivery: spoke_count is the anti-greeting-loop counter
         # that candidates() ranks on. A store failure must never fail a speak
         # that already happened; it only marks the turn as ungrounded.
+        globals()["_last_delivered_ms"] = _now_ms()
         _remember_said(sent["text"])
         _SAID[(sent["agent_id"], _norm_arg(sent["text"]).lower())] = _now_ms()
         _prune(_SAID, _SAID_TTL_MS, lambda v: v)

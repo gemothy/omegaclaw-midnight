@@ -531,6 +531,12 @@ def rankedHistory(history_file, budget, repeat_cap=2):
         if commands and any(
                 c.lstrip("( ").startswith(RETIRED_COMMANDS) for c in commands):
             continue
+        # "(No \"action needed.\")" and friends: the loop rejects these as
+        # malformed and answers REMEMBER:OUTPUT_NOTHING_ELSE_THAN, but they were
+        # 133 of 143 turns and every one of them taught the next turn to do the
+        # same nothing.
+        if re.match(r'\s*\(\("?(?:No|Nothing|None)\b', block.split("\n", 1)[-1]):
+            continue
         if any(f'"{name}"' in block or f"({name}" in block
                for name in RETIRED_COMMANDS):
             # The retired name passed as an ARGUMENT, which the model then
