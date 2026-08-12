@@ -2590,3 +2590,33 @@ def test_different_reads_do_not_block_each_other(control):
     reading its threads."""
     _check(mc.agents())
     assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
+
+
+def test_the_counterpart_is_found_however_the_world_spells_it(control):
+    """There is no participants list in this world: the payload names
+    initiatorAgentId and recipientAgentId. The renderer had a fallback, three
+    other callers did not, and the delivery confirmation matched no thread - so
+    22 delivered messages in one window stayed PENDING."""
+    own = "agent-1"
+    for item, want in (
+        ({"participants": [own, "agent-2"]}, "agent-2"),
+        ({"initiatorAgentId": own, "recipientAgentId": "agent-3"}, "agent-3"),
+        ({"initiatorAgentId": "agent-4", "recipientAgentId": own}, "agent-4"),
+        ({"participantPairKey": f"agent-5::{own}"}, "agent-5"),
+        ({"initiatorAgentId": own, "recipientAgentId": own}, None),
+    ):
+        assert mc._thread_counterpart(item, own) == want, item
+
+
+def test_a_delivery_is_confirmed_on_this_worlds_thread_shape(control):
+    """The shape that actually comes back from Midnight City, with no
+    participants list anywhere in it."""
+    control.on_action = lambda action: []          # the world emits no events
+    landed = {"threads": [{"threadId": "t1",
+                           "initiatorAgentId": "agent-1",
+                           "recipientAgentId": "agent-2",
+                           "participantPairKey": "agent-1::agent-2",
+                           "threadLastMessageAtMs": mc._now_ms() + 5000}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(landed).encode())
+    result = _check(mc.speak("agent-2 the shipment cleared an hour ago"))
+    assert "MCITY-SPEAK-OK" in result and "confirmed-by=thread" in result, result

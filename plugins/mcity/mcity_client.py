@@ -2838,6 +2838,34 @@ def recent_events():
     return _line("RECENT-EVENTS", "OK", (("count", len(items)),), rows or ["- none"])
 
 
+def _thread_counterpart(item, own_id):
+    """The other agent in a thread, however this world spells it.
+
+    There is no participants list: the payload names initiatorAgentId and
+    recipientAgentId. The renderer carried a fallback for that, but three other
+    callers derived the counterpart themselves and did not - so the delivery
+    confirmation matched no thread at all and every delivered message stayed
+    PENDING, 22 of them in one window. Fifth time a rule has been copied into a
+    new caller and drifted apart; one function now."""
+    if not isinstance(item, dict):
+        return None
+    parts = _get(item, "participants", "participantIds", "with")
+    if isinstance(parts, (list, tuple)):
+        for part in parts:
+            if isinstance(part, str) and part.strip() and part.strip() != own_id:
+                return part.strip()
+    for key in ("initiatorAgentId", "recipientAgentId", "pendingRecipientAgentId"):
+        side = _get(item, key)
+        if isinstance(side, str) and side.strip() and side.strip() != own_id:
+            return side.strip()
+    pair = _get(item, "participantPairKey")
+    if isinstance(pair, str) and "::" in pair:
+        for side in pair.split("::"):
+            if side.strip() and side.strip() != own_id:
+                return side.strip()
+    return None
+
+
 def _thread_mine(item, own_id, sender=None):
     """"yes" if we spoke last, "no" if somebody is waiting on us, else None.
 
@@ -2894,16 +2922,11 @@ def _refresh_waiting_if_stale():
         for item in items:
             if not isinstance(item, dict):
                 continue
-            others = [str(part).strip()
-                      for part in (_get(item, "participants", "participantIds",
-                                        "with") or ())
-                      if isinstance(part, str) and part.strip()
-                      and part.strip() != own_id]
+            who = _thread_counterpart(item, own_id)
             if _thread_mine(item, own_id) != "no":
                 continue
-            if len(others) == 1 and ID_RE.match(others[0]) \
-                    and _can_be_reached(others[0]) is not False:
-                found.append(others[0])
+            if who and ID_RE.match(who) and _can_be_reached(who) is not False:
+                found.append(who)
         _WAITING["at_ms"] = _now_ms()
         _WAITING["ids"] = found
         _waiting_refresh_at_ms = _now_ms()
@@ -3554,10 +3577,7 @@ def _thread_shows_our_message(agent_id, since_ms):
         for item in (_find_list(payload, "threads") or []):
             if not isinstance(item, dict):
                 continue
-            parts = _get(item, "participants", "participantIds", "with") or ()
-            others = [str(x).strip() for x in parts
-                      if isinstance(x, str) and x.strip() != own_id]
-            if agent_id not in others:
+            if _thread_counterpart(item, own_id) != agent_id:
                 continue
             last = _number(_get(item, "threadLastMessageAtMs"), 0, 0, 10 ** 15)
             return last >= since_ms
