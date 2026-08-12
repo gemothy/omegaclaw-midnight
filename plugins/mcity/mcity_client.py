@@ -1853,6 +1853,21 @@ def context_poison():
         for who in _refused_keys(kind):
             if isinstance(who, str) and _can_be_reached(who) is False:
                 poison.add(who)
+    # The roster's own live verdict, not just the refusals we have recorded.
+    #
+    # 68 unreachable skips in half an hour over SIX targets, one of them 30
+    # times. Those people were not refused by the world when we spoke - they were
+    # refused here, because canSpeak came back false on the roster - so nothing
+    # ever entered the refusal table and nothing was ever filtered out of the
+    # history the agent picks its targets from. It went on reading their ids and
+    # aiming at them.
+    #
+    # Self-limiting: an id leaves this set the moment a roster read says canSpeak
+    # again, and a stale verdict is ignored outright.
+    now = _now_ms()
+    for who, (can, at) in _CAN_SPEAK.items():
+        if can is False and (now - at) <= _CAN_SPEAK_TTL_MS:
+            poison.add(who)
     for key in _refused_keys("arguments"):
         if (isinstance(key, tuple) and len(key) == 2
                 and _refused_ago_ms("arguments", key) is not None):

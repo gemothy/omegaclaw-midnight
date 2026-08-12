@@ -3507,3 +3507,23 @@ def test_somebody_engaged_with_a_third_party_is_still_busy():
                              "isTalkingToYou": False,
                              "activeAction": {"kind": "engage", "phase": "active"}})
     assert mc._entry_engaged(entry) is True
+
+
+def test_somebody_the_roster_says_we_cannot_reach_leaves_the_context():
+    """68 unreachable skips in half an hour over six targets, one of them 30
+    times. Those people were never refused by the WORLD when we spoke - they were
+    refused here, on canSpeak, so nothing entered the refusal table and nothing
+    was filtered out of the history the agent picks its targets from."""
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-shut-out"] = (False, now)
+    assert "user-agent-shut-out" in mc.context_poison()
+
+
+def test_a_stale_verdict_does_not_bury_somebody():
+    """An id leaves this set the moment a roster read says canSpeak again, and an
+    expired verdict is ignored outright."""
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-old-no"] = (False, now - (mc._CAN_SPEAK_TTL_MS + 1000))
+    assert "user-agent-old-no" not in mc.context_poison()
+    mc._CAN_SPEAK["user-agent-back-now"] = (True, now)
+    assert "user-agent-back-now" not in mc.context_poison()
