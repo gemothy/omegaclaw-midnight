@@ -3352,3 +3352,30 @@ def test_sleep_is_still_something_you_wake_from():
 def test_a_friends_only_target_leaves_the_agents_context():
     mc._remember_refusal("not_friends", "user-agent-clique2")
     assert "user-agent-clique2" in mc.context_poison()
+
+
+def test_a_late_delivery_still_counts_as_having_spoken_to_them():
+    """mark_spoken advances spoke_count, and spoke_count is what candidates()
+    ranks on - the anti-greeting-loop order, 'somebody we have not spoken to
+    first'. It ran only on a SPEAK-OK, and almost every speak is PENDING, so the
+    count never moved and one agent stayed top of the list: talk-to= named them
+    130 times in twenty minutes and the agent sent them 51 messages, while 168
+    speak commands produced 4 opened threads. Two of those four were answered, so
+    the messages were never the problem - who they were aimed at was."""
+    sent_at = mc._now_ms()
+    mc._note_pending_speak("user-agent-late2", sent_at, "hello Holly")
+    mc._settle_pending_speaks({"threads": [
+        {"initiatorAgentId": mc._c("agent_id", ""),
+         "recipientAgentId": "user-agent-late2",
+         "threadLastMessageAtMs": sent_at + 3000}]})
+    row = mc._store_call(lambda store: store.get("user-agent-late2"))[0]
+    assert row is not None and row.spoke_count >= 1, (
+        "a confirmed delivery must advance the ranking that stops us repeating")
+
+
+def test_an_unconfirmed_speak_does_not_claim_we_spoke():
+    sent_at = mc._now_ms()
+    mc._note_pending_speak("user-agent-never", sent_at, "hello")
+    mc._settle_pending_speaks({"threads": []})
+    row = mc._store_call(lambda store: store.get("user-agent-never"))[0]
+    assert row is None or not row.spoke_count

@@ -4022,8 +4022,8 @@ _PENDING_SPEAKS = []
 _PENDING_SPEAK_TTL_MS = 300000     # past this the thread has closed anyway
 
 
-def _note_pending_speak(agent_id, at_ms):
-    _PENDING_SPEAKS.append((agent_id, at_ms))
+def _note_pending_speak(agent_id, at_ms, text=""):
+    _PENDING_SPEAKS.append((agent_id, at_ms, text))
     del _PENDING_SPEAKS[:-20]
 
 
@@ -4048,12 +4048,27 @@ def _settle_pending_speaks(payload):
                 newest[who] = last
         now = _now_ms()
         still = []
-        for who, at in _PENDING_SPEAKS:
+        for who, at, text in _PENDING_SPEAKS:
             if newest.get(who, 0) >= at:
                 globals()["_last_delivered_ms"] = max(_last_delivered_ms, at)
+                # Tell the STORE too, not just the vitals token.
+                #
+                # mark_spoken is what advances spoke_count, and spoke_count is
+                # what candidates() ranks on - the anti-greeting-loop order,
+                # "somebody we have not spoken to first". It ran only on a
+                # SPEAK-OK, and almost every speak is PENDING, so the count
+                # never moved and the same person stayed top of the list
+                # forever: talk-to= named one agent 130 times in twenty minutes
+                # and the agent sent them 51 messages, while 168 speak commands
+                # produced 4 opened threads.
+                #
+                # Two of those four were answered, so the messages were never
+                # the problem. Who they were aimed at was.
+                _store_call(lambda store, w=who, t=text:
+                            store.mark_spoken(w, _now_ms(), t))
                 continue
             if now - at <= _PENDING_SPEAK_TTL_MS:
-                still.append((who, at))
+                still.append((who, at, text))
         _PENDING_SPEAKS[:] = still
     except Exception:      # noqa: BLE001
         return
@@ -4520,7 +4535,8 @@ def speak(arg=None):
                                            ("confirmed-by", "thread")))
         else:
             # Not refused - just not finished. The next thread read settles it.
-            _note_pending_speak(sent["agent_id"], submitted_at)
+            _note_pending_speak(sent["agent_id"], submitted_at,
+                                sent.get("text", ""))
     if sent and result.startswith("MCITY-SPEAK-OK") \
             and "outcome=delivered" in result.partition("\n")[0]:
         # Ground the delivery: spoke_count is the anti-greeting-loop counter
