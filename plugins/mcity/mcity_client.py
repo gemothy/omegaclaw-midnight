@@ -707,8 +707,26 @@ def _line(verb, tag, pairs=(), lines=()):
     return head
 
 
+# Reasons where the HARNESS chose not to send the call, as opposed to the world
+# rejecting it. The distinction matters more than it looks: the core system
+# prompt tells the agent "if you see command errors, please fix the format and
+# re-invoke one-by-one", so every FAILED result is read as an instruction to try
+# again. Measured consequence - 105 of 106 commands in a window were mcity-work,
+# each one refused locally, each refusal telling it to re-invoke. The refusals
+# were the loop.
+#
+# These come back as SKIPPED instead: nothing went wrong, the call was simply not
+# worth making, and re-invoking is exactly what must not happen.
+_SKIP_REASONS = frozenset((
+    "repeat", "rich_enough", "worksite_busy", "nobody_reachable", "unreachable",
+    "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
+    "no_link_exit", "target_asleep", "busy",
+))
+
+
 def _failed(verb, reason, detail=""):
-    return _line(verb, "FAILED", (("reason", reason), ("detail", detail)))
+    tag = "SKIPPED" if reason in _SKIP_REASONS else "FAILED"
+    return _line(verb, tag, (("reason", reason), ("detail", detail)))
 
 
 def _suppress_repeat(verb, result):
@@ -1583,8 +1601,10 @@ def _promote_command(result, hint):
         # both makes the echo something to avoid rather than something to imitate.
         verb = (result or "").split()[0] if (result or "").split() else ""
         failed_call = ""
-        if verb.startswith("MCITY-") and verb.endswith(("-FAILED", "-PENDING")):
-            failed_call = "(mcity-" + verb[len("MCITY-"):-len("-FAILED")].lower() + ")"
+        for tag in ("-SKIPPED", "-FAILED", "-PENDING"):
+            if verb.startswith("MCITY-") and verb.endswith(tag):
+                failed_call = "(mcity-" + verb[len("MCITY-"):-len(tag)].lower() + ")"
+                break
         insert = (f"do-NOT-repeat={failed_call} do-THIS={command}" if failed_call
                   else command) + (f" -- {note}" if note else "")
         match = re.search(r"(reason=[\w-]+)", head)

@@ -420,7 +420,7 @@ def test_pacing_refuses_a_second_immediate_action(control):
     control.on_action = lambda action: []
     _check(mc.eat())
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=busy")
+    assert result.startswith("MCITY-WORK-SKIPPED reason=busy")
 
 
 def test_a_busy_agent_still_attempts_the_reply(control):
@@ -884,7 +884,7 @@ def test_a_look_only_loop_is_eventually_refused(control):
     reads as a turn well spent. A refusal is the only outcome in this protocol
     it cannot mistake for progress."""
     seen = [_check(mc.threads()) for _ in range(mc._REPEAT_REFUSE_AT + 1)]
-    assert seen[-1].startswith("MCITY-THREADS-FAILED reason=repeat")
+    assert seen[-1].startswith("MCITY-THREADS-SKIPPED reason=repeat")
     assert "(mcity-" in seen[-1].partition(" -- ")[0], \
         "the refusal must lead with a command the agent can copy"
     assert "reading again cannot change anything" in seen[-1]
@@ -898,7 +898,7 @@ def test_acting_clears_the_repeat_refusal(control):
     moved yet."""
     for _ in range(mc._REPEAT_REFUSE_AT + 1):
         mc.threads()
-    assert _check(mc.threads()).startswith("MCITY-THREADS-FAILED reason=repeat")
+    assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=repeat")
     control.on_action = lambda action: []
     _check(mc.work())                      # any action at all
     assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
@@ -912,7 +912,7 @@ def test_a_busy_agent_in_a_look_only_loop_is_still_refused(control):
     for _ in range(mc._REPEAT_REFUSE_AT + 2):
         mc.threads()
     mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy"})
-    assert _check(mc.threads()).startswith("MCITY-THREADS-FAILED reason=repeat")
+    assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=repeat")
 
 
 def test_an_idle_agent_is_still_refused_a_look_only_loop(control):
@@ -920,7 +920,7 @@ def test_an_idle_agent_is_still_refused_a_look_only_loop(control):
     for _ in range(mc._REPEAT_REFUSE_AT + 2):
         mc.threads()
     mc._VITALS.update({"at_ms": mc._now_ms(), "status": "idle"})
-    assert _check(mc.threads()).startswith("MCITY-THREADS-FAILED reason=repeat")
+    assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=repeat")
 
 
 def test_work_is_refused_while_a_person_waits_for_a_reply(control):
@@ -931,7 +931,7 @@ def test_work_is_refused_while_a_person_waits_for_a_reply(control):
     _check(mc.threads())                    # learns who is waiting
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-abc"]})
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=someone_waiting")
+    assert result.startswith("MCITY-WORK-SKIPPED reason=someone_waiting")
     assert "user-agent-abc" in result
     assert not control.actions, "no long action may start while someone waits"
 
@@ -965,7 +965,7 @@ def test_a_sleeping_target_is_remembered_and_not_retried(control):
     mc._ASLEEP["user-agent-abc"] = mc._now_ms()      # as the failure path records
     before = len(control.actions)
     again = _check(mc.speak("user-agent-abc are you there"))
-    assert again.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert again.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
     assert "cannot receive a message" in again
     assert len(control.actions) == before, "no round trip for a sleeping target"
 
@@ -1146,7 +1146,7 @@ def test_the_repeat_refusal_points_at_someone_reachable(control):
     mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
     mc._REACHABLE.update({"n": 1, "at_ms": mc._now_ms()})
     result = _check(mc.threads())
-    assert result.startswith("MCITY-THREADS-FAILED reason=repeat")
+    assert result.startswith("MCITY-THREADS-SKIPPED reason=repeat")
     assert "nobody waiting can hear you" in result
     head = result.partition("\n")[0]
     assert "(mcity-speak _quote_user-agent-awake" in head, \
@@ -1237,7 +1237,7 @@ def test_an_unreachable_refusal_hands_over_a_command(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     result = _check(mc.speak("user-agent-abc hello there"))
-    assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
     assert "(mcity-work)" in result
 
 
@@ -1269,7 +1269,7 @@ def test_our_own_engagement_stops_a_doomed_reply(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._last_self_probe_ms = mc._now_ms()
     result = _check(mc.speak("user-agent-abc hello there"))
-    assert result.startswith("MCITY-SPEAK-FAILED reason=self_engaged")
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=self_engaged")
     assert "another 12s" in result
     assert not control.actions
 
@@ -1453,7 +1453,7 @@ def test_work_stops_once_the_mission_says_it_is_enough(control):
                        "items": "crystal=13800 meme_coin=18383"})
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=rich_enough")
+    assert result.startswith("MCITY-WORK-SKIPPED reason=rich_enough")
     assert "(mcity-" in result.partition("\n")[0]
     assert not control.actions
 
@@ -1476,10 +1476,10 @@ def test_promoting_a_command_never_breaks_the_result_prefix(control):
     The first version of the promotion prepended the command and broke exactly
     that; the suite's own invariant caught it."""
     promoted = mc._promote_command(
-        "MCITY-WORK-FAILED reason=rich_enough detail=enough already",
+        "MCITY-WORK-SKIPPED reason=rich_enough detail=enough already",
         "(mcity-agents)")
     assert promoted.startswith(
-        "MCITY-WORK-FAILED reason=rich_enough do-NOT-repeat=(mcity-work) "
+        "MCITY-WORK-SKIPPED reason=rich_enough do-NOT-repeat=(mcity-work) "
         "do-THIS=(mcity-agents)")
     assert promoted.count("do-THIS=") == 1, "the command must not duplicate"
     assert "enough already" in promoted
@@ -1664,7 +1664,7 @@ def test_an_unreachable_send_is_redirected_to_the_person_waiting(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": ["user-agent-waiting"]})
     mc._CAN_SPEAK["user-agent-waiting"] = (True, mc._now_ms())
     result = _check(mc.speak("user-agent-asleep hello there"))
-    assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
     assert "user-agent-waiting is waiting" in result
     assert "(mcity-threads)" in result
     assert "<" not in result and ">" not in result, "no placeholder may survive"
@@ -1682,7 +1682,7 @@ def test_the_same_words_are_not_sent_to_the_same_person_twice(control):
     assert "MCITY-SPEAK-OK" in first
     before = len(control.actions)
     again = _check(mc.speak(line))
-    assert again.startswith("MCITY-SPEAK-FAILED reason=already_said")
+    assert again.startswith("MCITY-SPEAK-SKIPPED reason=already_said")
     assert "(mcity-threads)" in again
     assert len(control.actions) == before, "the repeat must not reach the world"
 
@@ -1738,7 +1738,7 @@ def test_the_nudge_returns_after_its_interval(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     _check(mc.work())
     mc._last_rich_nudge_ms = mc._now_ms() - (mc._RICH_NUDGE_EVERY_MS + 1000)
-    assert _check(mc.work()).startswith("MCITY-WORK-FAILED reason=rich_enough")
+    assert _check(mc.work()).startswith("MCITY-WORK-SKIPPED reason=rich_enough")
 
 
 def test_a_contention_burst_is_not_retried_immediately(control):
@@ -1751,7 +1751,7 @@ def test_a_contention_burst_is_not_retried_immediately(control):
     _check(mc.work())
     before = len(control.actions)
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=worksite_busy")
+    assert result.startswith("MCITY-WORK-SKIPPED reason=worksite_busy")
     assert len(control.actions) == before, "no world call inside the backoff"
 
 
@@ -1782,7 +1782,7 @@ def test_a_hungry_agent_eats_before_starting_a_long_job(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(61)",
                        "items": "crystal=10 to_go_food=2"})
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=eat_first")
+    assert result.startswith("MCITY-WORK-SKIPPED reason=eat_first")
     assert "(mcity-eat)" in result.partition("\n")[0]
     assert not control.actions, "no long action may start while hungry with food"
 
@@ -1847,7 +1847,7 @@ def test_the_backoff_refusal_hands_over_the_next_move(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)",
                        "items": "meme_coin=5"})
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=worksite_busy")
+    assert result.startswith("MCITY-WORK-SKIPPED reason=worksite_busy")
     assert "(mcity-" in result.partition("\n")[0], "every refusal names a next move"
 
 
@@ -1910,7 +1910,7 @@ def test_the_roster_is_not_re_read_when_it_just_said_nobody(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)",
                        "items": "meme_coin=5"})
     result = _check(mc.agents())
-    assert result.startswith("MCITY-AGENTS-FAILED reason=nobody_reachable")
+    assert result.startswith("MCITY-AGENTS-SKIPPED reason=nobody_reachable")
     assert "(mcity-" in result.partition("\n")[0]
 
 
@@ -2020,7 +2020,7 @@ def test_nobody_here_points_at_where_people_are(control):
                        "space_kind": "interior", "hunger": "normal(9)"})
     control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
     result = _check(mc.agents())
-    assert result.startswith("MCITY-AGENTS-FAILED reason=nobody_reachable")
+    assert result.startswith("MCITY-AGENTS-SKIPPED reason=nobody_reachable")
     assert "(mcity-move-area _quote_central-plaza_quote_)" in result.partition("\n")[0], result
 
 
@@ -2147,7 +2147,7 @@ def test_the_reminder_still_names_a_reachable_person(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._last_rich_nudge_ms = 0
     result = _check(mc.work())
-    assert result.startswith("MCITY-WORK-FAILED reason=rich_enough")
+    assert result.startswith("MCITY-WORK-SKIPPED reason=rich_enough")
     assert "user-agent-free" in result
 
 
@@ -2200,7 +2200,7 @@ def test_work_stands_aside_while_somebody_can_hear_us(control):
                        "items": "meme_coin=21088"})
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._last_rich_nudge_ms = mc._now_ms()          # a reminder just fired
-    assert _check(mc.work()).startswith("MCITY-WORK-FAILED reason=rich_enough")
+    assert _check(mc.work()).startswith("MCITY-WORK-SKIPPED reason=rich_enough")
     assert not control.actions
 
 
@@ -2347,7 +2347,7 @@ def test_a_door_that_does_not_open_is_not_tried_again(control):
     assert first.startswith("MCITY-EXIT-BUILDING-FAILED")
     before = len(control.actions)
     again = _check(mc.exit_building())
-    assert again.startswith("MCITY-EXIT-BUILDING-FAILED reason=no_link_exit")
+    assert again.startswith("MCITY-EXIT-BUILDING-SKIPPED reason=no_link_exit")
     assert len(control.actions) == before, "no second request for a known answer"
     assert "(mcity-" in again.partition("\n")[0]
 
@@ -2386,7 +2386,7 @@ def test_moving_to_where_we_already_are_is_refused(control):
     control.on_action = lambda action: []
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
     result = _check(mc.move_area("central"))
-    assert result.startswith("MCITY-MOVE-AREA-FAILED reason=already_here")
+    assert result.startswith("MCITY-MOVE-AREA-SKIPPED reason=already_here")
     assert not control.actions
 
 
@@ -2418,7 +2418,7 @@ def test_a_long_action_still_holds_speech_back(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     mc._last_self_probe_ms = mc._now_ms()
     result = _check(mc.speak("user-agent-abc hello there"))
-    assert result.startswith("MCITY-SPEAK-FAILED reason=self_engaged")
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=self_engaged")
     assert not control.actions
 
 
@@ -2428,7 +2428,7 @@ def test_a_refusal_names_the_call_not_to_repeat(control):
     one window were mcity-work while every refusal carried a correct
     alternative."""
     promoted = mc._promote_command(
-        "MCITY-WORK-FAILED reason=worksite_busy detail=every worksite is taken",
+        "MCITY-WORK-SKIPPED reason=worksite_busy detail=every worksite is taken",
         "(mcity-move-area _quote_bison-valley_quote_)")
     head = promoted.partition("\n")[0]
     assert "do-NOT-repeat=(mcity-work)" in head, head

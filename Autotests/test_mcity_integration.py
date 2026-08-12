@@ -929,14 +929,14 @@ def test_busy_city_holds_work_back_until_the_reply_is_sent(monkeypatch):
     _check(mc.threads())
 
     blocked = _check(mc.work())
-    assert blocked.startswith("MCITY-WORK-FAILED reason=someone_waiting")
+    assert blocked.startswith("MCITY-WORK-SKIPPED reason=someone_waiting")
     assert "user-agent-awake" in blocked, "it must name who is owed the reply"
 
     spoken = _check(mc.speak("user-agent-awake The shipment cleared an hour ago"))
     assert "MCITY-SPEAK-OK" in spoken, spoken
 
     repeat = _check(mc.speak("user-agent-awake The shipment cleared an hour ago"))
-    assert repeat.startswith("MCITY-SPEAK-FAILED reason=already_said")
+    assert repeat.startswith("MCITY-SPEAK-SKIPPED reason=already_said")
 
 
 def test_busy_city_refuses_the_unreachable_and_redirects(monkeypatch):
@@ -945,7 +945,7 @@ def test_busy_city_refuses_the_unreachable_and_redirects(monkeypatch):
     _check(mc.agents())
     _check(mc.threads())
     result = _check(mc.speak("user-agent-engaged are you free yet"))
-    assert result.startswith("MCITY-SPEAK-FAILED reason=unreachable")
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
     assert "user-agent-awake is waiting" in result
     assert "(mcity-threads)" in result
 
