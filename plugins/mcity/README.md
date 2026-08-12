@@ -219,6 +219,22 @@ was emitted 63 times and produced a single action. `cmd=` is therefore only
 emitted when the plugin has already checked the command is valid and correct,
 which is what lets the prompt say "emit it verbatim".
 
+## The rule this codebase breaks most often
+
+One rule, re-derived in a second caller. It has happened six times here and every
+instance cost a live failure:
+
+| rule | owner | what the copies did |
+|---|---|---|
+| can a message land? | `_can_be_reached` | four copies drifted; each ended up recommending somebody the next check refused |
+| who is the other side of a thread? | `_thread_counterpart` | only the renderer knew this world sends no `participants` list, so delivery confirmation matched nothing and 22 delivered messages read as PENDING |
+| destination argument checks | `_destination_action` | `travel_district` had its own copy and missed two guards, spending world calls being told it was already in the district it stood in |
+
+`Autotests/test_single_source_of_truth.py` checks these structurally, because
+reviewing for it by eye failed six times. If a new caller genuinely needs raw
+access, add it to the allowance in that file with the reason - the point is that
+the exception is deliberate and visible.
+
 ## Configuration reference
 
 | key | where | default |
