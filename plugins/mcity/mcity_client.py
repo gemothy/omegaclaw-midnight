@@ -588,7 +588,7 @@ def reset_runtime_state():
                      _dnd_streak=0, _last_rich_nudge_ms=0,
                      _worksite_busy_until_ms=0, _last_roster_read_ms=0,
                      _last_areas_read_ms=0, _no_link_exit_until_ms=0,
-                     _last_delivered_ms=0)
+                     _last_delivered_ms=0, _warmed=False)
 
 
 def _harvest_vitals(payload):
@@ -712,6 +712,7 @@ def _refresh_vitals_if_stale():
             return
         _vitals_refreshing = True
     try:
+        _warm_from_store()
         _skill_read("VITALS", "needs")
         # Inventory used to be read only while items was empty, so it was read
         # once per process and then frozen. It is the ONE vitals field the
@@ -1743,6 +1744,52 @@ _WHO_CAP = 400
 # you get that message sent again, which is the failure this is meant to end.
 _MET = {}
 _MET_CAP = 400
+
+
+_warmed = False
+
+
+def _warm_from_store():
+    """Reload what we know about people from Postgres, once, after a restart.
+
+    Every deploy restarts this container and every in-memory cache goes with it -
+    who can be reached, who we have met, who we last wrote to, what anybody is
+    called. The agent wakes up believing it has never spoken to a soul, so
+    silent-for reads never-spoken, met-before vanishes, and the least-recently
+    written-to ordering starts from nothing and greets whoever comes first.
+
+    Measured across four hours: the one hour with no deploy in it answered 9 of
+    11 threads, and the two hours carrying five deploys managed 1 of 9 and 0 of
+    17. Time of day is not separable from that with the data to hand, so this is
+    not a claim about cause - but a restart provably discards facts the store
+    still holds, and there is no reason to pay for that.
+
+    Deliberately the durable facts only: spoke counts, names, trades. NOT the
+    reachability verdicts, which describe a city that has moved on since.
+    """
+    global _warmed
+    if _warmed:
+        return
+    _warmed = True
+    rows, ok = _store_call(
+        lambda store: store.candidates(now_ms=_now_ms(), cooldown_ms=0,
+                                       limit=400))
+    # Not gated on _degraded. A degraded store is serving the in-memory
+    # fallback, which after a real restart is empty - so `not rows` already
+    # covers it - and refusing to read what it does hold buys nothing.
+    if not rows:
+        return
+    for row in rows:
+        if getattr(row, "spoke_count", 0):
+            _note_met(row.agent_id, row.spoke_count, row.last_spoken_ms)
+        fact = ",".join(part for part in (_text(getattr(row, "name", "")),
+                                          _text(getattr(row, "profession", "")))
+                        if part)
+        if fact and row.agent_id not in _WHO:
+            _WHO[row.agent_id] = fact
+    latest = max((getattr(r, "last_spoken_ms", 0) or 0 for r in rows), default=0)
+    if latest > 0:
+        globals()["_last_delivered_ms"] = max(_last_delivered_ms, latest)
 
 
 def _note_met(agent_id, count, last_ms):

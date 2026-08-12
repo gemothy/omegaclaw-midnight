@@ -3613,3 +3613,47 @@ def test_noticing_leaves_room_to_actually_answer():
     world's speak action is slower still and not ours to hurry."""
     assert mc._WAITING_REFRESH_MS <= 3000, (
         "a reply needs the rest of the sixty seconds more than we need the read")
+
+
+def mc_obs(agent_id, now):
+    """One roster observation, the shape upsert_agents takes."""
+    from mcity_store.base import AgentObservation
+    return AgentObservation(agent_id=agent_id, name="Known", status="idle",
+                            profession="hacker", is_open_to_talk=True,
+                            is_talking_to_you=False, can_speak=True,
+                            is_on_same_map=True, dist=1.0, observed_at_ms=now)
+
+
+def test_a_restart_does_not_erase_everybody_we_know():
+    """Every deploy restarts this container and every in-memory cache goes with
+    it, so the agent wakes believing it has never spoken to a soul: silent-for
+    reads never-spoken, met-before vanishes, and the least-recently-written-to
+    ordering starts from nothing. Across four hours the one hour with no deploy
+    answered 9 of 11 threads; the two carrying five deploys managed 1 of 9 and 0
+    of 17."""
+    now = mc._now_ms()
+    mc._store_call(lambda store: store.upsert_agents([mc_obs("user-agent-known",
+                                                             now)]))
+    mc._store_call(lambda store: store.mark_spoken("user-agent-known", now - 60000,
+                                                   "we spoke before"))
+    mc.reset_runtime_state()
+    mc._warm_from_store()
+    assert mc._met_before("user-agent-known"), "the store still knew them"
+    assert mc._last_delivered_ms > 0, "silent-for must not reset to never-spoken"
+
+
+def test_warming_happens_once():
+    mc._warm_from_store()
+    before = dict(mc._MET)
+    mc._MET.clear()
+    mc._warm_from_store()
+    assert not mc._MET, "a second warm must not re-run"
+    mc._MET.update(before)
+
+
+def test_reachability_is_not_restored_from_a_stale_city():
+    """Durable facts only. Who could be reached an hour ago describes a city that
+    has moved on."""
+    mc.reset_runtime_state()
+    mc._warm_from_store()
+    assert not mc._CAN_SPEAK, "reachability must come from a live roster read"
