@@ -430,6 +430,7 @@ _REFUSAL_TTL_MS = {
     "closed": 600000,
     "destination": 900000,
     "arguments": 900000,       # a command whose ARGUMENTS the world threw out
+    "not_friends": 3600000,    # social, not temporal - it does not pass with time
 }
 _REFUSED = {}
 
@@ -1779,8 +1780,9 @@ def _can_be_reached(agent_id):
     window at all.
 
     Evidence has a timestamp. The newer one wins."""
-    if _refused_ago_ms("closed", agent_id) is not None:
-        return False
+    for permanent in ("closed", "not_friends"):
+        if _refused_ago_ms(permanent, agent_id) is not None:
+            return False
     refused = [ago for kind in _REFUSALS_THE_ROSTER_CAN_OVERTURN
                if (ago := _refused_ago_ms(kind, agent_id)) is not None]
     known = _CAN_SPEAK.get(agent_id)
@@ -1809,7 +1811,7 @@ def context_poison():
     roster reading that overturns a refusal frees the id here in the same moment.
     """
     poison = set()
-    for kind in ("gone", "closed", "asleep"):
+    for kind in ("gone", "closed", "asleep", "not_friends"):
         for who in _refused_keys(kind):
             if isinstance(who, str) and _can_be_reached(who) is False:
                 poison.add(who)
@@ -4555,9 +4557,20 @@ def speak(arg=None):
             _remember_refusal("closed", sent["agent_id"])
         elif sent.get("agent_id") and "target not found" in lowered:
             _remember_refusal("gone", sent["agent_id"])
+        elif sent.get("agent_id") and "only talks to friends" in lowered:
+            # Its own kind, and not one the roster may overturn. This was filed
+            # under asleep, which was defensible until "freshest evidence wins"
+            # made a later roster reading clear a refusal - correct for sleep,
+            # which passes, and wrong for this, which does not. The result was
+            # eight retries in twenty minutes at somebody who will never accept:
+            # every roster scan wiped the memory of being turned down.
+            #
+            # canSpeak stays true for these agents, because they CAN be spoken
+            # to - just not by us. No roster field carries the friendship, so
+            # the world's refusal is the only evidence there will ever be.
+            _remember_refusal("not_friends", sent["agent_id"])
         elif sent.get("agent_id") and ("target is sleeping" in lowered
-                                       or "target is in do not disturb" in lowered
-                                       or "only talks to friends" in lowered):
+                                       or "target is in do not disturb" in lowered):
             _remember_refusal("asleep", sent["agent_id"])
         elif "speaker is in do not disturb" in lowered:
             # Speaker-side: a different target cannot fix it, so the candidate

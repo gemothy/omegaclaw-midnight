@@ -3326,3 +3326,29 @@ def test_what_we_said_before_is_never_put_back_in_context():
     source = pathlib.Path(mc.__file__).read_text()
     window = source[source.index("def _note_met"):source.index("def _note_who")]
     assert "last_spoken_text" not in window
+
+
+def test_a_friends_only_refusal_is_not_wiped_by_the_next_roster_read():
+    """"target only talks to friends" was filed under asleep, which was defensible
+    until "freshest evidence wins" made a later roster reading clear a refusal -
+    correct for sleep, which passes, and wrong for this, which does not. Eight
+    retries in twenty minutes at somebody who will never accept, because every
+    roster scan wiped the memory of being turned down. canSpeak stays true for
+    them: they CAN be spoken to, just not by us."""
+    now = mc._now_ms()
+    mc._remember_refusal("not_friends", "user-agent-clique")
+    mc._CAN_SPEAK["user-agent-clique"] = (True, now + 1000)
+    assert mc._can_be_reached("user-agent-clique") is False
+
+
+def test_sleep_is_still_something_you_wake_from():
+    """The overturning rule was right for the kind it was written for."""
+    now = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-napper")] = now - 60000
+    mc._CAN_SPEAK["user-agent-napper"] = (True, now)
+    assert mc._can_be_reached("user-agent-napper") is True
+
+
+def test_a_friends_only_target_leaves_the_agents_context():
+    mc._remember_refusal("not_friends", "user-agent-clique2")
+    assert "user-agent-clique2" in mc.context_poison()
