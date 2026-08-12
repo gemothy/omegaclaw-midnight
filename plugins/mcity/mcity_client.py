@@ -459,6 +459,14 @@ _can_speak_at_ms = 0
 _can_speak_refreshing = False
 
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
+# A read repeated within seconds cannot tell the agent anything new, whichever
+# read it is. Retiring the fixated skill has worked four times - areas, context,
+# work, and the idle sends - but the fixation simply moves: it was mcity-agents,
+# then mcity-work, and this window mcity-recent-events at 91 of 115 commands.
+# This addresses the class rather than the instance, and unlike the repeat
+# suppression it runs BEFORE the request, so it saves the world call too.
+_READ_COOLDOWN_MS = 15000
+_read_at = {}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
 
@@ -483,7 +491,7 @@ def reset_runtime_state():
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
     for cache in (_CAN_SPEAK, _ASLEEP, _GONE, _CLOSED_WITH, _LAST_READ, _SAID,
-                  _AWAKE_PLACES, _inbound, _my_texts):
+                  _AWAKE_PLACES, _inbound, _my_texts, _read_at):
         cache.clear()
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
@@ -600,7 +608,15 @@ def _refresh_vitals_if_stale():
         # no speech across 25 minutes following a deploy, against 19 speaks in a
         # single window before it. One read, once, when we know nothing; doing it
         # on every refresh reads 286 agents for no new information.
-        if _REACHABLE["n"] is None:
+        # STALE counts as unknown. This refreshed only when reachability had
+        # never been learned, so after the first read it went stale at two
+        # minutes and never came back: measured over twenty minutes, the vitals
+        # line carried no reachable=, no talk-to= and no silent-for= at all, and
+        # step five had nothing to act on. The helper is rate-limited to one
+        # roster read every 45 seconds, so asking more often costs nothing.
+        stale = (_REACHABLE["n"] is None
+                 or (_now_ms() - _REACHABLE["at_ms"]) > _CAN_SPEAK_TTL_MS)
+        if stale:
             _refresh_can_speak_if_unknown((), force=True)
     except Exception:  # noqa: BLE001 - grounding must never break a skill
         pass
@@ -744,7 +760,7 @@ def _line(verb, tag, pairs=(), lines=()):
 _SKIP_REASONS = frozenset((
     "repeat", "rich_enough", "worksite_busy", "nobody_reachable", "unreachable",
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
-    "no_link_exit", "target_asleep", "busy",
+    "no_link_exit", "target_asleep", "busy", "just_read",
 ))
 
 
@@ -753,70 +769,14 @@ def _failed(verb, reason, detail=""):
     return _line(verb, tag, (("reason", reason), ("detail", detail)))
 
 
-def _suppress_repeat(verb, result):
-    """Collapse a read that returned exactly what it returned last time.
-
-    The body is compared BEFORE _out appends vitals, because vitals move on
-    almost every call (holdings tick) and would defeat the comparison.
-
-    One repeat is allowed through untouched: re-reading once after acting is
-    normal, and a first repeat is how the agent confirms something landed. From
-    the second identical body onward the full text is replaced by its own first
-    line plus how long the world has looked like this - enough to keep the count
-    visible, without paying for rows the agent has now seen three times."""
-    try:
-        if verb not in _REPEATABLE_READS or not result.startswith(f"MCITY-{verb}-OK"):
-            return result
-        now = _now_ms()
-        prev = _LAST_READ.get(verb)
-        if not prev or prev["body"] != result or (now - prev["at"]) > _REPEAT_WINDOW_MS:
-            _LAST_READ[verb] = {"body": result, "at": now, "n": 0}
-            return result
-        prev["n"] += 1
-        if prev["n"] < 2:
-            return result
-        age = int((now - prev["at"]) / 1000)
-        head = result.partition("\n")[0]
-        # The busy exemption that stood here is gone with the premise it rested
-        # on. It assumed a busy agent had no legal move, because the harness
-        # believed busy blocked speech; the world's own canSpeak field disproved
-        # that. A busy agent can speak to anyone reachable, and can work, eat and
-        # trade, so a look-only loop is a real loop and gets refused like any
-        # other.
-        if prev["n"] >= _REPEAT_REFUSE_AT:
-            # Shortening the answer was not enough. Measured: with suppression
-            # live the agent still spent 48 of 48 decisions on mcity-threads,
-            # because an OK result - however terse - reads as a turn well spent
-            # and its own history then reinforces the pattern. A refusal is the
-            # only thing in this protocol the agent cannot mistake for progress.
-            # The counter clears the moment the body changes or any action lands,
-            # so a genuine need to look is never blocked twice.
-            # The advice has to match the situation. When nobody waiting can
-            # hear a reply, telling the agent to answer a mine=no row is the
-            # exact instruction that trapped it: it looped on threads while 56
-            # reachable agents stood nearby. Hand it a copyable command instead,
-            # the way the merchant cmd= and the escape hint do.
-            if verb == "THREADS" and not _WAITING.get("ids"):
-                opener = _reachable_opener()
-                nudge = f"{opener or _next_action_command()} - nobody waiting can hear you"
-            else:
-                waiting = _someone_is_waiting()
-                nudge = (f"Do this instead, exactly: (mcity-speak _quote_{waiting[0]} "
-                         "<your sentence>" if waiting
-                         else _next_action_command())
-            # Lead with the command. Every turn was a bare (mcity-threads) and
-            # nothing else, and its own history - all mcity-threads - is what it
-            # pattern-matches next. The instruction sat two hundred characters
-            # into the line, past the point it reads. So the command comes first
-            # and the explanation follows it.
-            return _failed(verb, "repeat",
-                           f"{nudge} -- unchanged for {age}s across "
-                           f"{prev['n'] + 1} identical reads, so reading again "
-                           f"cannot change anything. {head}")
-        return (f"{head} unchanged for {age}s across {prev['n'] + 1} reads; "
-                "re-reading cannot change it, so act instead of looking again")
-    except Exception:      # noqa: BLE001 - never break a skill over an optimisation
-        return result
+# _suppress_repeat lived here and is gone. It compared a read's body with the
+# previous one and replaced repeats with their own first line, escalating to a
+# refusal. It ran AFTER the skill executed, so it never saved a request - only
+# text - and it could not catch the repeats that mattered, because roster and
+# event rows carry distances, statuses and timestamps that jitter, so no two
+# bodies were ever byte-identical. The read cooldown replaces it: before the
+# request, and keyed on the agent having just looked rather than on whether the
+# answer happens to be identical.
 
 
 def _guard(verb):
@@ -838,6 +798,21 @@ def _guard(verb):
             if len(args) > 1:
                 joined = " ".join(p for p in (_text(a) for a in args) if p)
                 args = (joined,)
+            # A read the agent just made. Threads and the roster are refreshed by
+            # the harness itself and their answers ride on the vitals line, so a
+            # second look within the cooldown costs a turn and a request to learn
+            # nothing.
+            if verb in _REPEATABLE_READS:
+                since = _now_ms() - _read_at.get(verb, 0)
+                if _read_at.get(verb) and since < _READ_COOLDOWN_MS:
+                    wait = int((_READ_COOLDOWN_MS - since) / 1000) + 1
+                    return _out(_promote_command(
+                        _failed(verb, "just_read",
+                                f"you read this {int(since / 1000)}s ago and it "
+                                f"cannot have changed much; it is worth another "
+                                f"look in {wait}s"),
+                        _next_action_command()))
+                _read_at[verb] = _now_ms()
             try:
                 result = func(*args, **kwargs)
             except BaseException as e:  # noqa: BLE001 - the loop needs a string
@@ -846,7 +821,7 @@ def _guard(verb):
             if not isinstance(result, str) or not result.strip():
                 logger.error(f"mcity skill {verb} produced an empty result")
                 return _out(_failed(verb, "internal", "empty result"))
-            return _out(_suppress_repeat(verb, result))
+            return _out(result)
         return wrapper
     return decorator
 
@@ -1467,6 +1442,8 @@ def _entry_reachable(entry):
     back 'target is in do not disturb mode', 24 times in eight minutes."""
     return (bool(entry.get("can_speak"))
             and entry.get("open") is not False
+            # "target is in another space" is a world refusal we can see coming.
+            and entry.get("same_map") is not False
             and not _entry_engaged(entry))
 
 
@@ -1539,7 +1516,10 @@ def _next_action_command():
     if who:
         return (f"{who} can hear you right now - say something to them: "
                 f"(mcity-speak _quote_{who} then your sentence_quote_)")
-    return "Do this instead, exactly: (mcity-work)"
+    # NOT mcity-work: that skill is retired, and suggesting it sends the agent at
+    # something it can no longer call. When there is nobody to talk to and nothing
+    # to eat, the honest answer is that this turn has nothing in it.
+    return "There is nothing to do this turn - wait rather than repeat a call"
 
 
 def _resolve_target(agent_id):
@@ -2625,22 +2605,10 @@ def agents():
     # Rate-limited rather than blocked, because people wake up: one read every
     # _ROSTER_RECHECK_MS always goes through, so the agent learns within half a
     # minute of the city changing.
-    global _last_roster_read_ms
-    if (_REACHABLE["n"] == 0
-            and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS
-            and (_now_ms() - _last_roster_read_ms) < _ROSTER_RECHECK_MS):
-        left = int((_ROSTER_RECHECK_MS - (_now_ms() - _last_roster_read_ms)) / 1000) + 1
-        # Route first. "Nobody can be reached" is true of HERE; it was firing 22
-        # times a window while 55 free agents stood in central, and handing over
-        # cmd=mcity-work each time - the one piece of advice that guarantees the
-        # agent never finds them.
-        return _promote_command(
-            _failed("AGENTS", "nobody_reachable",
-                    f"the roster said nobody here can receive a message and it "
-                    f"was read moments ago; it is worth looking again in {left}s, "
-                    "not now"),
-            _travel_to_people_command() or _next_action_command())
-    _last_roster_read_ms = _now_ms()
+    # A roster-specific rate limit lived here, refusing a re-read while the
+    # last scan said nobody was reachable. The generic read cooldown in _guard
+    # covers it and runs before the request rather than after, and two
+    # mechanisms guarding one call is how they drift apart.
     payload, error = _skill_read("AGENTS", "agents")
     if error is not None:
         return error

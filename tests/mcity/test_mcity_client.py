@@ -52,6 +52,15 @@ def _reset():
     mc._inbound.clear()
 
 
+def _offers_a_next_move(result):
+    """A refusal must either hand over a command or say plainly that there is
+    nothing to do. Since mcity-work was retired the second case is real, and
+    inventing a suggestion to satisfy a test would put the agent back at a skill
+    it can no longer call."""
+    head = result.partition("\n")[0]
+    return "(mcity-" in head or "nothing to do this turn" in result
+
+
 def _check(result):
     """Every invariant that must hold for every result the agent can see."""
     assert isinstance(result, str) and result.strip(), "empty results vanish from RESULTS"
@@ -851,78 +860,6 @@ def test_split_arguments_match_the_compound_form_exactly(control):
     assert control.actions[-1] == split
 
 
-def test_an_unchanged_read_stops_repeating_its_whole_body(control):
-    """49 of 50 decisions in one window were mcity-threads returning the same 28
-    rows. One repeat is allowed - that is how the agent confirms something landed
-    - but from the second the body is replaced by its own first line."""
-    first = _check(mc.threads())
-    second = _check(mc.threads())          # one repeat passes through untouched
-    assert second.partition("\n")[0] == first.partition("\n")[0]
-    assert "unchanged for" not in second
-    third = _check(mc.threads())
-    assert "unchanged for" in third
-    assert "act instead of looking again" in third
-    assert len(third) < len(first)
-    assert third.startswith("MCITY-THREADS-OK")
-
-
-def test_a_changed_read_is_never_suppressed(control):
-    _check(mc.threads()); _check(mc.threads()); _check(mc.threads())
-    # Must change the RENDERED body, not just the payload: a different preview on
-    # the same single thread renders identically, and suppressing that is correct.
-    moved = {"threads": [{"threadId": f"t{i}", "participants": ["agent-1", f"agent-{i}"],
-                          "preview": "something genuinely new has happened"}
-                         for i in range(7, 10)]}
-    control.force("/api/agents/agent-1/threads", 200, json.dumps(moved).encode())
-    result = _check(mc.threads())
-    assert "unchanged for" not in result, "new world state must always come through"
-
-
-def test_a_look_only_loop_is_eventually_refused(control):
-    """Shortening the repeated body was not enough: with suppression live the
-    agent still spent 48 of 48 decisions on mcity-threads, because an OK result
-    reads as a turn well spent. A refusal is the only outcome in this protocol
-    it cannot mistake for progress."""
-    seen = [_check(mc.threads()) for _ in range(mc._REPEAT_REFUSE_AT + 1)]
-    assert seen[-1].startswith("MCITY-THREADS-SKIPPED reason=repeat")
-    assert "(mcity-" in seen[-1].partition(" -- ")[0], \
-        "the refusal must lead with a command the agent can copy"
-    assert "reading again cannot change anything" in seen[-1]
-    assert not any(s.startswith("MCITY-THREADS-FAILED") for s in seen[:2]), \
-        "the first reads must be answered normally"
-
-
-def test_acting_clears_the_repeat_refusal(control):
-    """The refusal breaks a look-only loop; it must never outlive the loop. Once
-    the agent acts, the next read is answered in full even if the world has not
-    moved yet."""
-    for _ in range(mc._REPEAT_REFUSE_AT + 1):
-        mc.threads()
-    assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=repeat")
-    control.on_action = lambda action: []
-    _check(mc.work())                      # any action at all
-    assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
-
-
-def test_a_busy_agent_in_a_look_only_loop_is_still_refused(control):
-    """This asserted the opposite. The exemption assumed a busy agent had no
-    legal move, because the harness believed busy blocked speech - the world's
-    own canSpeak field disproved that. A busy agent can speak to anyone
-    reachable, and can work, eat and trade, so its loop is a real loop."""
-    for _ in range(mc._REPEAT_REFUSE_AT + 2):
-        mc.threads()
-    mc._VITALS.update({"at_ms": mc._now_ms(), "status": "busy"})
-    assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=repeat")
-
-
-def test_an_idle_agent_is_still_refused_a_look_only_loop(control):
-    """The exemption is for having no legal move, not for looking in general."""
-    for _ in range(mc._REPEAT_REFUSE_AT + 2):
-        mc.threads()
-    mc._VITALS.update({"at_ms": mc._now_ms(), "status": "idle"})
-    assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=repeat")
-
-
 def test_work_is_refused_while_a_person_waits_for_a_reply(control):
     """The mission has said in prose for several passes that answering outranks
     working. The agent started work anyway with two people waiting, and a long
@@ -982,6 +919,7 @@ def test_a_sleeping_counterpart_is_flagged_and_never_counted_as_waiting(control)
     assert mc._WAITING["ids"] == [other], "the fixture must have someone waiting"
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
     mc._ASLEEP[other] = mc._now_ms()
+    mc._read_at.clear()          # a deliberate second look
     result = _check(mc.threads())
     assert "asleep=yes" in result
     assert other not in mc._WAITING["ids"], "asleep must not block work"
@@ -1129,44 +1067,10 @@ def test_the_header_counts_only_people_who_can_hear_a_reply(control):
     assert "waiting-reachable=1" in _check(mc.threads())
     mc._ASLEEP["agent-2"] = mc._now_ms()
     control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
+    mc._read_at.clear()
     result = _check(mc.threads())
     assert "waiting-reachable=0" in result
     assert "asleep=yes" in result, "the row must still say why"
-
-
-def test_the_repeat_refusal_points_at_someone_reachable(control):
-    """The old advice - answer a mine=no row - is the exact instruction that
-    trapped the agent: it looped on threads while 56 reachable agents stood
-    nearby, because everyone owing it a reply was asleep or in do-not-disturb."""
-    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
-    for _ in range(mc._REPEAT_REFUSE_AT + 2):
-        mc.threads()
-    # Both sources must agree, which is the point of the scan-wins rule: a
-    # cached entry alone no longer earns a name.
-    mc._CAN_SPEAK["user-agent-awake"] = (True, mc._now_ms())
-    mc._REACHABLE.update({"n": 1, "at_ms": mc._now_ms()})
-    result = _check(mc.threads())
-    assert result.startswith("MCITY-THREADS-SKIPPED reason=repeat")
-    assert "nobody waiting can hear you" in result
-    head = result.partition("\n")[0]
-    assert "(mcity-speak _quote_user-agent-awake" in head, \
-        "the command must lead, and must be the conversation, not a lookup"
-
-
-def test_the_repeat_refusal_keeps_the_normal_advice_when_someone_can_hear(control):
-    """threads() recomputes the waiting list on every call, so the fixture has to
-    carry a genuinely waiting counterpart rather than a pre-seeded one."""
-    waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
-                            "pendingRecipientAgentId": "agent-1",
-                            "preview": "still waiting on you tonight"}]}
-    for _ in range(mc._REPEAT_REFUSE_AT + 2):
-        control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
-        mc.threads()
-    control.force("/api/agents/agent-1/threads", 200, json.dumps(waiting).encode())
-    result = _check(mc.threads())
-    assert mc._WAITING["ids"] == ["agent-2"]
-    assert "(mcity-speak _quote_agent-2" in result
-    assert "nobody waiting can hear you" not in result
 
 
 def test_the_opener_fetches_a_name_when_it_has_none(control):
@@ -1226,7 +1130,7 @@ def test_the_opener_admits_when_nobody_can_be_reached(control):
                   json.dumps({"agents": []}).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
     assert mc._reachable_opener() is None
-    assert "(mcity-" in mc._next_action_command()
+    assert "nothing to do this turn" in mc._next_action_command()
 
 
 def test_an_unreachable_refusal_hands_over_a_command(control):
@@ -1238,7 +1142,7 @@ def test_an_unreachable_refusal_hands_over_a_command(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     result = _check(mc.speak("user-agent-abc hello there"))
     assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
-    assert "(mcity-work)" in result
+    assert _offers_a_next_move(result)
 
 
 def test_the_command_is_eat_only_when_actually_hungry(control):
@@ -1454,7 +1358,7 @@ def test_work_stops_once_the_mission_says_it_is_enough(control):
     mc._WAITING.update({"at_ms": mc._now_ms(), "ids": []})
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-SKIPPED reason=rich_enough")
-    assert "(mcity-" in result.partition("\n")[0]
+    assert _offers_a_next_move(result)
     assert not control.actions
 
 
@@ -1848,7 +1752,7 @@ def test_the_backoff_refusal_hands_over_the_next_move(control):
                        "items": "meme_coin=5"})
     result = _check(mc.work())
     assert result.startswith("MCITY-WORK-SKIPPED reason=worksite_busy")
-    assert "(mcity-" in result.partition("\n")[0], "every refusal names a next move"
+    assert _offers_a_next_move(result), "every refusal names a next move"
 
 
 def test_suggestions_never_name_someone_the_harness_would_refuse(control):
@@ -1897,41 +1801,6 @@ def test_reachable_is_absent_rather_than_guessed(control):
     mc._REACHABLE.update({"n": None, "at_ms": 0})     # nothing read yet
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     assert "reachable=" not in mc._vitals_line()
-
-
-def test_the_roster_is_not_re_read_when_it_just_said_nobody(control):
-    """reachable=0 told the agent nobody could hear it and it called mcity-agents
-    26 times in four minutes anyway. Stating the fact was not enough, exactly as
-    with earned=enough; a refusal carrying a command is what has always worked."""
-    control.force("/api/skill/agents/agent-1/agents", 200,
-                  json.dumps({"agents": []}).encode())
-    _check(mc.agents())
-    assert mc._REACHABLE["n"] == 0
-    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)",
-                       "items": "meme_coin=5"})
-    result = _check(mc.agents())
-    assert result.startswith("MCITY-AGENTS-SKIPPED reason=nobody_reachable")
-    assert "(mcity-" in result.partition("\n")[0]
-
-
-def test_the_roster_is_re_read_once_the_pause_ends(control):
-    """People wake up: the block must expire on its own."""
-    control.force("/api/skill/agents/agent-1/agents", 200,
-                  json.dumps({"agents": []}).encode())
-    _check(mc.agents())
-    mc._last_roster_read_ms = mc._now_ms() - (mc._ROSTER_RECHECK_MS + 1000)
-    control.force("/api/skill/agents/agent-1/agents", 200,
-                  json.dumps({"agents": []}).encode())
-    assert _check(mc.agents()).startswith("MCITY-AGENTS-OK")
-
-
-def test_a_roster_with_somebody_on_it_is_never_refused(control):
-    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
-                          "canSpeak": True, "status": "idle", "activeAction": None}]}
-    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
-    _check(mc.agents())
-    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
-    assert _check(mc.agents()).startswith("MCITY-AGENTS-OK")
 
 
 def test_the_route_is_found_through_the_area_anchor(control):
@@ -2002,9 +1871,9 @@ def test_a_scan_that_found_people_still_names_them(control):
 
 
 def test_nobody_here_points_at_where_people_are(control):
-    """'Nobody can be reached' is true of HERE. It fired 22 times in a window
-    while 55 free agents stood in central, handing over (mcity-work) each time
-    - the one instruction that guarantees the agent never finds them."""
+    """The roster-specific rate limit that used to carry this is gone - the
+    generic read cooldown covers it - but the routing must still reach the agent,
+    and the vitals line is where it now rides."""
     roster = {"agents": [
         {"agentId": "user-agent-away", "name": "Away", "distance": None,
          "canSpeak": False, "status": "idle", "activeAction": None,
@@ -2016,13 +1885,10 @@ def test_nobody_here_points_at_where_people_are(control):
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
     assert mc._REACHABLE["n"] == 0
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
                        "space_kind": "interior", "hunger": "normal(9)"})
-    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
-    result = _check(mc.agents())
-    assert result.startswith("MCITY-AGENTS-SKIPPED reason=nobody_reachable")
-    assert "(mcity-move-area _quote_central-plaza_quote_)" in result.partition("\n")[0], result
-
+    assert "(mcity-move-area _quote_central-plaza_quote_)" in mc._vitals_line()
 
 def test_stale_place_knowledge_is_refreshed_not_ignored(control):
     """This refreshed only when the places dict was EMPTY, so once filled and
@@ -2349,7 +2215,7 @@ def test_a_door_that_does_not_open_is_not_tried_again(control):
     again = _check(mc.exit_building())
     assert again.startswith("MCITY-EXIT-BUILDING-SKIPPED reason=no_link_exit")
     assert len(control.actions) == before, "no second request for a known answer"
-    assert "(mcity-" in again.partition("\n")[0]
+    assert _offers_a_next_move(again)
 
 
 def test_the_door_is_tried_again_once_the_memory_expires(control):
@@ -2670,3 +2536,57 @@ def test_every_named_person_survives_the_skip(control):
     mc._REACHABLE.update({"n": 1, "at_ms": now})
     who = mc._best_person_to_talk_to()
     assert who and mc._can_be_reached(who) is True
+
+
+def test_reachability_is_refreshed_when_it_goes_stale(control):
+    """It refreshed only when reachability had never been learned, so after the
+    first read it went stale at two minutes and never returned: over twenty
+    minutes the vitals line carried no reachable=, no talk-to= and no
+    silent-for=, and step five had nothing to act on."""
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Free", "distance": 2,
+                          "canSpeak": True, "isOpenToTalk": True, "status": "idle",
+                          "isOnSameMap": True, "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms() - (mc._CAN_SPEAK_TTL_MS + 5000)})
+    mc._can_speak_at_ms = 0
+    mc._VITALS["at_ms"] = None
+    mc._refresh_vitals_if_stale()
+    assert mc._REACHABLE["n"] == 1, "stale must be refreshed, not left to rot"
+
+
+def test_an_agent_in_another_space_is_not_recommended(control):
+    """'target is in another space' is a world refusal we can see coming."""
+    roster = {"agents": [{"agentId": "user-agent-away", "name": "Away", "distance": None,
+                          "canSpeak": True, "isOpenToTalk": True, "status": "idle",
+                          "isOnSameMap": False, "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert mc._can_be_reached("user-agent-away") is False
+
+
+def test_the_same_read_twice_in_seconds_is_skipped(control):
+    """Retiring the fixated skill has worked four times, but the fixation moves:
+    mcity-agents, then mcity-work, then mcity-recent-events at 91 of 115
+    commands. A read repeated within seconds cannot tell the agent anything new,
+    whichever read it is - and unlike the repeat suppression this runs before the
+    request, so the world call is saved too."""
+    _check(mc.recent_events())
+    before = len([r for r in control.requests if "recent-events" in r[1]])
+    result = _check(mc.recent_events())
+    assert result.startswith("MCITY-RECENT-EVENTS-SKIPPED reason=just_read")
+    after = len([r for r in control.requests if "recent-events" in r[1]])
+    assert after == before, "the request must not be made"
+    assert _offers_a_next_move(result), "and it must offer a next move"
+
+
+def test_the_read_is_available_again_after_the_cooldown(control):
+    _check(mc.threads())
+    mc._read_at["THREADS"] = mc._now_ms() - (mc._READ_COOLDOWN_MS + 1000)
+    assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
+
+
+def test_different_reads_do_not_block_each_other(control):
+    """The cooldown is per skill: looking at the roster must not stop the agent
+    reading its threads."""
+    _check(mc.agents())
+    assert _check(mc.threads()).startswith("MCITY-THREADS-OK")

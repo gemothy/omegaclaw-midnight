@@ -318,6 +318,7 @@ def test_spoken_agents_stop_crowding_the_roster(monkeypatch):
     first = _check(mc.agents())
     assert "id=user-agent-001 " in first
     mc._store.mark_spoken("user-agent-001", mc._now_ms(), "hello")
+    mc._read_at.clear()          # deliberate second read
     second = _check(mc.agents())
     assert "id=user-agent-001 " not in second
     shown, total = _footer(second, ROSTER_FOOTER_RE)
@@ -721,6 +722,7 @@ def test_mine_flag_uses_pending_recipient_when_present(monkeypatch):
     for pending, want in (("user-agent-me", "mine=no"), ("a", "mine=yes")):
         item = dict(base, pendingRecipientAgentId=pending)
         monkeypatch.setattr(mc, "_own_threads", lambda v, i=item: ({"threads": [i]}, None))
+        mc._read_at.clear()      # both halves are a deliberate read of the same skill
         assert want in mc.threads()
 
 
