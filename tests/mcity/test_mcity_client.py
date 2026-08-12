@@ -3379,3 +3379,39 @@ def test_an_unconfirmed_speak_does_not_claim_we_spoke():
     mc._settle_pending_speaks({"threads": []})
     row = mc._store_call(lambda store: store.get("user-agent-never"))[0]
     assert row is None or not row.spoke_count
+
+
+def test_talk_to_moves_on_instead_of_naming_one_person_forever():
+    """This took the FIRST reachable id whose _SAID key was missing and broke out
+    of the loop - and _SAID is written only on a confirmed SPEAK-OK while nearly
+    every speak comes back PENDING, so it was empty, nobody looked spoken-to, and
+    the first id in dict order won every turn. talk-to= named one agent 130 times
+    in twenty minutes and the agent sent them 51 messages, while the store had
+    that person at spoke_count=20 the whole time."""
+    now = mc._now_ms()
+    for who in ("user-agent-aaa", "user-agent-bbb"):
+        entry = mc._parse_agent({"id": who, "canSpeak": True, "isOpenToTalk": True,
+                                 "isOnSameMap": True, "activeAction": None,
+                                 "name": "N", "profession": "hacker"})
+        mc._note_can_speak(entry, now)
+    mc._REACHABLE.update({"n": 2, "at_ms": now})
+    first = mc._best_person_to_talk_to()
+    assert first is not None
+    mc._note_aimed_at(first)
+    assert mc._best_person_to_talk_to() != first, (
+        "having just written to somebody, name the other person")
+
+
+def test_an_unconfirmed_attempt_still_counts_as_having_written():
+    """Confirmation is the wrong gate: the world reports a speak in_progress for
+    longer than anyone waits, so a message sent five seconds ago is
+    indistinguishable from one never sent."""
+    mc._note_aimed_at("user-agent-ccc")
+    assert mc._last_aimed_at("user-agent-ccc") > 0
+
+
+def test_a_confirmed_delivery_outranks_a_stale_attempt():
+    now = mc._now_ms()
+    mc._note_aimed_at("user-agent-ddd")
+    mc._note_met("user-agent-ddd", 2, now + 5000)
+    assert mc._last_aimed_at("user-agent-ddd") >= now + 5000

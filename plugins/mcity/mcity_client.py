@@ -558,7 +558,7 @@ def reset_runtime_state():
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
     for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES, _WHO,
-                  _MET,
+                  _MET, _AIMED,
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
@@ -1990,6 +1990,43 @@ def _promote_command(result, hint):
         return _out(result)
 
 
+# When we last aimed a message at somebody, confirmed or not.
+#
+# Confirmation is the wrong gate for this. The world reports a speak in_progress
+# for longer than anyone waits, so a message sent five seconds ago is
+# indistinguishable from one never sent - and the agent sent 51 of them to one
+# person while waiting to find out.
+_AIMED = {}
+_AIMED_CAP = 400
+
+
+def _note_aimed_at(agent_id):
+    """Record the attempt itself, the moment the world accepts it."""
+    try:
+        if not agent_id:
+            return
+        if agent_id not in _AIMED and len(_AIMED) >= _AIMED_CAP:
+            _AIMED.pop(next(iter(_AIMED)), None)
+        _AIMED[agent_id] = _now_ms()
+    except Exception:      # noqa: BLE001
+        return
+
+
+def _last_aimed_at(agent_id):
+    """When this person last heard from us, from every record we keep.
+
+    Three exist and they answer at different moments: the store, which knows
+    across restarts but only about confirmed deliveries; _SAID, which holds the
+    words of a confirmed one; and _AIMED, the attempt itself, which is the only
+    one that knows about the message sent five seconds ago. Asking any single one
+    is how the chooser came to name one person 130 times."""
+    met = _MET.get(agent_id)
+    stored = met[1] if met and met[1] else 0
+    said = max((at for key, at in _SAID.items() if key[0] == agent_id),
+               default=0)
+    return max(stored, said, _AIMED.get(agent_id, 0))
+
+
 def _best_person_to_talk_to():
     """One reachable agent id, preferring somebody we have not spoken to.
 
@@ -2003,6 +2040,19 @@ def _best_person_to_talk_to():
         # contradicted by a later scan. Third place this same drift has appeared,
         # after the rendered column and the candidate list.
         scan_at = _REACHABLE["at_ms"] if _REACHABLE["n"] is not None else 0
+        # Least recently spoken to, first. This used to take the FIRST reachable
+        # id whose _SAID key was missing and break out of the loop - and _SAID is
+        # written only on a confirmed SPEAK-OK while nearly every speak comes
+        # back PENDING, so it was empty, nobody looked spoken-to, and the first
+        # id in dict order won every turn. Measured: talk-to= named one agent 130
+        # times in twenty minutes and the agent sent them 51 messages, while the
+        # store had that same person at spoke_count=20 and inside the ten minute
+        # no-re-greeting cooldown the whole time.
+        #
+        # A sort settles it without a special case. Never-spoken sorts to the
+        # front on 0, and everyone else by how long ago - which is the
+        # anti-greeting-loop order the store already ranks candidates() by, now
+        # asked the same question the same way.
         best = None
         for agent_id, (can, at) in _CAN_SPEAK.items():
             if not can or (now - at) > _CAN_SPEAK_TTL_MS or at < scan_at:
@@ -2016,11 +2066,9 @@ def _best_person_to_talk_to():
                 continue
             if not _looks_speakable(agent_id):
                 continue
-            spoken = any(key[0] == agent_id for key in _SAID)
-            if best is None or (not spoken and best[1]):
-                best = (agent_id, spoken)
-                if not spoken:
-                    break
+            when = _last_aimed_at(agent_id)
+            if best is None or when < best[1]:
+                best = (agent_id, when)
         return best[0] if best else None
     except Exception:      # noqa: BLE001 - vitals must never break a skill
         return None
@@ -4520,6 +4568,9 @@ def speak(arg=None):
     # coming back PENDING. Meanwhile the thread list showed the messages landing:
     # activity six and eleven minutes old, four messages in one thread, nothing
     # owed by us. Confirm from the threads instead when the events say nothing.
+    if sent.get("agent_id") and "MCITY-SPEAK-" in (result or "") \
+            and "SKIPPED" not in (result or ""):
+        _note_aimed_at(sent["agent_id"])
     if sent.get("agent_id") and "MCITY-SPEAK-PENDING" in (result or ""):
         # Look twice. The world creates the thread a moment after it accepts the
         # message, so a single check right after the confirm window can run
