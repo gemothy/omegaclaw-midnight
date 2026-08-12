@@ -1457,11 +1457,17 @@ def _entry_engaged(entry):
 def _entry_reachable(entry):
     """The one verdict on whether a message to this agent can land.
 
-    Used by BOTH the rendered can-speak= column and the _CAN_SPEAK cache. They
-    disagreed: the column showed raw canSpeak - 200 rows saying yes - while the
-    cache required canSpeak AND no live action, so the agent was being told yes
-    about people the harness itself would have refused to send to."""
-    return bool(entry.get("can_speak")) and not _entry_engaged(entry)
+    Used by BOTH the rendered can-speak= column and the _CAN_SPEAK cache.
+
+    isOpenToTalk belongs here and I took it out once, on the grounds that it was
+    true for 283 of 285 agents and therefore carried no signal. Being rarely
+    false is not the same as being meaningless: false is exactly what the world
+    means by do-not-disturb. Measured - the one agent the harness called
+    reachable had isOpenToTalk false, talk-to named them, and every send came
+    back 'target is in do not disturb mode', 24 times in eight minutes."""
+    return (bool(entry.get("can_speak"))
+            and entry.get("open") is not False
+            and not _entry_engaged(entry))
 
 
 def _note_can_speak(entry, at_ms=None):

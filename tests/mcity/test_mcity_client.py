@@ -2607,3 +2607,38 @@ def test_the_suggestion_carries_the_id_alone(control):
     suggestion = mc._speak_candidates() or ""
     assert "user-agent-free" in suggestion
     assert "Pepito" not in suggestion, "a name beside an id gets copied into it"
+
+
+def test_a_do_not_disturb_agent_is_not_recommended(control):
+    """isOpenToTalk false is what the world means by do-not-disturb. I removed it
+    from this check once because it was true for 283 of 285 agents; being rarely
+    false is not being meaningless. The one agent the harness called reachable had
+    it false, talk-to named them, and 24 sends in eight minutes came back 'target
+    is in do not disturb mode'."""
+    roster = {"agents": [
+        {"agentId": "user-agent-dnd", "name": "Busy", "distance": 1,
+         "canSpeak": True, "isOpenToTalk": False, "status": "idle",
+         "activeAction": None},
+        {"agentId": "user-agent-open", "name": "Open", "distance": 9,
+         "canSpeak": True, "isOpenToTalk": True, "status": "idle",
+         "activeAction": None},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    result = _check(mc.agents())
+    assert mc._can_be_reached("user-agent-dnd") is False
+    assert mc._can_be_reached("user-agent-open") is True
+    assert mc._best_person_to_talk_to() == "user-agent-open"
+    dnd_row = [r for r in result.splitlines() if "user-agent-dnd" in r][0]
+    assert "can-speak=no" in dnd_row, dnd_row
+
+
+def test_a_do_not_disturb_target_is_skipped_before_the_call(control):
+    roster = {"agents": [{"agentId": "user-agent-dnd", "name": "Busy", "distance": 1,
+                          "canSpeak": True, "isOpenToTalk": False, "status": "idle",
+                          "activeAction": None}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.on_action = lambda action: []
+    result = _check(mc.speak("user-agent-dnd hello there"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
+    assert not control.actions
