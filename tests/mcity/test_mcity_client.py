@@ -2760,3 +2760,41 @@ def test_an_anchored_area_is_still_offered(control):
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
                        "space_kind": "interior"})
     assert "central-plaza" in (mc._travel_to_people_command() or "")
+
+
+def test_a_destination_the_world_rejected_is_not_tried_again(control):
+    """The agent replays commands out of its own history, and history records the
+    call without its outcome - so a destination that failed once is offered by its
+    own past for as long as it stays in the window. Measured: 'district gateway
+    not found: bison-valley' six times and 'area not found: central' four times in
+    one window, after the harness had stopped suggesting either."""
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="travel_to_district",
+              reason="district gateway not found: bison-valley")]
+    first = _check(mc.travel_district("bison-valley"))
+    assert "MCITY-TRAVEL-DISTRICT-FAILED" in first
+    control.on_action = lambda action: []
+    before = len(control.actions)
+    again = _check(mc.travel_district("bison-valley"))
+    assert again.startswith("MCITY-TRAVEL-DISTRICT-SKIPPED reason=known_bad_destination")
+    assert len(control.actions) == before, "no second call for a known answer"
+
+
+def test_the_memory_is_per_skill_and_per_destination(control):
+    """A name that fails for travel may be perfectly valid for move-area: central
+    is a district for one and not an area for the other."""
+    control.on_action = lambda action: [
+        event("e1", "action_failed", actionKind="move_to",
+              reason="area not found: central")]
+    _check(mc.move_area("central"))
+    control.on_action = lambda action: []
+    _check(mc.travel_district("central"))
+    assert control.actions, "the other skill must still be allowed to try"
+
+
+def test_a_rejected_destination_is_forgiven_eventually(control):
+    control.on_action = lambda action: []
+    mc._BAD_DESTINATION[("MOVE-AREA", "central-plaza")] = \
+        mc._now_ms() - (mc._BAD_DESTINATION_TTL_MS + 1000)
+    _check(mc.move_area("central-plaza"))
+    assert control.actions

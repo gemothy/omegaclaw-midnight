@@ -492,8 +492,8 @@ def reset_runtime_state():
 
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
-    for cache in (_CAN_SPEAK, _ASLEEP, _GONE, _CLOSED_WITH, _LAST_READ, _SAID,
-                  _AWAKE_PLACES, _inbound, _my_texts, _read_at):
+    for cache in (_CAN_SPEAK, _ASLEEP, _GONE, _CLOSED_WITH, _BAD_DESTINATION,
+                  _LAST_READ, _SAID, _AWAKE_PLACES, _inbound, _my_texts, _read_at):
         cache.clear()
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
@@ -764,6 +764,7 @@ _SKIP_REASONS = frozenset((
     "repeat", "rich_enough", "worksite_busy", "nobody_reachable", "unreachable",
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
     "no_link_exit", "target_asleep", "busy", "just_read",
+    "known_bad_destination",
 ))
 
 
@@ -3478,6 +3479,16 @@ def _mutate(verb, build):
 
 
 _DISTRICT_TTL_MS = 120000      # how long to believe "you are already in district X"
+# Destinations the world has rejected, keyed by (verb, id). The agent replays
+# commands out of its own history, and history records the call without its
+# outcome - so a destination that failed once is offered by its own past for as
+# long as it stays in the window. Measured: "district gateway not found:
+# bison-valley" six times and "area not found: central" four times in one window,
+# after the harness had stopped suggesting either.
+_BAD_DESTINATION = {}
+_BAD_DESTINATION_TTL_MS = 900000
+_DESTINATION_REJECTIONS = ("area not found", "district gateway not found",
+                           "not a valid destination", "unknown area")
 
 
 def _destination_action(verb, arg, key, usage, kind=None):
@@ -3499,6 +3510,13 @@ def _destination_action(verb, arg, key, usage, kind=None):
         # perfectly reasonable from here and the world answers "agent is already
         # in district central" - six times in twelve minutes. The world is the
         # only thing that knows, so remember what it said.
+        rejected = _BAD_DESTINATION.get((verb, value))
+        if rejected and (_now_ms() - rejected) <= _BAD_DESTINATION_TTL_MS:
+            ago = int((_now_ms() - rejected) / 60000)
+            return None, _failed(verb, "known_bad_destination",
+                                 f"the world rejected {value} for this skill "
+                                 f"{ago}m ago; it is in your history but it does "
+                                 "not work")
         if value == _VITALS.get("district_now") and _VITALS.get("district_at_ms") \
                 and (_now_ms() - _VITALS["district_at_ms"]) <= _DISTRICT_TTL_MS:
             return None, _failed(verb, "already_here",
@@ -3508,6 +3526,11 @@ def _destination_action(verb, arg, key, usage, kind=None):
             return {"kind": kind, key: value}, None
         return {"kind": "move_to", "destination": {key: value}}, None
     result = _mutate(verb, build)
+    lowered = (result or "").lower()
+    value = _norm_arg(arg)
+    if value and any(phrase in lowered for phrase in _DESTINATION_REJECTIONS):
+        _BAD_DESTINATION[(verb, value)] = _now_ms()
+        _prune(_BAD_DESTINATION, _BAD_DESTINATION_TTL_MS, lambda v: v)
     match = re.search(r"already in district ([\w-]+)", (result or "").lower())
     if match:
         _VITALS["district_now"] = match.group(1)
