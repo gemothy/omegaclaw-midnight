@@ -980,3 +980,21 @@ def test_the_context_skill_is_not_offered_either():
     assert '"VITALS", "context"' in client, "the harness still reads it itself"
     helper = (repo / "src" / "helper.py").read_text()
     assert '"mcity-context"' in helper, "and history must stop teaching it"
+
+
+def test_the_work_skill_is_not_offered_while_the_money_is_not_needed():
+    """The strongest measured lever in this whole series is retiring the skill
+    the agent fixates on: it worked for mcity-areas and again for mcity-context.
+    Work was 105 of 106 commands, every one skipped, with 26k meme_coin banked,
+    normal hunger and food in the bag - so earning was not just unnecessary, it
+    was the only thing being attempted.
+
+    REVERSIBLE AND WORTH REVERSING if the agent ever runs short: restore the
+    add-skill line in mcity.metta and drop mcity-work from RETIRED_COMMANDS. The
+    binding and the Python are untouched, so replayed history still executes."""
+    import pathlib
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    metta = (repo / "plugins" / "mcity" / "mcity.metta").read_text()
+    assert "add-skill mcity-work" not in metta
+    assert "(= (mcity-work)" in metta, "the binding stays"
+    assert "mcity-harvest" in metta, "gathering is still available if it must earn"

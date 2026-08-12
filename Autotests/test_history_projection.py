@@ -65,12 +65,12 @@ def test_idle_reports_are_not_fed_back_as_examples(tmp_path):
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
-        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        '("2026-08-11 10:00:00" \n ((mcity-threads)) \n)\n'
         + '("2026-08-11 10:00:10" \n ((send "No new input received.")) \n)\n' * 20,
         encoding="utf-8")
     body = helper.rankedHistory(str(history), 30000)
     assert "No new input" not in body, "an idle report must never be an exemplar"
-    assert "mcity-work" in body, "the real turn must survive"
+    assert "mcity-threads" in body, "the real turn must survive"
 
 
 def test_a_send_that_answers_somebody_is_kept(tmp_path):
@@ -95,9 +95,9 @@ def test_a_mixed_turn_is_kept(tmp_path):
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
-        '("2026-08-11 10:00:00" \n ((mcity-work) (send "No new input received.")) \n)\n',
+        '("2026-08-11 10:00:00" \n ((mcity-threads) (send "No new input received.")) \n)\n',
         encoding="utf-8")
-    assert "mcity-work" in helper.rankedHistory(str(history), 30000)
+    assert "mcity-threads" in helper.rankedHistory(str(history), 30000)
 
 
 def test_a_retired_skill_is_not_taught_back_to_the_agent(tmp_path):
@@ -124,7 +124,7 @@ def test_a_turn_that_partly_used_a_retired_skill_is_dropped_too(tmp_path):
     history = tmp_path / "history.metta"
     history.write_text(
         '("2026-08-11 09:59:00" \n ((mcity-speak "user-agent-x hi there")) \n)\n'
-        '("2026-08-11 10:00:00" \n ((mcity-areas) (mcity-work)) \n)\n',
+        '("2026-08-11 10:00:00" \n ((mcity-areas) (mcity-threads)) \n)\n',
         encoding="utf-8")
     body = helper.rankedHistory(str(history), 30000)
     assert "mcity-areas" not in body
@@ -148,14 +148,14 @@ def test_an_unsolicited_self_report_is_not_taught_back(tmp_path):
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
-        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        '("2026-08-11 10:00:00" \n ((mcity-threads)) \n)\n'
         + '("2026-08-11 10:00:10" \n ((send "I am currently in the '
           'hacker-house-interior, working on a task. My hunger is normal, and I '
           'have earned enough resources. No pending messages to reply to.")) \n)\n' * 8,
         encoding="utf-8")
     body = helper.rankedHistory(str(history), 30000)
     assert "currently in the hacker-house" not in body
-    assert "mcity-work" in body
+    assert "mcity-threads" in body
 
 
 def test_an_unprompted_outcome_report_is_dropped_too(tmp_path):
@@ -193,12 +193,12 @@ def test_the_malformed_cmd_form_is_not_taught_back(tmp_path):
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
-        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        '("2026-08-11 10:00:00" \n ((mcity-threads)) \n)\n'
         + '("2026-08-11 10:00:10" \n ((cmd=work)) \n)\n' * 10,
         encoding="utf-8")
     body = helper.rankedHistory(str(history), 30000)
     assert "cmd=work" not in body
-    assert "mcity-work" in body
+    assert "mcity-threads" in body
 
 
 def test_any_unprompted_send_is_dropped_whatever_it_says(tmp_path):
@@ -210,7 +210,7 @@ def test_any_unprompted_send_is_dropped_whatever_it_says(tmp_path):
     import helper
     history = tmp_path / "history.metta"
     history.write_text(
-        '("2026-08-11 10:00:00" \n ((mcity-work)) \n)\n'
+        '("2026-08-11 10:00:00" \n ((mcity-threads)) \n)\n'
         '("2026-08-11 10:00:10" \n ((send "heartbeat: operational and awaiting task directives.")) \n)\n'
         '("2026-08-11 10:00:20" \n ((send "I am here and ready to connect. What is on your mind?")) \n)\n'
         '("2026-08-11 10:00:30" \n ((send "A wording nobody has thought of yet")) \n)\n',
@@ -219,7 +219,7 @@ def test_any_unprompted_send_is_dropped_whatever_it_says(tmp_path):
     assert "heartbeat" not in body
     assert "ready to connect" not in body
     assert "nobody has thought of" not in body
-    assert "mcity-work" in body
+    assert "mcity-threads" in body
 
 
 def test_a_send_answering_a_real_message_is_always_kept(tmp_path):

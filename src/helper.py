@@ -438,7 +438,7 @@ def _history_commands(block):
 # "cmd=work" and friends: the agent copied the old cmd= label as part of the
 # command name and emitted (cmd=work), a malformed no-op, for 90 of 111 decisions
 # in one window. The label is gone, but its examples are still in history.
-RETIRED_COMMANDS = ("mcity-areas", "mcity-context", "cmd=")
+RETIRED_COMMANDS = ("mcity-areas", "mcity-context", "cmd=", "mcity-work")
 
 # Turns whose whole content was telling the operator nothing. The second group
 # is the unsolicited self-status report - "I am currently in the
