@@ -1478,8 +1478,10 @@ def test_promoting_a_command_never_breaks_the_result_prefix(control):
     promoted = mc._promote_command(
         "MCITY-WORK-FAILED reason=rich_enough detail=enough already",
         "(mcity-agents)")
-    assert promoted.startswith("MCITY-WORK-FAILED reason=rich_enough (mcity-agents)")
-    assert promoted.count("(mcity-agents)") == 1, "the command must not duplicate"
+    assert promoted.startswith(
+        "MCITY-WORK-FAILED reason=rich_enough do-NOT-repeat=(mcity-work) "
+        "do-THIS=(mcity-agents)")
+    assert promoted.count("do-THIS=") == 1, "the command must not duplicate"
     assert "enough already" in promoted
 
 
@@ -2418,3 +2420,17 @@ def test_a_long_action_still_holds_speech_back(control):
     result = _check(mc.speak("user-agent-abc hello there"))
     assert result.startswith("MCITY-SPEAK-FAILED reason=self_engaged")
     assert not control.actions
+
+
+def test_a_refusal_names_the_call_not_to_repeat(control):
+    """The loop echoes the failed call first, so the first s-expression the agent
+    reads is the one that just failed - and it copies it: 105 of 106 commands in
+    one window were mcity-work while every refusal carried a correct
+    alternative."""
+    promoted = mc._promote_command(
+        "MCITY-WORK-FAILED reason=worksite_busy detail=every worksite is taken",
+        "(mcity-move-area _quote_bison-valley_quote_)")
+    head = promoted.partition("\n")[0]
+    assert "do-NOT-repeat=(mcity-work)" in head, head
+    assert "do-THIS=(mcity-move-area _quote_bison-valley_quote_)" in head
+    assert "every worksite is taken" in promoted

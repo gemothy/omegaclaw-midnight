@@ -1575,7 +1575,18 @@ def _promote_command(result, hint):
             note = note.replace(tail, "")
         note = note.strip().rstrip(":").strip()
         head, sep, rest = (result or "").partition("\n")
-        insert = f"{command}" + (f" -- {note}" if note else "")
+        # Name the trap. The loop echoes the failed call FIRST -
+        #   ((mcity-work) MCITY-WORK-FAILED reason=... (mcity-move-area ...))
+        # - so the first s-expression the agent reads is the one that just
+        # failed, and it copies it: 105 of 106 commands in one window were
+        # mcity-work while every refusal carried a correct alternative. Labelling
+        # both makes the echo something to avoid rather than something to imitate.
+        verb = (result or "").split()[0] if (result or "").split() else ""
+        failed_call = ""
+        if verb.startswith("MCITY-") and verb.endswith(("-FAILED", "-PENDING")):
+            failed_call = "(mcity-" + verb[len("MCITY-"):-len("-FAILED")].lower() + ")"
+        insert = (f"do-NOT-repeat={failed_call} do-THIS={command}" if failed_call
+                  else command) + (f" -- {note}" if note else "")
         match = re.search(r"(reason=[\w-]+)", head)
         if match:
             head = head.replace(match.group(1), f"{match.group(1)} {insert};", 1)
