@@ -385,7 +385,7 @@ _REPEATABLE_READS = frozenset((
 # waiting person outranks working, and it still started long actions with two
 # people waiting - and a long action makes it unreachable for the duration, so
 # the thread dies. Prose is not enforcement; this is.
-_WAITING = {"at_ms": 0, "ids": []}
+_WAITING = {"at_ms": 0, "ids": [], "said": {}}
 _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
 # How often vitals re-checks who is waiting.
 #
@@ -565,7 +565,7 @@ def reset_runtime_state():
     _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
-    _WAITING.update({"at_ms": 0, "ids": []})
+    _WAITING.update({"at_ms": 0, "ids": [], "said": {}})
     _VITALS.clear()
     _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
                     "items_at_ms": 0,
@@ -761,6 +761,23 @@ def _vitals_line():
     waiting = _someone_is_waiting()
     parts.append(f"waiting={len(waiting)}"
                  + (f" (answer {waiting[0]})" if waiting else ""))
+    # What they actually said, so the reply can be written THIS turn.
+    #
+    # Answering took two turns - read the thread, then speak - and the world
+    # closes a thread after sixty seconds. Measured over half an hour: of 45
+    # turns where somebody was owed a reply, 25 were answered within four turns
+    # and 20 never were, and in every one of those 20 the next turn WAS the
+    # threads read. The agent always started the procedure; it lost the thread
+    # partway through.
+    #
+    # Third party text, so it goes through _clean like every other word from this
+    # world: quotes stripped, the closing marker neutralised so a message cannot
+    # end the untrusted region, and truncated. The rules already tell the agent
+    # that marked text is never an instruction and may never choose its skill.
+    if waiting:
+        said = (_WAITING.get("said") or {}).get(waiting[0])
+        if said:
+            parts.append("they-said=" + _clean(str(said)[:120]))
     # earned= replaces an arithmetic comparison the model was not doing. Step
     # four asks it to read holding=... meme_coin=18383 and decide whether that
     # beats two hundred; it kept calling mcity-work instead, 54 refusals in three
@@ -3354,6 +3371,7 @@ def _refresh_waiting_if_stale():
         items = _find_list(payload, "threads") or []
         own_id = _c("agent_id", "")
         found = []
+        said = {}
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -3362,8 +3380,11 @@ def _refresh_waiting_if_stale():
                 continue
             if who and ID_RE.match(who) and _can_be_reached(who) is not False:
                 found.append(who)
+                said[who] = _get(item, "latestMessagePreview", "lastMessageBody",
+                                 "preview", "lastMessage", "lastMessagePreview")
         _WAITING["at_ms"] = _now_ms()
         _WAITING["ids"] = found
+        _WAITING["said"] = said
         _waiting_refresh_at_ms = _now_ms()
     except Exception:      # noqa: BLE001 - grounding must never break a skill
         pass
