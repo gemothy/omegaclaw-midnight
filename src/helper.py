@@ -531,18 +531,23 @@ def rankedHistory(history_file, budget, repeat_cap=2):
         if commands and any(
                 c.lstrip("( ").startswith(RETIRED_COMMANDS) for c in commands):
             continue
-        # "(No \"action needed.\")" and friends: the loop rejects these as
-        # malformed and answers REMEMBER:OUTPUT_NOTHING_ELSE_THAN, but they were
-        # 133 of 143 turns and every one of them taught the next turn to do the
-        # same nothing.
-        if re.match(r'\s*\(\("?(?:No|Nothing|None)\b', block.split("\n", 1)[-1]):
+        # A turn that invoked no recognised skill did nothing, whatever it said,
+        # and _history_commands returns [] for exactly those. Matching the words
+        # was whack-a-mole: "(No \"action needed.\")" was 133 of 143 turns, I
+        # filtered that phrasing, and "(Continue.)" took its place at 65 of 96.
+        #
+        # This reverses the older rule below, which kept a command-less turn on
+        # the grounds that it "still carries prose worth keeping". For an agent
+        # whose every useful output is a command, that prose is filler, and it is
+        # the single most repeated thing in its context. An exchange with the
+        # operator is the exception and is kept.
+        if not commands and "HUMAN_MESSAGE:" not in block:
             continue
         if any(f'"{name}"' in block or f"({name}" in block
                for name in RETIRED_COMMANDS):
             # The retired name passed as an ARGUMENT, which the model then
             # imitates: ((mcity-agents "mcity-areas")) appeared verbatim.
             continue
-        # A turn with no recognisable command still carries prose worth keeping.
         if commands and all(seen_commands.get(c, 0) >= repeat_cap for c in commands):
             continue
         if used + len(block) > budget:

@@ -247,3 +247,36 @@ def test_a_turn_that_did_nothing_is_not_taught_back(tmp_path):
     body = helper.rankedHistory(str(history), 30000)
     assert "action needed" not in body
     assert "mcity-threads" in body
+
+
+def test_filler_turns_are_dropped_whatever_they_say(tmp_path):
+    """Matching the words was whack-a-mole: (No "action needed.") was 133 of 143
+    turns, I filtered that phrasing, and (Continue.) took its place at 65 of 96.
+    LLM_COMMANDS is the list of things that actually do something, so requiring
+    one is the rule no new filler evades."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-12 10:00:00" \n ((mcity-threads)) \n)\n'
+        '("2026-08-12 10:00:10" \n ((Continue.)) \n)\n'
+        '("2026-08-12 10:00:20" \n ((No "action needed.")) \n)\n'
+        '("2026-08-12 10:00:30" \n ((Standing by for further instructions)) \n)\n'
+        '("2026-08-12 10:00:40" \n ((Thinking about what to do next)) \n)\n',
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    for filler in ("Continue.", "action needed", "Standing by", "Thinking about"):
+        assert filler not in body, filler
+    assert "mcity-threads" in body
+
+
+def test_a_real_command_is_never_mistaken_for_filler(tmp_path):
+    """Every registered skill must survive, including ones taking arguments."""
+    import helper
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("2026-08-12 10:00:00" \n ((mcity-speak "user-agent-x hello there")) \n)\n'
+        '("2026-08-12 10:00:10" \n ((mcity-move-area "central-plaza")) \n)\n'
+        '("2026-08-12 10:00:20" \n ((remember "a thing worth keeping")) \n)\n',
+        encoding="utf-8")
+    body = helper.rankedHistory(str(history), 30000)
+    assert "mcity-speak" in body and "mcity-move-area" in body and "remember" in body
