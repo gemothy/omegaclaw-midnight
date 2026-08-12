@@ -851,7 +851,7 @@ _SKIP_REASONS = frozenset((
     "repeat", "rich_enough", "worksite_busy", "nobody_reachable", "unreachable",
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
     "no_link_exit", "target_asleep", "busy", "just_read",
-    "known_bad_destination",
+    "known_bad_destination", "no_food",
 ))
 
 
@@ -3906,6 +3906,15 @@ def _refuse_while_someone_waits(verb):
                    f"{who} <your sentence>, then come back to this")
 
 
+def _holding_food():
+    """True when holding= carries something edible.
+
+    One reading of the item list, used by both the eat guard and the
+    hungry-agent refusal. They asked the same question two ways, which is how
+    every duplicated rule in this file has started."""
+    return any(food in (_VITALS.get("items") or "") for food in FOOD_ITEMS)
+
+
 def _needs_to_eat():
     """True when the agent is hungry and is carrying something edible.
 
@@ -3916,7 +3925,7 @@ def _needs_to_eat():
     hunger = (_VITALS.get("hunger") or "").lower()
     if not hunger.startswith(("hungry", "starving")):
         return False
-    return any(food in (_VITALS.get("items") or "") for food in FOOD_ITEMS)
+    return _holding_food()
 
 
 def _rich_enough():
@@ -4060,6 +4069,18 @@ def eat():
         return _out(_failed("EAT", "not_hungry",
                             f"vitals says hunger={hunger}; eating only works when "
                             "hungry or starving, so do something else this turn"))
+    # The symmetric guard, which was missing. not_hungry was refused from our own
+    # vitals without a world call; being hungry with nothing edible was not, so
+    # the world spent 26 writes in half an hour saying "not enough edible food to
+    # eat" while holding= plainly read crystal=113800 and nothing else. Writes are
+    # the scarce thing here - the world takes twelve a minute against nine
+    # hundred reads - and this one could never have succeeded.
+    if fresh and _VITALS.get("items") is not None and not _holding_food():
+        return _out(_promote_command(
+            _failed("EAT", "no_food",
+                    f"vitals says hunger={hunger} but holding= carries nothing "
+                    "edible, so there is nothing to eat. Buy food first"),
+            "(mcity-merchants)"))
     result = _mutate("EAT", lambda: ({"kind": "eat"}, None))
     if "MCITY-EAT-FAILED" not in (result or ""):
         return result

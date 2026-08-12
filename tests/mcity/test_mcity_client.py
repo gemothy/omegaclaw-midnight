@@ -3025,3 +3025,36 @@ def test_the_world_saying_so_is_still_believed():
     source = pathlib.Path(mc.__file__).read_text()
     assert '_remember_refusal("closed"' in source, (
         "the speak-failure path must still record a real refusal")
+
+
+def test_eating_with_nothing_edible_costs_no_world_call(control):
+    """not_hungry was refused from our own vitals without a world call; being
+    hungry with nothing edible was not, so the world spent 26 writes in half an
+    hour saying 'not enough edible food to eat' while holding= plainly read
+    crystal=113800 and nothing else. The world takes twelve writes a minute."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(70)",
+                       "items": "crystal=113800"})
+    before = len(control.actions)
+    result = _check(mc.eat())
+    assert result.startswith("MCITY-EAT-SKIPPED reason=no_food"), result
+    assert "(mcity-merchants)" in result.partition("\n")[0], "name the way out"
+    assert len(control.actions) == before, "a write that could not have worked"
+
+
+def test_eating_is_still_tried_when_something_edible_is_held(control):
+    """The guard must not become the reason the agent starves - that failure has
+    happened here before, in the other direction."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(70)",
+                       "items": "to_go_food=2 crystal=5"})
+    before = len(control.actions)
+    _check(mc.eat())
+    assert len(control.actions) > before, "holding food means the world decides"
+
+
+def test_an_unknown_inventory_does_not_block_eating(control):
+    """items None means we have not read one, which is not the same as empty."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(70)",
+                       "items": None})
+    before = len(control.actions)
+    _check(mc.eat())
+    assert len(control.actions) > before

@@ -113,3 +113,23 @@ def test_no_refusal_kind_exists_without_a_ttl():
     used = set(re.findall(r'_(?:remember_refusal|refused_ago_ms|refused_keys)\(\s*"(\w+)"',
                           source))
     assert used <= declared, f"{used - declared} have no TTL; they never expire"
+
+
+def test_a_refusal_that_names_a_next_move_is_never_a_failure():
+    """The core system prompt tells the agent "if you see command errors, fix the
+    format and re-invoke". So FAILED means retry, and a refusal we have attached a
+    do-THIS to is precisely one that must NOT be retried - we have just named
+    something else to do. no_food shipped as FAILED and was caught here.
+
+    This is the bug that once made 105 of 106 commands a single refused call, each
+    refusal instructing the agent to make it again."""
+    source = CLIENT.read_text()
+    skips = re.search(r"_SKIP_REASONS = frozenset\(\((.*?)\)\)", source, re.S)
+    assert skips, "_SKIP_REASONS not found"
+    declared = set(re.findall(r'"(\w+)"', skips.group(1)))
+    promoted = set(re.findall(
+        r'_promote_command\(\s*\n?\s*_failed\(\s*\n?\s*"[A-Z-]+",\s*"(\w+)"', source))
+    missing = promoted - declared
+    assert not missing, (
+        f"{sorted(missing)} name a next move but are tagged FAILED, which reads "
+        "as 'retry this'. Add them to _SKIP_REASONS.")
