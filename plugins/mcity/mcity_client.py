@@ -547,6 +547,7 @@ def reset_runtime_state():
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
+    _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
     _WAITING.update({"at_ms": 0, "ids": []})
@@ -2876,6 +2877,51 @@ def navigation_options():
     return _line("NAVIGATION", "OK", (), rows)
 
 
+# Where food can be bought, learned from any merchants read.
+#
+# The agent read the merchant listing eleven times in twenty minutes while its
+# hunger climbed from 70 to 73, holding crystal=113950 the whole time. The
+# listing was not the problem - it plainly said "Central Mart Outlet gives=1
+# to_go_food for=50 crystal cmd=crystal 50 Central Mart Outlet". The problem is
+# that the outlet stands at central,81,18 and the agent was in
+# ada-arena-interior, so the one command it needed was a MOVE, and pointing it at
+# the listing again could never produce one.
+_FOOD_SOURCE = {"at_ms": 0, "space": None, "cmd": None, "name": None}
+_FOOD_SOURCE_TTL_MS = 600000
+_EDIBLE_HINTS = ("food", "fish", "meat", "bread", "fruit", "veg", "meal")
+
+
+def _note_food_source(pays_item, space, cmd, name):
+    """Keep the first merchant seen that hands over something edible."""
+    try:
+        item = (pays_item or "").lower()
+        if not item or not any(hint in item for hint in _EDIBLE_HINTS):
+            return
+        if not cmd or not space:
+            return
+        _FOOD_SOURCE.update({"at_ms": _now_ms(), "space": space.split(",")[0],
+                             "cmd": cmd, "name": name})
+    except Exception:      # noqa: BLE001
+        return
+
+
+def _way_to_food():
+    """The one command that gets the agent fed from where it stands, or None.
+
+    Being AT the merchant is what the trade needs, so this answers with a move
+    when we are elsewhere and with the trade itself when we have arrived."""
+    if not _FOOD_SOURCE["cmd"] or not _FOOD_SOURCE["at_ms"]:
+        return None
+    if (_now_ms() - _FOOD_SOURCE["at_ms"]) > _FOOD_SOURCE_TTL_MS:
+        return None
+    here = _VITALS.get("space")
+    if here and _FOOD_SOURCE["space"] and here == _FOOD_SOURCE["space"]:
+        return f"(mcity-trade _quote_{_FOOD_SOURCE['cmd']}_quote_)"
+    if _FOOD_SOURCE["space"]:
+        return f"(mcity-move-area _quote_{_FOOD_SOURCE['space']}_quote_)"
+    return None
+
+
 @_guard("MERCHANTS")
 def merchants():
     resp = _http("GET", "/api/skill/merchants")
@@ -2913,6 +2959,8 @@ def merchants():
             ("batch", _plain(_get(item, "batchMultiple"))),
             ("cmd", _trade_cmd(item, name)),
         )))
+        _note_food_source(_plain(_get(item, "paysItemId")), pos,
+                          _trade_cmd(item, name), _merchant_label(name))
     return _line("MERCHANTS", "OK", (("count", len(items)),), rows or ["- none"])
 
 
@@ -3919,6 +3967,34 @@ def _refuse_while_someone_waits(verb):
                    f"{who} <your sentence>, then come back to this")
 
 
+_KNOWN_INEDIBLE = ("crystal", "meme_coin", "wood", "ore")
+
+
+def _holding_only_inedible():
+    """True only when every single thing held is known NOT to be food.
+
+    The eat guard asks this rather than `not _holding_food()`, and the difference
+    matters. FOOD_ITEMS is a substring match on "food", so fish and meat - both
+    sold by outlets in central for 50 crystal - do not match it. Refusing to eat
+    on that basis would starve the agent the moment it finally bought a meal,
+    which is the failure FOOD_ITEMS was itself written to avoid: an unknown item
+    must fail toward letting the agent try, since eat() still checks with the
+    world and a wrong guess costs one refused call.
+
+    Refusing needs certainty; trying does not. So this returns True only for a
+    holding list made entirely of currency and raw materials - crystal=113800
+    and meme_coin=17187, which is the case that cost 26 writes in half an hour.
+    """
+    items = (_VITALS.get("items") or "").strip()
+    if not items:
+        return False               # nothing read is not the same as nothing edible
+    held = [part.split("=", 1)[0].strip().lower()
+            for part in items.split() if part.strip()]
+    if not held:
+        return False
+    return all(any(dull in name for dull in _KNOWN_INEDIBLE) for name in held)
+
+
 def _holding_food():
     """True when holding= carries something edible.
 
@@ -4088,12 +4164,12 @@ def eat():
     # eat" while holding= plainly read crystal=113800 and nothing else. Writes are
     # the scarce thing here - the world takes twelve a minute against nine
     # hundred reads - and this one could never have succeeded.
-    if fresh and _VITALS.get("items") is not None and not _holding_food():
+    if fresh and _VITALS.get("items") is not None and _holding_only_inedible():
         return _out(_promote_command(
             _failed("EAT", "no_food",
                     f"vitals says hunger={hunger} but holding= carries nothing "
                     "edible, so there is nothing to eat. Buy food first"),
-            "(mcity-merchants)"))
+            _way_to_food() or "(mcity-merchants)"))
     result = _mutate("EAT", lambda: ({"kind": "eat"}, None))
     if "MCITY-EAT-FAILED" not in (result or ""):
         return result

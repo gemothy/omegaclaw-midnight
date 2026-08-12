@@ -3077,3 +3077,53 @@ def test_only_speak_gives_up_early():
     window = source[source.index("budget = float(_c(\"confirm_timeout\""):]
     window = window[:window.index("deadline =")]
     assert "MOVE" not in window and "TRADE" not in window
+
+
+def test_buying_fish_does_not_start_a_starvation_loop(control):
+    """FOOD_ITEMS is a substring match on "food", so fish and meat - both sold by
+    outlets in central for 50 crystal - do not match it. Refusing to eat on that
+    basis would starve the agent the moment it finally bought a meal. Refusing
+    needs certainty; trying does not."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(70)",
+                       "items": "fish=1 crystal=113800"})
+    before = len(control.actions)
+    _check(mc.eat())
+    assert len(control.actions) > before, "an unknown item must be tried, not refused"
+
+
+def test_a_purse_of_currency_is_still_refused(control):
+    """crystal=113800 meme_coin=17187 and nothing else is the case that cost 26
+    writes in half an hour."""
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(70)",
+                       "items": "crystal=113800 meme_coin=17187"})
+    before = len(control.actions)
+    result = _check(mc.eat())
+    assert result.startswith("MCITY-EAT-SKIPPED reason=no_food"), result
+    assert len(control.actions) == before
+
+
+def test_a_hungry_agent_is_sent_to_the_food_not_to_the_list():
+    """The agent read the merchant listing eleven times in twenty minutes while
+    its hunger climbed from 70 to 73, holding crystal=113950 throughout. The
+    listing was never the problem - it plainly named the outlet and the exact
+    trade. The outlet stands in central and the agent was in ada-arena-interior,
+    so the one command it needed was a MOVE."""
+    mc._note_food_source("to_go_food", "central,81,18",
+                         "crystal 50 Central Mart Outlet", "Central Mart Outlet")
+    mc._VITALS.update({"space": "ada-arena-interior"})
+    assert mc._way_to_food() == '(mcity-move-area _quote_central_quote_)'
+
+
+def test_standing_at_the_outlet_gets_the_trade_itself():
+    mc._note_food_source("to_go_food", "central,81,18",
+                         "crystal 50 Central Mart Outlet", "Central Mart Outlet")
+    mc._VITALS.update({"space": "central"})
+    assert mc._way_to_food() == \
+        '(mcity-trade _quote_crystal 50 Central Mart Outlet_quote_)'
+
+
+def test_a_crypto_merchant_is_not_a_meal():
+    """gives=10 crystal for=1 meme_coin feeds nobody."""
+    mc._note_food_source("crystal", "central,101,86",
+                         "meme_coin 1 Central Crypto Merchant", "Crypto")
+    assert mc._way_to_food() is None
