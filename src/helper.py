@@ -478,6 +478,16 @@ def _is_idle_report(block, commands):
     return True
 
 
+def _unreachable_ids():
+    """Ask the mcity client which ids are currently refused. Never raises and
+    never blocks a projection: with no client loaded this is simply empty."""
+    try:
+        from plugins.mcity import mcity_client
+        return mcity_client.currently_unreachable_ids()
+    except Exception:      # noqa: BLE001
+        return frozenset()
+
+
 def rankedHistory(history_file, budget, repeat_cap=2):
     """Recent history with runaway repetition capped, newest-biased.
 
@@ -506,6 +516,7 @@ def rankedHistory(history_file, budget, repeat_cap=2):
     except OSError:
         return ""
 
+    unreachable = _unreachable_ids()
     blocks = _history_blocks(text)
     if not blocks:
         return text[-budget:] if budget > 0 else ""
@@ -543,6 +554,15 @@ def rankedHistory(history_file, budget, repeat_cap=2):
         # the single most repeated thing in its context. An exchange with the
         # operator is the exception and is kept.
         if not commands and "HUMAN_MESSAGE:" not in block:
+            continue
+        # A turn aimed at somebody the world will not take a message for. The
+        # agent picks its targets out of this history, so every refusal wrote
+        # another line naming a dead id into the context it reads next turn - one
+        # id absorbed 58 of 60 refusals in six minutes while talk-to= named
+        # somebody reachable throughout. Retiring a COMMAND has worked four
+        # times; this retires an ARGUMENT the world has closed, and it reopens on
+        # its own the moment the roster says otherwise.
+        if unreachable and any(i in block for i in unreachable):
             continue
         if any(f'"{name}"' in block or f"({name}" in block
                for name in RETIRED_COMMANDS):

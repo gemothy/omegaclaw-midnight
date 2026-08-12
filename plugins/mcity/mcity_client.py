@@ -1645,6 +1645,24 @@ def _can_be_reached(agent_id):
     return known[0] if fresh else None
 
 
+def currently_unreachable_ids():
+    """Ids the world will not accept a message for right now.
+
+    Exported for the history projection. One agent was refused 58 times in six
+    minutes on a single id while talk-to= named somebody else the whole time: the
+    agent takes its targets from its own recent history, and every refusal wrote
+    another line naming that id into the history it reads next turn. The model
+    was doing exactly what its context taught it.
+
+    Goes through _can_be_reached rather than the refusal table directly, so a
+    roster reading that overturns a refusal frees the id here too."""
+    ids = set()
+    for kind in ("gone", "closed", "asleep"):
+        ids |= _refused_keys(kind)
+    return frozenset(i for i in ids
+                     if isinstance(i, str) and _can_be_reached(i) is False)
+
+
 def _next_action_command():
     """One copyable command for a turn with no conversation available.
 

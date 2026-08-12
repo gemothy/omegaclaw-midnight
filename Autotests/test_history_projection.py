@@ -280,3 +280,33 @@ def test_a_real_command_is_never_mistaken_for_filler(tmp_path):
         encoding="utf-8")
     body = helper.rankedHistory(str(history), 30000)
     assert "mcity-speak" in body and "mcity-move-area" in body and "remember" in body
+
+
+def test_a_turn_aimed_at_a_closed_target_is_not_shown_again(tmp_path):
+    """The agent picks its targets out of this history, so every refusal wrote
+    another line naming a dead id into the context it reads next turn - one id
+    absorbed 58 of 60 refusals in six minutes while talk-to= named somebody
+    reachable throughout. The model was doing what its context taught it."""
+    history = tmp_path / "history.metta"
+    history.write_text(
+        '("history"\n'
+        '("2026-08-12 12:00:00" \n ((mcity-speak "user-agent-dead hello there")) \n)\n'
+        '("2026-08-12 12:00:10" \n ((mcity-speak "user-agent-live hello there")) \n)\n',
+        encoding="utf-8")
+    import helper
+    original = helper._unreachable_ids
+    helper._unreachable_ids = lambda: frozenset({"user-agent-dead"})
+    try:
+        out = helper.rankedHistory(str(history), 30000)
+    finally:
+        helper._unreachable_ids = original
+    assert "user-agent-dead" not in out
+    assert "user-agent-live" in out, "only the closed target is dropped"
+
+
+def test_a_projection_survives_a_client_that_is_not_loaded():
+    """The projection runs in contexts with no mcity client at all, and a history
+    window is not worth failing over a missing import."""
+    import helper
+    assert helper._unreachable_ids() == frozenset() or isinstance(
+        helper._unreachable_ids(), frozenset)
