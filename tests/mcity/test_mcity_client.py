@@ -1279,6 +1279,11 @@ def test_the_agent_is_sent_where_the_free_people_are(control):
     ]}
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
+    # Only a route verified against the world's areas list is offered.
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(
+        {"areas": [{"id": "central-plaza", "kind": "park",
+                    "moveAreaAvailable": True,
+                    "anchor": {"spaceId": "central"}}]}).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
     opener = mc._reachable_opener()
     assert "2 free agents are at central" in opener
@@ -1312,6 +1317,12 @@ def test_a_contended_worksite_points_at_somewhere_better(control):
     ]}
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
+    # A route is only offered when an area anchored there is in the
+    # world's own list; a bare space name is no longer guessed at.
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(
+        {"areas": [{"id": "central-plaza", "kind": "park",
+                    "moveAreaAvailable": True,
+                    "anchor": {"spaceId": "central"}}]}).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
     control.on_action = lambda action: [
         event("e1", "action_failed", actionKind="perform_job",
@@ -1333,6 +1344,12 @@ def test_the_travel_command_lands_in_the_head_line(control):
     ]}
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
+    # A route is only offered when an area anchored there is in the
+    # world's own list; a bare space name is no longer guessed at.
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(
+        {"areas": [{"id": "central-plaza", "kind": "park",
+                    "moveAreaAvailable": True,
+                    "anchor": {"spaceId": "central"}}]}).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
     control.on_action = lambda action: [
         event("e1", "action_failed", actionKind="perform_job",
@@ -1473,19 +1490,26 @@ def test_being_indoors_is_told_to_use_the_door_not_the_map(control):
     assert "travel-district" not in hint, "that call is refused when already there"
 
 
-def test_a_genuinely_different_district_still_gets_a_travel_command(control):
+def test_a_different_space_needs_an_anchored_area_to_be_offered(control):
+    """This asserted a travel-district fallback that has been removed. A space is
+    usually not a district - the world answered 'district gateway not found:
+    bison-valley' for a park - so only a move-area verified against the world's
+    own areas list is offered now."""
     roster = {"agents": [
         {"agentId": "user-agent-away", "name": "Away", "distance": None,
-         "canSpeak": False, "status": "idle", "activeAction": None,
-         "position": {"spaceId": "harbour"}},
+         "canSpeak": False, "isOpenToTalk": True, "status": "idle",
+         "activeAction": None, "position": {"spaceId": "harbour"}},
     ]}
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(
+        {"areas": [{"id": "harbour-docks", "kind": "park",
+                    "moveAreaAvailable": True,
+                    "anchor": {"spaceId": "harbour"}}]}).encode())
     mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central",
                        "space_kind": "district"})
-    hint = mc._travel_to_people_command()
-    assert "harbour" in hint and "(mcity-" in hint
-
+    hint = mc._travel_to_people_command() or ""
+    assert "harbour-docks" in hint and "travel-district" not in hint
 
 def test_the_space_kind_is_harvested_from_the_world(control):
     """kind is the useful field: inside a building currentSpace.id is just the
@@ -2682,3 +2706,57 @@ def test_travel_district_sends_the_action_shape_the_world_expects(control):
     sent = control.actions[-1]
     assert sent["kind"] == "travel_to_district"
     assert sent["districtId"] == "harbour"
+
+
+def test_a_private_room_is_never_offered_as_a_destination(control):
+    """An idle agent in agent-room:user-agent-... is in their own quarters. The
+    world answers 'district gateway not found: agent-room', and it was offered
+    only because somebody idle happened to be standing there."""
+    roster = {"agents": [
+        {"agentId": "user-agent-hidden", "name": "Hidden", "distance": None,
+         "canSpeak": False, "isOpenToTalk": True, "status": "idle",
+         "activeAction": None,
+         "position": {"spaceId": "agent-room:user-agent-hidden"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    assert not [k for k in mc._AWAKE_PLACES if k.startswith("agent-room")]
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
+    assert mc._travel_to_people_command() is None
+
+
+def test_no_route_is_guessed_when_no_area_reaches_the_people(control):
+    """The fallback used to emit travel-district with whatever space held the
+    people, and a space is usually not a district: 'district gateway not found:
+    bison-valley' for a park. The anchored move-area is checked against the
+    world's own areas list; nothing else is, so nothing else is offered."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "isOpenToTalk": True, "status": "idle",
+         "activeAction": None, "position": {"spaceId": "bison-valley"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200,
+                  json.dumps({"areas": []}).encode())   # nothing anchored there
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central",
+                       "space_kind": "district"})
+    assert mc._travel_to_people_command() is None
+
+
+def test_an_anchored_area_is_still_offered(control):
+    """The route that is verified against the world's areas list must survive."""
+    roster = {"agents": [
+        {"agentId": "user-agent-away", "name": "Away", "distance": None,
+         "canSpeak": False, "isOpenToTalk": True, "status": "idle",
+         "activeAction": None, "position": {"spaceId": "central"}},
+    ]}
+    areas = {"areas": [{"id": "central-plaza", "kind": "park",
+                        "moveAreaAvailable": True,
+                        "anchor": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    _check(mc.agents())
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(areas).encode())
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    assert "central-plaza" in (mc._travel_to_people_command() or "")

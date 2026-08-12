@@ -1481,6 +1481,12 @@ def _note_can_speak(entry, at_ms=None):
         # location problem, not a conversation problem.
         if not engaged and entry.get("status") == "idle":
             where = entry.get("space")
+            # Not a private room. An idle agent in "agent-room:user-agent-..." is
+            # in their own quarters, which is not a place to travel to - the world
+            # answers "district gateway not found: agent-room" - and it was being
+            # offered as a destination because somebody idle was standing in it.
+            if where and where.startswith("agent-room"):
+                where = None
             if where:
                 seen, _at = _AWAKE_PLACES.get(where, (0, 0))
                 _AWAKE_PLACES[where] = (seen + 1, _now_ms())
@@ -1809,6 +1815,13 @@ def _travel_to_people_command():
                     return (f"Nobody here can talk, but {count} free agents are "
                             f"at {best}. Go to them, exactly: (mcity-move-area "
                             f"_quote_{area_id}_quote_)")
+        # No travel-district guess. The fallback below used to emit
+        # travel-district with whatever space held the people, and a space is
+        # usually not a district: the world answered "district gateway not found:
+        # bison-valley" for a park, and "agent is already in district central"
+        # when it happened to be right about the name but wrong about the need.
+        # The anchored move-area above is checked against the world's own areas
+        # list; nothing else here is, so nothing else is offered.
         if indoors and _now_ms() >= _no_link_exit_until_ms:
             # Only when the door is still worth trying. It is not, in this
             # building: exit_building handles a buildingLink and this exit is a
@@ -1816,8 +1829,7 @@ def _travel_to_people_command():
             return (f"{count} free agents are out in {best}, and you are inside a "
                     f"building with no area reaching it. Try the door: "
                     f"exactly: (mcity-exit-building)")
-        return (f"Nobody here can talk, but {count} free agents are at {best}. "
-                f"Go to them, exactly: (mcity-travel-district _quote_{best}_quote_)")
+        return None
     except Exception:      # noqa: BLE001 - a hint must never break a skill
         return None
 
