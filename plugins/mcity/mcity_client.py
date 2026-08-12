@@ -1828,6 +1828,20 @@ def _note_can_speak(entry, at_ms=None):
 _REFUSALS_THE_ROSTER_CAN_OVERTURN = ("gone", "asleep")
 
 
+def _world_has_refused(agent_id):
+    """True when the world itself has turned us away from this person lately.
+
+    The difference that matters for a reply. Skipping a reply on canSpeak is
+    skipping it on the world's answer to a question we did not ask - can this
+    agent be APPROACHED - so that gate yields to somebody mid-thread. Skipping it
+    because the world refused this very send is different evidence entirely, and
+    ignoring it turned into a retry loop: 46 of 48 speak failures in twenty-five
+    minutes were "target is in do not disturb mode", recorded each time and
+    bypassed each time because the person was still sitting in waiting=."""
+    return any(_refused_ago_ms(kind, agent_id) is not None
+               for kind in _REFUSAL_TTL_MS if kind != "arguments")
+
+
 def _can_be_reached(agent_id):
     """True / False / None (unknown), from the freshest evidence we hold.
 
@@ -4623,7 +4637,8 @@ def speak(arg=None):
         # this function's call to make. Refusing needs certainty, and we do not
         # have it here.
         if _can_be_reached(parts[0]) is False \
-                and parts[0] not in _someone_is_waiting():
+                and (parts[0] not in _someone_is_waiting()
+                     or _world_has_refused(parts[0])):
             others = [i for i in _someone_is_waiting()
                       if i != parts[0] and _can_be_reached(i) is not False]
             # The row already said asleep=yes and the agent spoke to them anyway:

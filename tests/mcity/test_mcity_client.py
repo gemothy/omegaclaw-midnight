@@ -3577,3 +3577,29 @@ def test_the_world_still_overrides_the_guess():
     mc._harvest_vitals({"agent": {
         "activeAction": {"kind": "move_to"}, "canStartConversation": False}})
     assert mc._VITALS["engaged"] is True
+
+
+def test_a_reply_stops_once_the_world_itself_has_refused(control):
+    """46 of 48 speak failures in twenty-five minutes were "target is in do not
+    disturb mode" - recorded each time, and bypassed each time because the person
+    was still sitting in waiting=. Skipping a reply on canSpeak is skipping it on
+    an answer to a question we did not ask; skipping it because the world refused
+    this very send is different evidence."""
+    now = mc._now_ms()
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-dnd"], "said": {}})
+    mc._remember_refusal("asleep", "user-agent-dnd")
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-dnd are you there"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable"), result
+    assert len(control.actions) == before, "no second write into a known refusal"
+
+
+def test_a_reply_still_beats_a_mere_roster_verdict(control):
+    """The bypass keeps the job it was added for."""
+    now = mc._now_ms()
+    control.on_action = lambda action: []
+    mc._CAN_SPEAK["user-agent-owed3"] = (False, now)
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-owed3"], "said": {}})
+    before = len(control.actions)
+    _check(mc.speak("user-agent-owed3 yes still on"))
+    assert len(control.actions) > before
