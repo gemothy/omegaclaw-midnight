@@ -3415,3 +3415,37 @@ def test_a_confirmed_delivery_outranks_a_stale_attempt():
     mc._note_aimed_at("user-agent-ddd")
     mc._note_met("user-agent-ddd", 2, now + 5000)
     assert mc._last_aimed_at("user-agent-ddd") >= now + 5000
+
+
+def test_the_line_never_names_two_different_people():
+    """It carried "waiting=1 (answer user-agent-637f...)" and
+    "talk-to=user-agent-e112... who=Spy,hacker" at once - two people in one
+    breath, the second with the richer description - on 24 of the 63 lines where
+    anybody was waiting. Over that same half hour four agents opened threads with
+    us and we answered none. The mission says answering outranks everything, and
+    it is not the mission's job to overcome a contradiction in the line below it."""
+    now = mc._now_ms()
+    entry = mc._parse_agent({"id": "user-agent-other", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "name": "Spy", "profession": "hacker",
+                             "activeAction": None})
+    mc._note_can_speak(entry, now)
+    mc._REACHABLE.update({"n": 6, "at_ms": now})
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-owed"]})
+    mc._VITALS.update({"at_ms": now, "hunger": "normal(29)", "items": "crystal=5"})
+    line = mc._vitals_line() or ""
+    assert "answer user-agent-owed" in line, line
+    assert "talk-to=" not in line, line
+
+
+def test_talk_to_returns_once_nobody_is_owed_a_reply():
+    now = mc._now_ms()
+    entry = mc._parse_agent({"id": "user-agent-other2", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "name": "Spy", "profession": "hacker",
+                             "activeAction": None})
+    mc._note_can_speak(entry, now)
+    mc._REACHABLE.update({"n": 6, "at_ms": now})
+    mc._WAITING.update({"at_ms": now, "ids": []})
+    mc._VITALS.update({"at_ms": now, "hunger": "normal(29)", "items": "crystal=5"})
+    assert "talk-to=" in (mc._vitals_line() or "")

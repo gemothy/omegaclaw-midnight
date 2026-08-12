@@ -133,3 +133,18 @@ def test_a_refusal_that_names_a_next_move_is_never_a_failure():
     assert not missing, (
         f"{sorted(missing)} name a next move but are tagged FAILED, which reads "
         "as 'retry this'. Add them to _SKIP_REASONS.")
+
+
+def test_the_vitals_line_never_offers_two_people_or_two_commands():
+    """The agent is told a parenthesised command IS its next move and that
+    answering outranks everything. Both instructions are void the moment the line
+    beneath them names a second target, and this has now happened twice: the food
+    route against talk-to, then waiting against talk-to - 24 of 63 lines, over a
+    half hour in which four agents opened threads with us and we answered none."""
+    source = CLIENT.read_text()
+    body = source[source.index("def _vitals_line"):]
+    body = body[:body.index("\ndef _out")]
+    assert "elif not waiting:" in body, (
+        "talk-to must yield to somebody who is owed a reply")
+    assert "and not food_route" in body, (
+        "the route must yield to a hungry agent's way to food")

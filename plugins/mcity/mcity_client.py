@@ -819,7 +819,20 @@ def _vitals_line():
             route = _cached_route()
             if route:
                 parts.append(route)
-        else:
+        elif not waiting:
+            # Never while somebody is owed a reply. This line carried
+            # "waiting=1 (answer user-agent-637f...)" and
+            # "talk-to=user-agent-e112... who=Spy,hacker" at the same time - two
+            # different people named in one breath, the second with the richer
+            # description - on 24 of the 63 lines where anybody was waiting. Over
+            # the same half hour four agents opened threads with us and we
+            # answered none of them.
+            #
+            # The mission says answering outranks everything, and it is not the
+            # mission's job to overcome a contradiction the harness put on the
+            # line beneath it. Same rule the food route already follows: one
+            # person named per turn.
+            #
             # Name somebody. Step five used to require an mcity-agents read and a
             # row to be picked out of it; the agent read the roster and then went
             # back to work instead, every window. This is the same move that
