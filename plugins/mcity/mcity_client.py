@@ -474,6 +474,7 @@ _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
            "status": None, "busy_for": None, "engaged": False, "space_kind": None}
 _SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
 _SELF_ENGAGED_MIN_S = 3        # below this the action ends before the refusal helps
+_THREAD_CONFIRM_RETRY_S = 2.0  # the world creates the thread just after accepting
 _last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
 VITALS_REFRESH_MS = 30000      # re-read vitals at most this often
@@ -3959,7 +3960,15 @@ def speak(arg=None):
     # activity six and eleven minutes old, four messages in one thread, nothing
     # owed by us. Confirm from the threads instead when the events say nothing.
     if sent.get("agent_id") and "MCITY-SPEAK-PENDING" in (result or ""):
+        # Look twice. The world creates the thread a moment after it accepts the
+        # message, so a single check right after the confirm window can run
+        # before the thread list has caught up - which is why every delivered
+        # message stayed PENDING while the thread list plainly showed threads
+        # appearing with exactly one message in them, ours.
         landed = _thread_shows_our_message(sent["agent_id"], submitted_at)
+        if not landed:
+            time.sleep(_THREAD_CONFIRM_RETRY_S)
+            landed = _thread_shows_our_message(sent["agent_id"], submitted_at)
         if landed:
             result = _line("SPEAK", "OK", (("outcome", "delivered"),
                                            ("confirmed-by", "thread")))

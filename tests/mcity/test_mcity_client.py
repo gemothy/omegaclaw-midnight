@@ -2620,3 +2620,30 @@ def test_a_delivery_is_confirmed_on_this_worlds_thread_shape(control):
     control.force("/api/agents/agent-1/threads", 200, json.dumps(landed).encode())
     result = _check(mc.speak("agent-2 the shipment cleared an hour ago"))
     assert "MCITY-SPEAK-OK" in result and "confirmed-by=thread" in result, result
+
+
+def test_a_delivery_that_appears_late_is_still_confirmed(control, monkeypatch):
+    """The world creates the thread a moment after accepting the message, so a
+    single check right after the confirm window runs too early - which is why
+    delivered messages stayed PENDING while the thread list showed threads
+    appearing with exactly one message in them, ours."""
+    monkeypatch.setattr(mc, "_THREAD_CONFIRM_RETRY_S", 0.01)
+    control.on_action = lambda action: []
+    empty = {"threads": []}                                   # not there yet
+    landed = {"threads": [{"threadId": "t1", "initiatorAgentId": "agent-1",
+                           "recipientAgentId": "agent-2",
+                           "threadLastMessageAtMs": mc._now_ms() + 5000}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(empty).encode())
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(landed).encode())
+    result = _check(mc.speak("agent-2 hello there friend"))
+    assert "MCITY-SPEAK-OK" in result and "confirmed-by=thread" in result, result
+
+
+def test_two_looks_and_no_thread_stays_pending(control, monkeypatch):
+    """It must still never invent a delivery."""
+    monkeypatch.setattr(mc, "_THREAD_CONFIRM_RETRY_S", 0.01)
+    control.on_action = lambda action: []
+    for _ in range(3):
+        control.force("/api/agents/agent-1/threads", 200,
+                      json.dumps({"threads": []}).encode())
+    assert "MCITY-SPEAK-PENDING" in _check(mc.speak("agent-2 hello there"))
