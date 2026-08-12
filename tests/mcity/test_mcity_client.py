@@ -2818,3 +2818,21 @@ def test_no_wait_is_advertised_once_the_gap_has_passed(control):
     mc._cfg["action_min_gap"] = 0.0
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
     assert "action-in=" not in (mc._vitals_line() or "")
+
+
+def test_a_read_is_available_again_within_a_few_seconds(control):
+    """Fifteen seconds was set to break a fixation on mcity-recent-events, which
+    is retired now. The world allows 900 reads a minute against 12 writes, so
+    reading is nearly free - and with the agent deciding every two seconds and
+    able to act on only a third of its turns, a long cooldown left it nothing
+    legal to do with the rest: filler was 48 of 104 decisions."""
+    assert mc._READ_COOLDOWN_MS <= 5000
+    _check(mc.threads())
+    mc._read_at["THREADS"] = mc._now_ms() - (mc._READ_COOLDOWN_MS + 100)
+    assert _check(mc.threads()).startswith("MCITY-THREADS-OK")
+
+
+def test_the_same_read_back_to_back_is_still_skipped(control):
+    """The cooldown still has to stop the same read twice in a row."""
+    _check(mc.threads())
+    assert _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=just_read")

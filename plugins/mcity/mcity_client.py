@@ -465,7 +465,13 @@ _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 # then mcity-work, and this window mcity-recent-events at 91 of 115 commands.
 # This addresses the class rather than the instance, and unlike the repeat
 # suppression it runs BEFORE the request, so it saves the world call too.
-_READ_COOLDOWN_MS = 15000
+# Fifteen seconds was set to break a fixation on mcity-recent-events, which is
+# now retired. It is far stricter than the world asks: nginx allows 900 reads a
+# minute against 12 writes, so reading is nearly free. With the faster model the
+# agent decides about every two seconds and can only act on a third of its turns,
+# and a cooldown this long left it nothing legal to do with the rest - filler was
+# 48 of 104 decisions. Five seconds still stops the same read twice in a row.
+_READ_COOLDOWN_MS = 5000
 _read_at = {}
 _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
