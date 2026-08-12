@@ -557,6 +557,7 @@ def reset_runtime_state():
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
     for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES, _WHO,
+                  _MET,
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
@@ -834,6 +835,9 @@ def _vitals_line():
                 parts.append(f"talk-to={who}")
                 if _WHO.get(who):
                     parts.append(f"who={_WHO[who]}")
+                met = _met_before(who)
+                if met:
+                    parts.append(met)
                 # How long since anybody heard from us. Without it the agent
                 # answered "No action needed" 133 times in twenty minutes:
                 # nothing was owed, the money was enough and work was retired, so
@@ -1649,6 +1653,50 @@ def _entry_reachable(entry):
 # wrong tool - refusing near-duplicate messages has silenced this agent twice.
 _WHO = {}
 _WHO_CAP = 400
+
+
+# id -> (times we have spoken to them, when we last did).
+#
+# The store has recorded this from the first day - mark_spoken writes
+# spoke_count, last_spoken_ms and last_spoken_text on every confirmed delivery -
+# and nothing ever showed it to the agent. It was read back only to rank who to
+# greet next. So every encounter began from nothing and the agent introduced
+# itself again: "Gem Ozan here", "Gem here", "Central here, Gem", to people it
+# had already met minutes earlier.
+#
+# The world cannot help with this. Its threads close after exactly sixty seconds,
+# so continuity across two encounters is ONLY what we remember ourselves - which
+# is the one thing a persistent harness is for.
+#
+# Deliberately the COUNT and the AGE, not the text of what was said. This agent
+# imitates whatever sits in its context: showing it its own last message is how
+# you get that message sent again, which is the failure this is meant to end.
+_MET = {}
+_MET_CAP = 400
+
+
+def _note_met(agent_id, count, last_ms):
+    """Remember that we have met this person before, from the roster store."""
+    try:
+        if not agent_id or not count:
+            return
+        if agent_id not in _MET and len(_MET) >= _MET_CAP:
+            _MET.pop(next(iter(_MET)), None)
+        _MET[agent_id] = (int(count), int(last_ms or 0))
+    except Exception:      # noqa: BLE001
+        return
+
+
+def _met_before(agent_id):
+    """met-before= for the vitals line, or None for a stranger."""
+    entry = _MET.get(agent_id)
+    if not entry or not entry[0]:
+        return None
+    count, last_ms = entry
+    if last_ms and last_ms > 0:
+        mins = int((_now_ms() - last_ms) / 60000)
+        return f"met-before={count}x last={mins}m-ago"
+    return f"met-before={count}x"
 
 
 def _note_who(agent_id, entry):
@@ -2932,6 +2980,8 @@ def agents():
     # the live payload rather than the store, then nearest-first.
     by_id = {entry["id"]: entry for entry in roster if entry["id"]}
     spoke = {row.agent_id: row.spoke_count for row in ranked}
+    for row in ranked:
+        _note_met(row.agent_id, row.spoke_count, row.last_spoken_ms)
     ranked_ids = [row.agent_id for row in ranked if row.agent_id in by_id]
     ranked_set = set(ranked_ids)
     rest = [entry for entry in roster if entry["id"] not in ranked_set]

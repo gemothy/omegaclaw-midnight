@@ -3283,3 +3283,46 @@ def test_an_anonymous_neighbour_adds_nothing_to_the_line():
 def test_the_who_table_cannot_grow_without_bound():
     """284 agents live in this city and the roster is read every few seconds."""
     assert mc._WHO_CAP <= 1000
+
+
+def test_the_agent_is_told_it_has_met_this_person_before():
+    """The store has recorded this from the first day - mark_spoken writes
+    spoke_count and last_spoken_ms on every confirmed delivery - and nothing ever
+    showed it to the agent. So every encounter began from nothing and it
+    introduced itself again: "Gem Ozan here", "Gem here", "Central here, Gem", to
+    people it had met minutes earlier. The world cannot help: its threads close
+    after sixty seconds, so continuity is only what we remember ourselves."""
+    now = mc._now_ms()
+    entry = mc._parse_agent({"id": "user-agent-holly", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "name": "Holly", "profession": "hacker",
+                             "activeAction": None})
+    mc._note_can_speak(entry, now)
+    mc._note_met("user-agent-holly", 3, now - 120000)
+    mc._REACHABLE.update({"n": 1, "at_ms": now})
+    mc._VITALS.update({"at_ms": now, "hunger": "normal(20)", "items": "crystal=5"})
+    line = mc._vitals_line() or ""
+    assert "met-before=3x last=2m-ago" in line, line
+
+
+def test_a_stranger_is_not_announced_as_an_old_friend():
+    now = mc._now_ms()
+    entry = mc._parse_agent({"id": "user-agent-new", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "name": "New", "profession": "trader",
+                             "activeAction": None})
+    mc._note_can_speak(entry, now)
+    mc._REACHABLE.update({"n": 1, "at_ms": now})
+    mc._VITALS.update({"at_ms": now, "hunger": "normal(20)", "items": "crystal=5"})
+    assert "met-before" not in (mc._vitals_line() or "")
+
+
+def test_what_we_said_before_is_never_put_back_in_context():
+    """This agent imitates whatever sits in its context; showing it its own last
+    message is how you get that message sent again, which is the failure this is
+    meant to end."""
+    mc._note_met("user-agent-x", 2, mc._now_ms())
+    assert "last-said" not in (mc._met_before("user-agent-x") or "")
+    source = pathlib.Path(mc.__file__).read_text()
+    window = source[source.index("def _note_met"):source.index("def _note_who")]
+    assert "last_spoken_text" not in window
