@@ -2902,3 +2902,41 @@ def test_without_the_field_the_old_guess_still_applies():
     assert mc._VITALS["engaged"] is True
     mc._harvest_vitals({"agent": {"activeAction": None}})
     assert mc._VITALS["engaged"] is False
+
+
+def test_a_later_look_at_the_roster_beats_an_older_refusal():
+    """One agent was refused as unreachable 74 times in twenty-five minutes while
+    talk-to= went on naming them: the vitals line asked the roster and the speak
+    path asked the memory, and a 'gone' from half an hour earlier outranked a
+    reading two seconds old. Nothing was delivered in that window at all."""
+    now = mc._now_ms()
+    mc._REFUSED[("gone", "user-agent-back")] = now - 60000
+    mc._CAN_SPEAK["user-agent-back"] = (True, now)
+    assert mc._can_be_reached("user-agent-back") is True
+
+
+def test_an_older_look_at_the_roster_does_not_beat_a_fresh_refusal():
+    """The rule is which evidence is newer, not which one we prefer."""
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-x"] = (True, now - 60000)
+    mc._REFUSED[("asleep", "user-agent-x")] = now
+    assert mc._can_be_reached("user-agent-x") is False
+
+
+def test_the_roster_cannot_overturn_a_closed_conversation():
+    """canSpeak answers whether somebody is awake and open. It says nothing about
+    thread state, and 'conversation recently closed' comes back however awake
+    they are - so this refusal is not the roster's to overturn."""
+    now = mc._now_ms()
+    mc._REFUSED[("closed", "user-agent-shut")] = now - 60000
+    mc._CAN_SPEAK["user-agent-shut"] = (True, now)
+    assert mc._can_be_reached("user-agent-shut") is False
+
+
+def test_vitals_never_names_a_target_the_speak_path_refuses():
+    """The agent is told the parenthesised command is checked and not a
+    suggestion, so naming somebody it will then refuse spends the turn twice."""
+    import inspect
+    body = inspect.getsource(mc._vitals_line)
+    assert "_can_be_reached(who) is False" in body, (
+        "talk-to= must be filtered by the verdict the speak path uses")

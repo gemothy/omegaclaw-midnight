@@ -775,7 +775,13 @@ def _vitals_line():
             # back to work instead, every window. This is the same move that
             # retired the threads and roster polls: state the answer, delete the
             # lookup.
+            # Checked against the same verdict the speak path uses. These were
+            # two different answers to one question - the roster scan named
+            # somebody and _can_be_reached refused them - and the agent obeyed
+            # the vitals line, as it is told to, straight into a refusal.
             who = _best_person_to_talk_to()
+            if who and _can_be_reached(who) is False:
+                who = None
             if who:
                 parts.append(f"talk-to={who}")
                 # How long since anybody heard from us. Without it the agent
@@ -1605,15 +1611,37 @@ def _note_can_speak(entry, at_ms=None):
         pass
 
 
+# A refusal about the PERSON is superseded by a later look at the roster, which
+# reports exactly the same thing: asleep is what canSpeak answers, and gone means
+# the world did not know the id, so finding them listed says it does now. A
+# refusal about the CONVERSATION is not - the roster says nothing about thread
+# state, and "conversation recently closed" comes back however awake somebody is.
+_REFUSALS_THE_ROSTER_CAN_OVERTURN = ("gone", "asleep")
+
+
 def _can_be_reached(agent_id):
-    """True / False / None (unknown), from the freshest evidence we hold."""
-    if any(_refused_ago_ms(kind, agent_id) is not None
-           for kind in ("gone", "closed", "asleep")):
+    """True / False / None (unknown), from the freshest evidence we hold.
+
+    It did not do what that sentence says. Refusals were consulted first and
+    unconditionally, so a "gone" from twenty-nine minutes ago beat a roster
+    reading two seconds old - and one agent was refused as unreachable 74 times
+    in twenty-five minutes while talk-to= went on naming them, because the vitals
+    line asks the roster and this asked the memory. Nothing was delivered in that
+    window at all.
+
+    Evidence has a timestamp. The newer one wins."""
+    if _refused_ago_ms("closed", agent_id) is not None:
         return False
+    refused = [ago for kind in _REFUSALS_THE_ROSTER_CAN_OVERTURN
+               if (ago := _refused_ago_ms(kind, agent_id)) is not None]
     known = _CAN_SPEAK.get(agent_id)
-    if known and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
-        return known[0]
-    return None
+    seen_ago = (_now_ms() - known[1]) if known else None
+    fresh = seen_ago is not None and seen_ago <= _CAN_SPEAK_TTL_MS
+    if refused:
+        if fresh and seen_ago < min(refused):
+            return known[0]
+        return False
+    return known[0] if fresh else None
 
 
 def _next_action_command():
