@@ -759,6 +759,23 @@ def _vitals_line():
     if _now_ms() < _worksite_busy_until_ms:
         left = int((_worksite_busy_until_ms - _now_ms()) / 1000) + 1
         parts.append(f"work=paused({left}s)")
+    # Hunger outranks company, and it was the one step with no command on this
+    # line. The agent has been hungry for hours - value 30 to 77 - holding
+    # crystal=113950 against a fifty crystal meal, and _rich_enough only says
+    # "enough" once hunger reads normal, so earned=keep-going kept sending it to
+    # the CRYPTO merchant to earn more of what it already had. Its live action
+    # was literally "trade 100 meme_coin" walking to central,100,86 while the
+    # food outlet stood at central,84,17.
+    #
+    # The way to food existed but only inside the mcity-eat refusal, which the
+    # agent sees only if it happens to call eat. Every other step of the mission
+    # names its command here, on the line read every turn. This one did not.
+    food_route = None
+    if (_VITALS.get("hunger") or "").lower().startswith(("hungry", "starving")) \
+            and _holding_only_inedible():
+        food_route = _way_to_food()
+        if food_route:
+            parts.append(food_route)
     # reachable= removes the reason to poll the roster, exactly as waiting=
     # removed the reason to poll the thread list.
     if (_REACHABLE["n"] is not None
@@ -769,7 +786,10 @@ def _vitals_line():
         # calling mcity-agents entirely - as instructed - so the only code path
         # that offered a route was a work-backoff refusal, and for four deploys
         # running it saw no route at all while nine free agents stood in central.
-        if _REACHABLE["n"] == 0:
+        if _REACHABLE["n"] == 0 and not food_route:
+            # Not while a food command is already on this line. The agent is told
+            # a parenthesised command is the next move, so offering two makes the
+            # instruction meaningless and it picks whichever it likes.
             route = _cached_route()
             if route:
                 parts.append(route)
@@ -786,7 +806,7 @@ def _vitals_line():
             who = _best_person_to_talk_to()
             if who and _can_be_reached(who) is False:
                 who = None
-            if who:
+            if who and not food_route:
                 parts.append(f"talk-to={who}")
                 # How long since anybody heard from us. Without it the agent
                 # answered "No action needed" 133 times in twenty minutes:

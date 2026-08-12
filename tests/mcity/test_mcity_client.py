@@ -3153,3 +3153,38 @@ def test_a_freed_id_leaves_the_poison_list():
     mc._REFUSED[("asleep", "user-agent-woke")] = now - 60000
     mc._CAN_SPEAK["user-agent-woke"] = (True, now)
     assert "user-agent-woke" not in mc.context_poison()
+
+
+def test_the_vitals_line_names_the_way_to_food():
+    """The agent has been hungry for hours - value 30 to 77 - holding
+    crystal=113950 against a fifty crystal meal. _rich_enough only says 'enough'
+    once hunger reads normal, so earned=keep-going kept sending it to the CRYPTO
+    merchant to earn more of what it already had: its live action was literally
+    'trade 100 meme_coin' walking to central,100,86 while the food outlet stood at
+    central,84,17. Every other step of the mission names its command on this line."""
+    mc._note_food_source("to_go_food", "central,84,17",
+                         "crystal 50 Central Meat Outlet", "Central Meat Outlet")
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(77)",
+                       "items": "crystal=113950 meme_coin=17187",
+                       "space": "bison-valley"})
+    line = mc._vitals_line()
+    assert "(mcity-move-area _quote_central_quote_)" in line, line
+
+
+def test_a_fed_agent_is_not_sent_shopping():
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(10)",
+                       "items": "crystal=113950", "space": "bison-valley"})
+    line = mc._vitals_line() or ""
+    assert "mcity-trade" not in line and "Meat Outlet" not in line
+
+
+def test_hunger_does_not_put_two_commands_on_one_line():
+    """The agent is told a parenthesised command IS the next move, so offering two
+    makes the instruction meaningless and it picks whichever it likes."""
+    mc._note_food_source("to_go_food", "central,84,17",
+                         "crystal 50 Central Meat Outlet", "Central Meat Outlet")
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "starving(90)",
+                       "items": "crystal=113950", "space": "bison-valley"})
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
+    line = mc._vitals_line() or ""
+    assert line.count("(mcity-") <= 1, line
