@@ -2530,3 +2530,37 @@ def test_a_route_is_recomputed_after_the_agent_moves(control):
     control.force("/api/skill/agents/agent-1/areas", 200,
                   json.dumps({"areas": []}).encode())
     assert mc._cached_route() != first
+
+
+def test_a_closed_conversation_is_not_spoken_into(control):
+    """Every one of the agent's 50 threads is closed with reason stale_timeout -
+    the world shuts a quiet conversation - and all 20 world speak rejections in
+    one window were 'conversation recently closed'."""
+    closed = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
+                           "threadStatus": "closed",
+                           "threadCloseReason": "stale_timeout",
+                           "preview": "we spoke earlier"}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(closed).encode())
+    _check(mc.threads())
+    assert mc._can_be_reached("agent-2") is False, "learned from the thread list"
+    control.on_action = lambda action: []
+    result = _check(mc.speak("agent-2 are you still there"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
+    assert not control.actions
+
+
+def test_the_close_is_also_learned_from_the_world_refusal(control):
+    seq = itertools.count()
+    control.on_action = lambda action: [
+        event(f"e{next(seq)}", "action_failed", actionKind="speak",
+              targetAgentId="user-agent-abc",
+              reason="conversation recently closed 019ff385")]
+    _check(mc.speak("user-agent-abc hello again"))
+    assert mc._can_be_reached("user-agent-abc") is False
+
+
+def test_the_cooldown_expires_so_people_are_not_written_off(control):
+    control.on_action = lambda action: []
+    mc._CLOSED_WITH["user-agent-abc"] = mc._now_ms() - (mc._CLOSED_COOLDOWN_MS + 1000)
+    _check(mc.speak("user-agent-abc hello again"))
+    assert control.actions

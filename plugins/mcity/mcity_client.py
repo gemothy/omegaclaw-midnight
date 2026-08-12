@@ -402,6 +402,12 @@ _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
 # existing, so there is no reason to spend a second call on it.
 _GONE = {}
 _GONE_TTL_MS = 1800000
+# Counterparts whose conversation the world has just closed. Every one of the
+# agent's 50 threads is closed with reason stale_timeout - the world shuts a
+# quiet conversation - and speaking into one comes back "conversation recently
+# closed". So a closed thread means: talk to somebody else for now.
+_CLOSED_WITH = {}
+_CLOSED_COOLDOWN_MS = 600000
 _ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
 # (target, exact words) -> when it was delivered. Repeating yourself verbatim
 # to the same person is the clearest tell of a bot.
@@ -476,8 +482,8 @@ def reset_runtime_state():
 
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
-    for cache in (_CAN_SPEAK, _ASLEEP, _GONE, _LAST_READ, _SAID, _AWAKE_PLACES,
-                  _inbound, _my_texts):
+    for cache in (_CAN_SPEAK, _ASLEEP, _GONE, _CLOSED_WITH, _LAST_READ, _SAID,
+                  _AWAKE_PLACES, _inbound, _my_texts):
         cache.clear()
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
@@ -1501,6 +1507,9 @@ def _can_be_reached(agent_id):
     """True / False / None (unknown), from the freshest evidence we hold."""
     gone = _GONE.get(agent_id)
     if gone and (_now_ms() - gone) <= _GONE_TTL_MS:
+        return False
+    closed = _CLOSED_WITH.get(agent_id)
+    if closed and (_now_ms() - closed) <= _CLOSED_COOLDOWN_MS:
         return False
     at = _ASLEEP.get(agent_id)
     if at and (_now_ms() - at) <= _ASLEEP_TTL_MS:
@@ -2987,6 +2996,10 @@ def threads(_ignored=None):
         # those threads are the ones that survive the budget, exactly like the
         # ACTION REQUIRED imperative inside mcity-thread.
         mine = _thread_mine(item, own_id, sender)
+        status = _text(_get(item, "threadStatus"))
+        if status and status != "open" and len(others) == 1 and ID_RE.match(others[0]):
+            # Learned before spending a call on it.
+            _CLOSED_WITH.setdefault(others[0], _now_ms())
         asleep = False
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
             # False only when the world has actually said so; unknown counts as
@@ -3944,7 +3957,10 @@ def speak(arg=None):
         # A fourth refusal: "target only talks to friends". Social, not
         # temporal, so it will not clear on its own - all the more reason not to
         # spend another turn on that person.
-        if sent.get("agent_id") and "target not found" in lowered:
+        if sent.get("agent_id") and "conversation recently closed" in lowered:
+            _CLOSED_WITH[sent["agent_id"]] = _now_ms()
+            _prune(_CLOSED_WITH, _CLOSED_COOLDOWN_MS, lambda v: v)
+        elif sent.get("agent_id") and "target not found" in lowered:
             _GONE[sent["agent_id"]] = _now_ms()
             _prune(_GONE, _GONE_TTL_MS, lambda v: v)
         elif sent.get("agent_id") and ("target is sleeping" in lowered
