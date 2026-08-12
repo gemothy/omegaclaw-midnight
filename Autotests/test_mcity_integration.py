@@ -1000,3 +1000,19 @@ def test_the_work_skill_is_not_offered_while_the_money_is_not_needed():
     assert "add-skill mcity-work" not in metta
     assert "(= (mcity-work)" in metta, "the binding stays"
     assert "mcity-harvest" in metta, "gathering is still available if it must earn"
+
+
+def test_the_launcher_and_its_reasoning_name_the_same_model():
+    """The model choice was reversed on measurement - a dense 32B for a MoE - and
+    the header explains why. A header that names a different model than the one
+    it launches is how the next person inherits a decision without its evidence."""
+    import pathlib
+    import re
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    launcher = (repo / "bin" / "vllm-mcity-up").read_text()
+    served = re.search(r'^MODEL="\$\{VLLM_MODEL:-([^}]+)\}"', launcher, re.M)
+    assert served, "the launcher must name a default model"
+    model = served.group(1)
+    header = launcher.split("set -euo pipefail")[0]
+    assert model in header, f"the header does not explain why it serves {model}"
+    assert "Revert with:" in header, "a reversed decision must say how to reverse it"

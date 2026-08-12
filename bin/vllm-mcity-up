@@ -1,11 +1,28 @@
 #!/usr/bin/env bash
 # Launch the vLLM backend that serves Midnight City agents (OmegaClaw talks to this).
 #
-# Model: nvidia/Qwen3-32B-FP4 - DENSE 32B, NVFP4, GQA with 8 KV heads. ~18GB of
-# weights. Swapped in from the 35B-A3B MoE because that model has only ~3B ACTIVE
-# parameters: with thinking off it was doing a five-branch conditional procedure on
-# a 3B forward pass and failing it. A dense 32B spends ~10x the compute per token
-# in the forward pass, so it needs no chain-of-thought tax to reason.
+# Model: nvidia/Qwen3.6-35B-A3B-NVFP4 - MoE, ~3B active per token.
+#
+# This reverses an earlier decision, on measurement. The dense Qwen3-32B-FP4 was
+# chosen when a Qwen3.5-35B-A3B could not follow the five-branch procedure on a 3B
+# forward pass with thinking off. Two things changed. The model generation did -
+# 3.6 is not 3.5 - and, more importantly, the harness stopped asking the model to
+# derive anything: the vitals line now states who is waiting, who can be reached,
+# whether the money is enough, how long it has been silent, and the exact command
+# to run. What is left is short, and a 3B forward pass is enough for it.
+#
+# Measured head to head on the SAME live 19k-character prompt:
+#
+#   dense Qwen3-32B-FP4    6.5-7.4 s per decision    6-9 tok/s
+#   this model            0.3-1.3 s per decision     ~21 tok/s
+#
+# and over a six-minute live window: cadence 10s -> 3.7s, speak attempts 2 -> 23,
+# and 24 distinct in-character messages rather than the same greeting repeated.
+# Generation is what costs, not prefill: a 21k-char prompt prefills in 1.3s, while
+# a fifty-token reply took five seconds on the dense model. Decode is bound by
+# ACTIVE parameters, which is exactly what a MoE reduces.
+#
+# Revert with: VLLM_MODEL=nvidia/Qwen3-32B-FP4 bin/vllm-mcity-up
 #
 # ALIAS: always served as `mcity-agent` as well as its real name. OmegaClaw asks for
 # the alias, so swapping the model here never requires touching the agent launcher.
@@ -28,8 +45,8 @@
 # continuously at ~11 tok/s and took about three minutes per decision - roughly two
 # thousand tokens of silent deliberation to emit one command. Midnight City moves in
 # real time and people wait in threads, so a three-minute turn is not a slow agent, it
-# is an absent one. The dense 32B was chosen precisely so it would not need the
-# chain-of-thought tax to reason (see above), and it does not.
+# is an absent one. Neither model needs the chain-of-thought tax here, because the
+# harness states the facts the procedure turns on rather than asking for them.
 #
 # --default-chat-template-kwargs is preferred over the older approach of passing
 # --chat-template at a hand-edited copy of the template with the default inverted:
@@ -49,19 +66,20 @@
 # 0.85 (101.7 GiB) serving the 122B and repeatedly triggered system-wide OOM cascades
 # that killed gnome-shell, NetworkManager, containerd and the whole desktop session.
 # 0.42 = 50.3 GiB, which leaves ~69 GiB for the OS and the nexus-* containers.
-# Higher than the MoE needed: this model keeps a real KV cache on all 64 layers,
-# where the MoE kept one on only 10 of 40.
+# Kept at 0.42 across the model change rather than tuned down: it is a known-good
+# number on this box, and the failure it guards against took the whole desktop
+# with it.
 set -euo pipefail
 
 NAME="${VLLM_NAME:-vllm-mcity}"
 IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:latest}"
-MODEL="${VLLM_MODEL:-nvidia/Qwen3-32B-FP4}"
+MODEL="${VLLM_MODEL:-nvidia/Qwen3.6-35B-A3B-NVFP4}"
 PORT="${VLLM_PORT:-8000}"
 GPU_UTIL="${VLLM_GPU_UTIL:-0.42}"
 MAX_LEN="${VLLM_MAX_LEN:-32768}"
 MAX_SEQS="${VLLM_MAX_SEQS:-4}"
-# Kept from the MoE config: harmless here (this model has standard attention, so the
-# Mamba align-mode floor does not apply) and it keeps chunked prefill chunks large.
+# Originally added for a Mamba-attention model's align-mode floor; harmless here and
+# it keeps chunked-prefill chunks large.
 MAX_BATCHED="${VLLM_MAX_BATCHED:-4096}"
 # Hard cgroup backstop so a runaway allocation can never take the machine down again.
 MEM_LIMIT="${VLLM_MEM_LIMIT:-56g}"
