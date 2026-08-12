@@ -3058,3 +3058,22 @@ def test_an_unknown_inventory_does_not_block_eating(control):
     before = len(control.actions)
     _check(mc.eat())
     assert len(control.actions) > before
+
+
+def test_a_speak_does_not_block_the_agent_for_the_full_budget():
+    """This loop blocks the whole agent. With a third of turns carrying an action,
+    an eight second budget cost about two and a half seconds of every decision
+    against 0.84s of actual model time - and every speak came back PENDING anyway,
+    because the world reports it in_progress for longer than we will ever wait."""
+    assert mc._SPEAK_CONFIRM_TIMEOUT < mc.DEFAULT_CONFIRM_TIMEOUT
+    source = pathlib.Path(mc.__file__).read_text()
+    assert 'if verb == "SPEAK":' in source and "_SPEAK_CONFIRM_TIMEOUT" in source
+
+
+def test_only_speak_gives_up_early():
+    """A move or a trade has no deferred confirmation, and theirs is what keeps
+    already_here and the district guards honest."""
+    source = pathlib.Path(mc.__file__).read_text()
+    window = source[source.index("budget = float(_c(\"confirm_timeout\""):]
+    window = window[:window.index("deadline =")]
+    assert "MOVE" not in window and "TRADE" not in window

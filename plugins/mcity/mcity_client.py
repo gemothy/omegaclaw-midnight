@@ -102,6 +102,7 @@ USER_AGENT = "OmegaClaw-mcity/1.0"
 DEFAULT_GATEWAY_URL = "http://localhost:8080"
 DEFAULT_HTTP_TIMEOUT = 12.0        # seconds, per request
 DEFAULT_CONFIRM_TIMEOUT = 8.0      # seconds, action outcome polling budget
+_SPEAK_CONFIRM_TIMEOUT = 2.0       # speaks settle on the next thread read
 CONFIRM_POLL_INTERVAL = 1.0        # seconds
 RECENT_EVENT_LIMIT = 100
 DEFAULT_MAX_RESULT_CHARS = 2000
@@ -3590,6 +3591,18 @@ def _submit(partial, verb):
         _action_count += 1
 
     budget = float(_c("confirm_timeout", DEFAULT_CONFIRM_TIMEOUT))
+    # A speak does not need the full budget any more. The world reports it
+    # in_progress for longer than we are ever willing to wait - every speak came
+    # back PENDING - and since the previous commit the next thread read settles
+    # it for free. So stop paying for a confirmation that has already moved
+    # elsewhere: this loop blocks the whole agent, and at a third of turns
+    # carrying an action an eight second budget was costing about two and a half
+    # seconds of every decision, against 0.84s of actual model time.
+    #
+    # Only SPEAK. A move or a trade has no deferred path, and their confirmation
+    # is what keeps already_here and the district guards honest.
+    if verb == "SPEAK":
+        budget = min(budget, _SPEAK_CONFIRM_TIMEOUT)
     deadline = time.monotonic() + budget
     checked = 0
     progress = None
