@@ -3127,3 +3127,29 @@ def test_a_crypto_merchant_is_not_a_meal():
     mc._note_food_source("crystal", "central,101,86",
                          "meme_coin 1 Central Crypto Merchant", "Crypto")
     assert mc._way_to_food() is None
+
+
+def test_a_rejected_trade_argument_stops_being_an_exemplar(control):
+    """The harness promoted (mcity-trade "crystal 50 Central Meat Outlet") thirty
+    times while the agent emitted "meme_coin 15 Central Crypto Merchant" and the
+    invented "meal-kit 1 Central Crypto Merchant", never once the command it was
+    handed. It takes its arguments from its own history, and each rejection wrote
+    another copy of itself into the context read next turn."""
+    mc._remember_refusal("arguments", ("TRADE", "meal-kit 1 Central Crypto Merchant"))
+    assert "meal-kit 1 Central Crypto Merchant" in mc.context_poison()
+
+
+def test_poison_still_carries_the_ids_it_always_did():
+    """The rename must not quietly drop what the old name did."""
+    now = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-out")] = now
+    assert "user-agent-out" in mc.context_poison()
+
+
+def test_a_freed_id_leaves_the_poison_list():
+    """A roster reading that overturns a refusal frees the id here in the same
+    moment, because this asks _can_be_reached rather than the refusal table."""
+    now = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-woke")] = now - 60000
+    mc._CAN_SPEAK["user-agent-woke"] = (True, now)
+    assert "user-agent-woke" not in mc.context_poison()

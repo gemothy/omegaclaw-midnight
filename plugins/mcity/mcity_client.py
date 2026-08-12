@@ -419,6 +419,7 @@ _REFUSAL_TTL_MS = {
     "gone": 1800000,
     "closed": 600000,
     "destination": 900000,
+    "arguments": 900000,       # a command whose ARGUMENTS the world threw out
 }
 _REFUSED = {}
 
@@ -1647,22 +1648,31 @@ def _can_be_reached(agent_id):
     return known[0] if fresh else None
 
 
-def currently_unreachable_ids():
-    """Ids the world will not accept a message for right now.
+def context_poison():
+    """Strings whose presence in a remembered turn means that turn teaches a
+    mistake, for the history projection to drop.
 
-    Exported for the history projection. One agent was refused 58 times in six
-    minutes on a single id while talk-to= named somebody else the whole time: the
-    agent takes its targets from its own recent history, and every refusal wrote
-    another line naming that id into the history it reads next turn. The model
-    was doing exactly what its context taught it.
+    Was currently_unreachable_ids, which only ever held agent ids. The same
+    failure then arrived wearing different clothes: the agent invented trade
+    arguments out of its own rejected history while the harness handed it the
+    correct command thirty times. An id the world will not deliver to and an
+    argument the world threw out are the same thing to a model reading its own
+    transcript for a pattern - both are exemplars of something that does not
+    work, and neither is outvoted by instructions.
 
-    Goes through _can_be_reached rather than the refusal table directly, so a
-    roster reading that overturns a refusal frees the id here too."""
-    ids = set()
+    Goes through _can_be_reached for ids rather than the refusal table, so a
+    roster reading that overturns a refusal frees the id here in the same moment.
+    """
+    poison = set()
     for kind in ("gone", "closed", "asleep"):
-        ids |= _refused_keys(kind)
-    return frozenset(i for i in ids
-                     if isinstance(i, str) and _can_be_reached(i) is False)
+        for who in _refused_keys(kind):
+            if isinstance(who, str) and _can_be_reached(who) is False:
+                poison.add(who)
+    for key in _refused_keys("arguments"):
+        if (isinstance(key, tuple) and len(key) == 2
+                and _refused_ago_ms("arguments", key) is not None):
+            poison.add(key[1])
+    return frozenset(poison)
 
 
 def _next_action_command():
@@ -4569,6 +4579,19 @@ def trade(arg=None):
                 "itemId": item_id,
                 "quantity": quantity}, None
     result = _mutate("TRADE", build)
+    # Remember the exact argument string the world threw out. The agent takes its
+    # arguments from its own history, and a rejected trade writes another copy of
+    # itself into the context read next turn: the harness promoted
+    # (mcity-trade "crystal 50 Central Meat Outlet") thirty times while the agent
+    # emitted "meme_coin 15 Central Crypto Merchant" and the invented "meal-kit 1
+    # Central Crypto Merchant", never once the command it was handed.
+    #
+    # This is the failure rankedHistory was written for - its own docstring
+    # records a tail holding thirteen copies of a failing trade, "so every
+    # exemplar in context was wrong". That fix filters by command NAME. These are
+    # arguments, and they needed the same treatment.
+    if "MCITY-TRADE-FAILED" in (result or "") and _norm_arg(arg):
+        _remember_refusal("arguments", ("TRADE", _norm_arg(arg)))
     if fixups:
         was, now, count = fixups[-1]
         result = _out(f"{result}\ncorrected=you named {_plain(was)}, which is what "

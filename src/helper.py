@@ -479,11 +479,12 @@ def _is_idle_report(block, commands):
 
 
 def _unreachable_ids():
-    """Ask the mcity client which ids are currently refused. Never raises and
-    never blocks a projection: with no client loaded this is simply empty."""
+    """Ask the mcity client what in a remembered turn teaches a mistake - agent
+    ids the world will not deliver to, and argument strings it threw out. Never
+    raises and never blocks a projection: with no client loaded this is empty."""
     try:
         from plugins.mcity import mcity_client
-        return mcity_client.currently_unreachable_ids()
+        return mcity_client.context_poison()
     except Exception:      # noqa: BLE001
         return frozenset()
 
