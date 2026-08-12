@@ -2940,3 +2940,53 @@ def test_vitals_never_names_a_target_the_speak_path_refuses():
     body = inspect.getsource(mc._vitals_line)
     assert "_can_be_reached(who) is False" in body, (
         "talk-to= must be filtered by the verdict the speak path uses")
+
+
+def test_a_speak_that_lands_late_is_still_a_delivery():
+    """Every speak came back PENDING and confirmed-by=thread never once fired, so
+    the harness believed it had delivered nothing. It had: of fifty threads,
+    eighteen were started by us and sixteen carry our message. The world reported
+    the action still in_progress after eight seconds of polling and the thread it
+    creates does not exist until the action completes."""
+    sent_at = mc._now_ms()
+    mc._note_pending_speak("user-agent-late", sent_at)
+    mc._settle_pending_speaks({"threads": [
+        {"initiatorAgentId": mc._c("agent_id", ""),
+         "recipientAgentId": "user-agent-late",
+         "threadLastMessageAtMs": sent_at + 4000}]})
+    assert not mc._PENDING_SPEAKS, "the thread list vouched for it"
+    assert mc._last_delivered_ms >= sent_at, (
+        "silent-for= reads never-spoken until a delivery lands, and the mission "
+        "tells the agent that silence means speaking is due")
+
+
+def test_an_older_thread_does_not_vouch_for_a_new_message():
+    """This agent holds seven threads with one person and they die after sixty
+    seconds, so 'a thread exists' is not evidence - only movement after we sent."""
+    sent_at = mc._now_ms()
+    mc._note_pending_speak("user-agent-stale", sent_at)
+    mc._settle_pending_speaks({"threads": [
+        {"initiatorAgentId": mc._c("agent_id", ""),
+         "recipientAgentId": "user-agent-stale",
+         "threadLastMessageAtMs": sent_at - 90000}]})
+    assert mc._PENDING_SPEAKS, "an older thread must not confirm a newer message"
+
+
+def test_the_newest_thread_with_that_person_is_the_one_that_counts():
+    """Seven threads, newest last in this payload: taking the first match would
+    read a dead thread and call a delivered message undelivered."""
+    sent_at = mc._now_ms()
+    mc._note_pending_speak("user-agent-many", sent_at)
+    mine = mc._c("agent_id", "")
+    mc._settle_pending_speaks({"threads": [
+        {"initiatorAgentId": mine, "recipientAgentId": "user-agent-many",
+         "threadLastMessageAtMs": sent_at - 120000},
+        {"initiatorAgentId": mine, "recipientAgentId": "user-agent-many",
+         "threadLastMessageAtMs": sent_at + 3000}]})
+    assert not mc._PENDING_SPEAKS
+
+
+def test_a_confirmation_never_fails_the_read_it_rode_in_on():
+    mc._note_pending_speak("user-agent-x", mc._now_ms())
+    mc._settle_pending_speaks({"threads": "not a list at all"})
+    mc._settle_pending_speaks(None)

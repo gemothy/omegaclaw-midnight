@@ -545,6 +545,7 @@ def reset_runtime_state():
     for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES,
                   _inbound, _my_texts, _read_at):
         cache.clear()
+    del _PENDING_SPEAKS[:]
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
     _WAITING.update({"at_ms": 0, "ids": []})
@@ -3095,6 +3096,7 @@ def _own_threads(verb):
     resp = _http("GET", f"/api/agents/{agent}/threads?limit=50")
     if not resp["ok"]:
         return None, _fail_http(verb, resp)
+    _settle_pending_speaks(resp["json"])
     return resp["json"], None
 
 
@@ -3748,6 +3750,66 @@ def exit_building():
     return result
 
 
+# Speaks the world accepted but had not finished when we stopped waiting:
+# [(agent_id, submitted_at_ms)].
+#
+# Every speak came back PENDING and confirmed-by=thread never once fired, so the
+# harness believed it had never delivered anything. It had: of fifty threads,
+# eighteen were started by us and sixteen carry our message. The confirmation was
+# looking too EARLY rather than for too short a time - the world reported the
+# action still in_progress after eight seconds of polling, and the thread it
+# creates does not exist until the action completes, which is after the two
+# seconds the retry waited.
+#
+# The cost was not only that the logs undercounted. _last_delivered_ms is set on
+# a confirmed delivery and nothing else, so silent-for= read never-spoken forever,
+# and the mission tells the agent that any silence over a couple of minutes means
+# speaking is due - which is a fair description of an agent that repeated a
+# variant of the same sentence to the same five people all window.
+#
+# So confirm later instead of longer, and pay nothing for it: every thread read
+# already fetches the list this needs.
+_PENDING_SPEAKS = []
+_PENDING_SPEAK_TTL_MS = 300000     # past this the thread has closed anyway
+
+
+def _note_pending_speak(agent_id, at_ms):
+    _PENDING_SPEAKS.append((agent_id, at_ms))
+    del _PENDING_SPEAKS[:-20]
+
+
+def _settle_pending_speaks(payload):
+    """Mark any pending speak the thread list now vouches for. Never raises: a
+    confirmation must not be able to fail the read it rode in on."""
+    try:
+        if not _PENDING_SPEAKS:
+            return
+        own_id = _c("agent_id", "")
+        newest = {}
+        for item in (_find_list(payload, "threads") or []):
+            if not isinstance(item, dict):
+                continue
+            who = _thread_counterpart(item, own_id)
+            if not who:
+                continue
+            last = _number(_get(item, "threadLastMessageAtMs"), 0, 0, 10 ** 15)
+            # Newest per counterpart, not the first one seen: this agent holds
+            # seven threads with one person and they die after sixty seconds.
+            if last > newest.get(who, 0):
+                newest[who] = last
+        now = _now_ms()
+        still = []
+        for who, at in _PENDING_SPEAKS:
+            if newest.get(who, 0) >= at:
+                globals()["_last_delivered_ms"] = max(_last_delivered_ms, at)
+                continue
+            if now - at <= _PENDING_SPEAK_TTL_MS:
+                still.append((who, at))
+        _PENDING_SPEAKS[:] = still
+    except Exception:      # noqa: BLE001
+        return
+
+
 def _thread_shows_our_message(agent_id, since_ms):
     """True when the thread with this agent has moved since we sent.
 
@@ -4158,6 +4220,9 @@ def speak(arg=None):
         if landed:
             result = _line("SPEAK", "OK", (("outcome", "delivered"),
                                            ("confirmed-by", "thread")))
+        else:
+            # Not refused - just not finished. The next thread read settles it.
+            _note_pending_speak(sent["agent_id"], submitted_at)
     if sent and result.startswith("MCITY-SPEAK-OK") \
             and "outcome=delivered" in result.partition("\n")[0]:
         # Ground the delivery: spoke_count is the anti-greeting-loop counter
