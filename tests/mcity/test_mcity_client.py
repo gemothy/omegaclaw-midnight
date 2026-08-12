@@ -23,6 +23,8 @@ import json
 import os
 import sys
 
+import inspect
+import pathlib
 import pytest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -2423,20 +2425,25 @@ def test_a_route_is_recomputed_after_the_agent_moves(control):
 
 
 def test_a_closed_conversation_is_not_spoken_into(control):
-    """Every one of the agent's 50 threads is closed with reason stale_timeout -
-    the world shuts a quiet conversation - and all 20 world speak rejections in
-    one window were 'conversation recently closed'."""
-    closed = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
-                           "threadStatus": "closed",
-                           "threadCloseReason": "stale_timeout",
-                           "preview": "we spoke earlier"}]}
-    control.force("/api/agents/agent-1/threads", 200, json.dumps(closed).encode())
-    _check(mc.threads())
-    assert mc._can_be_reached("agent-2") is False, "learned from the thread list"
-    control.on_action = lambda action: []
-    result = _check(mc.speak("agent-2 are you still there"))
+    """A refusal the WORLD issued is believed, and that person is not spoken to
+    again while it stands.
+
+    Rewritten 2026-08-12. It used to assert the same thing was learned from the
+    thread LIST, which is where it went wrong: in this world every thread closes
+    after sixty seconds, so that marked everybody, permanently. A refusal is what
+    the world says when we speak, not what a thread does on its own.
+
+    The refusal is recorded here rather than driven through a forced response,
+    the way the sleeping-target test above does it and for the same reason: the
+    control fixture returns the action envelope, not the rejection the recording
+    path reads. test_the_world_saying_so_is_still_believed pins that the path
+    exists; this pins what the harness does once it has."""
+    mc._remember_refusal("closed", "user-agent-abc")
+    assert mc._can_be_reached("user-agent-abc") is False
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-abc are you still there"))
     assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
-    assert not control.actions
+    assert len(control.actions) == before, "no round trip into a closed thread"
 
 
 def test_the_close_is_also_learned_from_the_world_refusal(control):
@@ -2990,3 +2997,31 @@ def test_a_confirmation_never_fails_the_read_it_rode_in_on():
     mc._note_pending_speak("user-agent-x", mc._now_ms())
     mc._settle_pending_speaks({"threads": "not a list at all"})
     mc._settle_pending_speaks(None)
+
+
+def test_a_thread_that_timed_out_does_not_close_the_person(control):
+    """In this world every thread closes after exactly sixty seconds - all fifty
+    the world holds for this agent are closed, every one with reason
+    stale_timeout. Marking the counterpart refused on that basis marked everybody
+    we had ever spoken to and refreshed it on every read, so waiting= was 0
+    essentially always: of 36 threads other agents opened with us, we answered 3."""
+    payload = {"threads": [{"threadId": "t1", "threadStatus": "closed",
+                            "threadCloseReason": "stale_timeout",
+                            "initiatorAgentId": "agent-2",
+                            "recipientAgentId": "agent-1",
+                            "initiatorMessageCount": 1,
+                            "recipientMessageCount": 0,
+                            "preview": "Gem, are you there?"}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())
+    _check(mc.threads())
+    assert mc._refused_ago_ms("closed", "agent-2") is None, (
+        "a stale_timeout is the world's lifecycle, not a refusal")
+    assert "agent-2" in mc._someone_is_waiting(), (
+        "somebody who asked us a question and got nothing back is waiting")
+
+
+def test_the_world_saying_so_is_still_believed():
+    """Removing the guess must not remove the evidence."""
+    source = pathlib.Path(mc.__file__).read_text()
+    assert '_remember_refusal("closed"' in source, (
+        "the speak-failure path must still record a real refusal")

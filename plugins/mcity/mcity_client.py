@@ -3202,10 +3202,21 @@ def threads(_ignored=None):
         # those threads are the ones that survive the budget, exactly like the
         # ACTION REQUIRED imperative inside mcity-thread.
         mine = _thread_mine(item, own_id, sender)
-        status = _text(_get(item, "threadStatus"))
-        if status and status != "open" and len(others) == 1 and ID_RE.match(others[0]):
-            # Learned before spending a call on it.
-            _remember_refusal("closed", others[0], first_only=True)
+        # A closed thread is NOT evidence that this person will refuse us.
+        #
+        # This used to mark the counterpart closed, to learn it before spending a
+        # call. In this world every thread closes after exactly sixty seconds -
+        # all fifty the world holds for this agent are closed, every one with
+        # reason stale_timeout - so it marked EVERY person we had ever spoken to,
+        # and refreshed that mark on every read. waiting= excludes anyone
+        # _can_be_reached calls False, and closed is the one refusal a roster
+        # reading may not overturn, so waiting= was 0 essentially always: of 36
+        # threads other agents opened with us, we answered 3.
+        #
+        # It was guarding against the world's "conversation recently closed"
+        # rejection, which did not appear once in two hours of logs. The world
+        # closing a quiet thread is its normal lifecycle; a refusal is something
+        # the world says when we speak. That path still records it, below.
         asleep = False
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
             # False only when the world has actually said so; unknown counts as
