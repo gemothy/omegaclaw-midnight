@@ -2642,3 +2642,31 @@ def test_a_do_not_disturb_target_is_skipped_before_the_call(control):
     result = _check(mc.speak("user-agent-dnd hello there"))
     assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
     assert not control.actions
+
+
+def test_talk_to_and_the_skip_can_never_disagree(control):
+    """talk-to read _CAN_SPEAK directly while the skip also weighed the gone,
+    asleep and closed-conversation memories, so it kept naming somebody the very
+    next check refused - the fourth time this rule was duplicated into a new
+    caller and drifted."""
+    now = mc._now_ms()
+    for state, agent_id in (("gone", "user-agent-gone"),
+                            ("asleep", "user-agent-asleep"),
+                            ("closed", "user-agent-closed")):
+        mc._CAN_SPEAK[agent_id] = (True, now)      # the cache alone says yes
+    mc._REACHABLE.update({"n": 3, "at_ms": now})
+    mc._GONE["user-agent-gone"] = now
+    mc._ASLEEP["user-agent-asleep"] = now
+    mc._CLOSED_WITH["user-agent-closed"] = now
+    assert mc._best_person_to_talk_to() is None, "none of these can be reached"
+    mc._CAN_SPEAK["user-agent-fine"] = (True, now)
+    assert mc._best_person_to_talk_to() == "user-agent-fine"
+
+
+def test_every_named_person_survives_the_skip(control):
+    """The property that matters: whoever talk-to names must be sendable."""
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-fine"] = (True, now)
+    mc._REACHABLE.update({"n": 1, "at_ms": now})
+    who = mc._best_person_to_talk_to()
+    assert who and mc._can_be_reached(who) is True

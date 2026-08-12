@@ -1708,6 +1708,13 @@ def _best_person_to_talk_to():
         for agent_id, (can, at) in _CAN_SPEAK.items():
             if not can or (now - at) > _CAN_SPEAK_TTL_MS or at < scan_at:
                 continue
+            # Ask the one function that decides. This loop consulted _CAN_SPEAK
+            # alone, while _can_be_reached also weighs the gone, asleep and
+            # closed-conversation memories - so talk-to kept naming people the
+            # very next check refused. Fourth time this rule has been duplicated
+            # into a new caller and drifted; there is now one path.
+            if _can_be_reached(agent_id) is not True:
+                continue
             if not _looks_speakable(agent_id):
                 continue
             spoken = any(key[0] == agent_id for key in _SAID)
