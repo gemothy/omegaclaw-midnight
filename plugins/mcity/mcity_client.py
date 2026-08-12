@@ -387,7 +387,17 @@ _REPEATABLE_READS = frozenset((
 # the thread dies. Prose is not enforcement; this is.
 _WAITING = {"at_ms": 0, "ids": []}
 _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
-_WAITING_REFRESH_MS = 20000    # how often vitals re-checks who is waiting
+# How often vitals re-checks who is waiting.
+#
+# The world closes every thread at exactly sixty seconds - measured across fifty
+# threads, min 60.0s - so that is the whole window in which a reply can land. At
+# twenty seconds we spent up to a third of it not knowing somebody had spoken,
+# and waiting= was non-zero in 16 of 901 samples.
+#
+# Eight seconds costs about seven thread reads a minute where nginx allows nine
+# hundred, against the twelve WRITES a minute that are actually scarce. Reads are
+# not the constraint here and never have been; a person waiting is.
+_WAITING_REFRESH_MS = 8000
 _waiting_refresh_at_ms = 0
 _waiting_refreshing = False
 # Everything the world has refused, in one place: (kind, key) -> when it said so.

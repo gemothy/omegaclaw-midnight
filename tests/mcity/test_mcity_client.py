@@ -3209,3 +3209,13 @@ def test_a_fresh_read_stamps_the_item_list():
     mc._harvest_vitals({"agent": {}, "inventory": {"meat": 13, "crystal": 5}})
     assert mc._VITALS["items_at_ms"], "an unstamped list can never go stale"
     assert "meat=13" in mc._VITALS["items"]
+
+
+def test_waiting_is_sampled_faster_than_a_thread_dies():
+    """The world closes every thread at exactly sixty seconds - measured across
+    fifty threads, min 60.0s - so that is the whole window a reply can land in.
+    At twenty seconds we spent up to a third of it not knowing somebody had
+    spoken, and waiting= was non-zero in 16 of 901 samples."""
+    assert mc._WAITING_REFRESH_MS * 6 <= 60000, (
+        "sample often enough to leave the agent several turns inside the window")
+    assert mc._WAITING_STALE_MS > mc._WAITING_REFRESH_MS
