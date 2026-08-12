@@ -394,10 +394,20 @@ _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
 # twenty seconds we spent up to a third of it not knowing somebody had spoken,
 # and waiting= was non-zero in 16 of 901 samples.
 #
-# Eight seconds costs about seven thread reads a minute where nginx allows nine
-# hundred, against the twelve WRITES a minute that are actually scarce. Reads are
-# not the constraint here and never have been; a person waiting is.
-_WAITING_REFRESH_MS = 8000
+# Three, not eight, on a measurement of the two inbound threads this agent has
+# managed to answer: they were answered 54.0s and 66.5s into a sixty second
+# window, and every unanswered one died stale_timeout. We are not losing these on
+# logic any more, we are losing them on the clock - one of the two landed after
+# the thread had already closed.
+#
+# Noticing is the part of that budget the harness owns. Deciding costs about four
+# seconds and the world's own speak action is slower still and not ours to hurry,
+# so five seconds off the front is the whole of what can be taken.
+#
+# Twenty thread reads a minute where nginx allows nine hundred, against the twelve
+# WRITES a minute that are actually scarce. Reads have never been the constraint
+# here; a person waiting sixty seconds is.
+_WAITING_REFRESH_MS = 3000
 _waiting_refresh_at_ms = 0
 _waiting_refreshing = False
 # Everything the world has refused, in one place: (kind, key) -> when it said so.

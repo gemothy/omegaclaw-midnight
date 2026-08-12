@@ -3603,3 +3603,13 @@ def test_a_reply_still_beats_a_mere_roster_verdict(control):
     before = len(control.actions)
     _check(mc.speak("user-agent-owed3 yes still on"))
     assert len(control.actions) > before
+
+
+def test_noticing_leaves_room_to_actually_answer():
+    """The two inbound threads this agent has answered were answered 54.0s and
+    66.5s into a sixty second window - one of them after the thread had already
+    closed - and every unanswered one died stale_timeout. Noticing is the part of
+    that budget the harness owns; deciding costs about four seconds and the
+    world's speak action is slower still and not ours to hurry."""
+    assert mc._WAITING_REFRESH_MS <= 3000, (
+        "a reply needs the rest of the sixty seconds more than we need the read")
