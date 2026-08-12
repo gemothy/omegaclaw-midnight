@@ -556,7 +556,7 @@ def reset_runtime_state():
 
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
-    for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES,
+    for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES, _WHO,
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
@@ -832,6 +832,8 @@ def _vitals_line():
                 who = None
             if who and not food_route:
                 parts.append(f"talk-to={who}")
+                if _WHO.get(who):
+                    parts.append(f"who={_WHO[who]}")
                 # How long since anybody heard from us. Without it the agent
                 # answered "No action needed" 133 times in twenty minutes:
                 # nothing was owed, the money was enough and work was retired, so
@@ -1590,10 +1592,29 @@ def _prune(store, ttl_ms, stamp):
         pass
 
 
+# Actions that genuinely stop somebody hearing us. Travel is not one of them.
+_ACTIONS_THAT_BLOCK_TALK = ("engage", "sleep")
+
+
 def _entry_engaged(entry):
-    """True when this roster entry is inside a live action."""
+    """True when this roster entry is inside an action that blocks conversation.
+
+    It used to answer True for ANY live action, which is the same mistake the
+    self-check made and which the world settled there: our own payload reads
+    kind=move_to, phase=traveling, canStartConversation=TRUE. Most of this city
+    is walking at any moment, so counting travel as engaged put nearly everybody
+    out of reach - 93 unreachable skips in twenty minutes - while the world's own
+    canSpeak said otherwise on the same rows.
+
+    Sleep and engage still count, because those are what the world actually
+    refuses. An action shape we do not recognise keeps the cautious answer."""
     action = entry.get("action")
-    return isinstance(action, dict) and bool(action)
+    if not isinstance(action, dict) or not action:
+        return False
+    kind = (action.get("kind") or "").strip().lower()
+    if not kind:
+        return True
+    return any(blocker in kind for blocker in _ACTIONS_THAT_BLOCK_TALK)
 
 
 def _entry_reachable(entry):
@@ -1614,6 +1635,37 @@ def _entry_reachable(entry):
             and not _entry_engaged(entry))
 
 
+# id -> a short human fact about that person, harvested free from any roster read.
+#
+# The agent's openers were a template with the nouns swapped: "How holds your
+# watch?" three times in one window, plus four signal/mesh variants, and most
+# threads stayed one-sided. It had nothing to be specific ABOUT - talk-to= handed
+# it a uuid and the mission said "ask about their night, their work, this
+# district, anything real", which is a request to invent something.
+#
+# The roster already carries name and profession on every row. Naming them is the
+# same move that made speak reliable in the first place: state the fact, delete
+# the lookup. A guard against repetition was the obvious alternative and is the
+# wrong tool - refusing near-duplicate messages has silenced this agent twice.
+_WHO = {}
+_WHO_CAP = 400
+
+
+def _note_who(agent_id, entry):
+    """Keep name and profession for an agent we have seen on the roster."""
+    try:
+        name = _text(entry.get("name"))
+        job = _text(entry.get("profession"))
+        fact = ",".join(part for part in (name, job) if part)
+        if not fact:
+            return
+        if agent_id not in _WHO and len(_WHO) >= _WHO_CAP:
+            _WHO.pop(next(iter(_WHO)), None)
+        _WHO[agent_id] = fact
+    except Exception:      # noqa: BLE001
+        return
+
+
 def _note_can_speak(entry, at_ms=None):
     """Remember the world's own verdict on whether an agent can be spoken to.
 
@@ -1625,6 +1677,7 @@ def _note_can_speak(entry, at_ms=None):
         agent_id, can = entry.get("id"), entry.get("can_speak")
         if not agent_id or not isinstance(can, bool):
             return
+        _note_who(agent_id, entry)
         # canSpeak alone is NOT enough. Three targets that refused with "target
         # is in do not disturb mode" all carried canSpeak true while running an
         # activeAction of kind engage, phase active. That is the same state the

@@ -3219,3 +3219,67 @@ def test_waiting_is_sampled_faster_than_a_thread_dies():
     assert mc._WAITING_REFRESH_MS * 6 <= 60000, (
         "sample often enough to leave the agent several turns inside the window")
     assert mc._WAITING_STALE_MS > mc._WAITING_REFRESH_MS
+
+
+def test_a_walking_neighbour_can_still_be_spoken_to():
+    """_entry_engaged answered True for ANY live action - the same mistake the
+    self-check made, which the world settled there: our own payload reads
+    kind=move_to, phase=traveling, canStartConversation TRUE. Most of this city is
+    walking at any moment, so this put nearly everybody out of reach - 93
+    unreachable skips in twenty minutes - while canSpeak said otherwise."""
+    entry = {"can_speak": True, "open": True, "same_map": True,
+             "action": {"kind": "move_to", "phase": "traveling"}}
+    assert mc._entry_engaged(entry) is False
+    assert mc._entry_reachable(entry) is True
+
+
+def test_a_sleeping_neighbour_is_still_out_of_reach():
+    entry = {"can_speak": True, "open": True, "same_map": True,
+             "action": {"kind": "sleep", "phase": "traveling"}}
+    assert mc._entry_engaged(entry) is True
+
+
+def test_an_engaged_neighbour_is_still_out_of_reach():
+    entry = {"can_speak": True, "open": True, "same_map": True,
+             "action": {"kind": "engage", "phase": "active"}}
+    assert mc._entry_engaged(entry) is True
+
+
+def test_an_action_shape_we_do_not_know_keeps_the_cautious_answer():
+    entry = {"can_speak": True, "open": True, "same_map": True,
+             "action": {"phase": "active"}}
+    assert mc._entry_engaged(entry) is True
+
+
+def test_the_vitals_line_names_a_person_not_a_uuid():
+    """The openers were a template with the nouns swapped - "How holds your
+    watch?" three times in one window plus four signal/mesh variants - and most
+    threads stayed one-sided. The agent had nothing to be specific ABOUT: talk-to=
+    handed it a uuid while the mission asked it to discuss "their work", which is
+    a request to invent something. The roster carries name and profession on
+    every row."""
+    now = mc._now_ms()
+    entry = mc._parse_agent({"id": "user-agent-phil", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "name": "Philip", "profession": "hacker",
+                             "activeAction": None})
+    mc._note_can_speak(entry, now)
+    mc._REACHABLE.update({"n": 1, "at_ms": now})
+    mc._VITALS.update({"at_ms": now, "hunger": "normal(20)", "items": "crystal=5"})
+    line = mc._vitals_line() or ""
+    assert "who=Philip,hacker" in line, line
+
+
+def test_an_anonymous_neighbour_adds_nothing_to_the_line():
+    """A missing name must not put an empty who= on the line."""
+    now = mc._now_ms()
+    entry = mc._parse_agent({"id": "user-agent-nameless", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": None})
+    mc._note_can_speak(entry, now)
+    assert "user-agent-nameless" not in mc._WHO
+
+
+def test_the_who_table_cannot_grow_without_bound():
+    """284 agents live in this city and the roster is read every few seconds."""
+    assert mc._WHO_CAP <= 1000
