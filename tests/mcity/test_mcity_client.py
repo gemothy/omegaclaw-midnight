@@ -3680,3 +3680,25 @@ def test_warming_still_restores_the_clock():
     window = source[source.index("def _warm_from_store"):]
     window = window[:window.index("\ndef ")]
     assert "_last_delivered_ms" in window
+
+
+def test_a_taken_over_lease_is_reclaimed_rather_than_mourned():
+    """The world's supervisor took this agent and every mutation for the next
+    fifty minutes came back lease_lost - 145 of them - with the heartbeat thread
+    stopped for good and nothing short of a human restart able to recover it. For
+    a loop meant to run unattended that is indistinguishable from the process
+    being dead."""
+    source = pathlib.Path(mc.__file__).read_text()
+    window = source[source.index('if state == "lost":'):]
+    window = window[:window.index("if state == \"active\"")]
+    assert "_connect()" in window, "a takeover must be retried eventually"
+    assert "TAKEOVER_COOLDOWN_SECONDS" in window, "and not at once"
+    assert mc.TAKEOVER_COOLDOWN_SECONDS >= 300, (
+        "immediate retry would be the tug of war the original comment warns of")
+
+
+def test_losing_the_lease_is_not_the_models_problem_to_fix():
+    """FAILED reads as 'fix the format and re-invoke' to this agent. 145 of those
+    went out for a condition no command it could write would change."""
+    assert "lease_lost" in mc._SKIP_REASONS
+    assert "lease_expired" in mc._SKIP_REASONS

@@ -121,6 +121,8 @@ HB_TICK_SECONDS = 1.0              # heartbeat thread wake-up cadence
 HB_RETRY_SECONDS = 5.0
 RECONNECT_GAP_SECONDS = 60.0
 MAX_RECONNECTS = 3                 # CONSECUTIVE failures, reset by any success
+TAKEOVER_COOLDOWN_SECONDS = 300    # first reclaim attempt after a takeover
+TAKEOVER_MAX_COOLDOWN_SECONDS = 3600
 RECONNECT_COOLDOWN_SECONDS = 900.0 # after a burst of failures, not a permanent stop
 ECHO_MEMORY = 32
 # How much contiguous world text an outgoing line may share before it counts as
@@ -956,7 +958,7 @@ _SKIP_REASONS = frozenset((
     "repeat", "rich_enough", "worksite_busy", "nobody_reachable", "unreachable",
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
     "no_link_exit", "target_asleep", "busy", "just_read",
-    "known_bad_destination", "no_food",
+    "known_bad_destination", "no_food", "lease_lost", "lease_expired",
 ))
 
 
@@ -2626,7 +2628,10 @@ def _heartbeat_once():
         # Another controller or the AI supervisor took the agent. Never
         # reconnect here: that would start a tug of war over a live agent.
         _drop_lease("lost", "taken over")
-        logger.error("Midnight City lease lost: another controller claimed the agent")
+        with _lock:
+            globals()["_reconnect_at"] = time.monotonic() + TAKEOVER_COOLDOWN_SECONDS
+        logger.error("Midnight City lease lost: another controller claimed the "
+                     "agent; will try to reclaim in %ds", TAKEOVER_COOLDOWN_SECONDS)
         return "lost"
     if status in (401, 403):
         _drop_lease("failed", "auth")
@@ -2660,8 +2665,36 @@ def _hb_tick():
         reconnects = _reconnects
         lease = dict(_lease) if _lease else None
 
-    if state in ("lost", "failed"):
+    if state == "failed":
         _hb_stop.set()
+        return
+
+    if state == "lost":
+        # A takeover used to end this thread for good, and the comment on it is
+        # right that reconnecting AT ONCE would be a tug of war over a live
+        # agent. But permanent is the wrong other end of that: the world's
+        # supervisor took this agent at 18:11 and every mutation for the next
+        # fifty minutes came back lease_lost - 145 of them - with the harness
+        # unable to do anything at all until a human restarted the container.
+        # For a loop that is meant to run unattended that is the worst failure
+        # available, and it is indistinguishable from the process being dead.
+        #
+        # So: wait out a long cool-off, then try ONCE, and double the wait each
+        # time we are refused. After a few rounds that is an attempt an hour,
+        # which nobody could call a fight over the agent - it is just noticing
+        # that it was handed back.
+        if now < reconnect_at:
+            return
+        with _lock:
+            _reconnects += 1
+            _reconnect_at = now + min(
+                TAKEOVER_COOLDOWN_SECONDS * (2 ** (_reconnects - 1)),
+                TAKEOVER_MAX_COOLDOWN_SECONDS)
+        logger.warning(
+            "Midnight City lease was taken over; trying to reclaim (attempt %d)",
+            _reconnects)
+        if _connect():
+            logger.warning("Midnight City lease reclaimed after a takeover")
         return
 
     if state == "active" and lease is not None:
@@ -2675,9 +2708,11 @@ def _hb_tick():
         result = _heartbeat_once()
         if result == "ok":
             return
-        if result in ("lost", "auth"):
+        if result == "auth":
             _hb_stop.set()
             return
+        if result == "lost":
+            return          # the lost branch above owns the retry schedule
         with _lock:
             _hb_due_at = time.monotonic() + HB_RETRY_SECONDS
         return
