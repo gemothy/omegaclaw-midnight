@@ -2564,3 +2564,46 @@ def test_the_cooldown_expires_so_people_are_not_written_off(control):
     mc._CLOSED_WITH["user-agent-abc"] = mc._now_ms() - (mc._CLOSED_COOLDOWN_MS + 1000)
     _check(mc.speak("user-agent-abc hello again"))
     assert control.actions
+
+
+def test_a_slip_in_a_long_id_does_not_lose_the_message(control):
+    """92 speak attempts in eight minutes were skipped as unreachable because the
+    id matched nobody: talk-to named user-agent-look-28517152-..., the agent typed
+    user-agent-28517152-... with the look- prefix dropped. Refusing a message over
+    a transcription slip in a 45-character identifier is pedantry at the agent's
+    expense."""
+    real = "user-agent-look-28517152-31d3-4ce4-b050-7291aa798466"
+    mc._CAN_SPEAK[real] = (True, mc._now_ms())
+    assert mc._resolve_target("user-agent-28517152-31d3-4ce4-b050-7291aa798466") == real
+
+
+def test_a_display_name_copied_into_the_id_is_stripped(control):
+    """try-instead rendered '<id> (Name)' and the agent copied both."""
+    real = "user-agent-28517152-31d3-4ce4-b050-7291aa798466"
+    mc._CAN_SPEAK[real] = (True, mc._now_ms())
+    assert mc._resolve_target(f"{real} (Pepito)") == real
+
+
+def test_an_unknown_id_is_left_exactly_as_typed(control):
+    """It must never invent a recipient: an id we have never seen goes through
+    unchanged and the world decides."""
+    assert mc._resolve_target("user-agent-never-seen-at-all") == \
+        "user-agent-never-seen-at-all"
+
+
+def test_an_ambiguous_tail_is_not_guessed(control):
+    """Two agents sharing a tail means we do not know which was meant."""
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-aaa-9999abcdef"] = (True, now)
+    mc._CAN_SPEAK["user-agent-bbb-9999abcdef"] = (True, now)
+    typed = "user-agent-ccc-9999abcdef"
+    assert mc._resolve_target(typed) == typed
+
+
+def test_the_suggestion_carries_the_id_alone(control):
+    roster = {"agents": [{"agentId": "user-agent-free", "name": "Pepito", "distance": 2,
+                          "isOpenToTalk": True, "canSpeak": True, "status": "idle"}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    suggestion = mc._speak_candidates() or ""
+    assert "user-agent-free" in suggestion
+    assert "Pepito" not in suggestion, "a name beside an id gets copied into it"

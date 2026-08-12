@@ -1536,6 +1536,41 @@ def _next_action_command():
     return "Do this instead, exactly: (mcity-work)"
 
 
+def _resolve_target(agent_id):
+    """Map what the agent typed onto an id the world knows, or return it as-is.
+
+    Measured over eight minutes: 92 speak attempts were skipped as unreachable
+    because the id did not match anybody, and the emissions show why. talk-to
+    named user-agent-look-28517152-..., the agent typed
+    user-agent-28517152-... - the look- prefix dropped - and elsewhere it copied
+    "user-agent-28517152-... (Pepito)", pulling the display name inside the id
+    because try-instead rendered them adjacent.
+
+    Refusing a message over a transcription slip in a 45-character identifier is
+    the harness being pedantic at the agent's expense. Only ever resolves to an
+    id we have actually seen, and only when exactly one matches."""
+    try:
+        if not agent_id:
+            return agent_id
+        known = set(_CAN_SPEAK) | set(_ASLEEP) | set(_GONE)
+        if agent_id in known:
+            return agent_id
+        stem = agent_id.split()[0].strip("()")
+        if stem in known:
+            return stem
+        # The distinctive part is the tail: a uuid or short code. Match on it, but
+        # only when it picks out exactly one agent.
+        tail = stem.rsplit("-", 3)[-1] if "-" in stem else stem
+        if len(tail) >= 6:
+            hits = [k for k in known if k.endswith(tail)]
+            if len(hits) == 1:
+                return hits[0]
+        hits = [k for k in known if k.endswith(stem) or stem.endswith(k)]
+        return hits[0] if len(hits) == 1 else agent_id
+    except Exception:      # noqa: BLE001 - never break a skill over a lookup
+        return agent_id
+
+
 def _looks_speakable(agent_id):
     """ID_RE is a general id pattern and accepts things like "nyx".
 
@@ -3883,6 +3918,7 @@ def speak(arg=None):
                                  f"{_escape_command()}")
         if _VITALS.get("engaged"):
             _last_self_probe_ms = _now_ms()
+        parts[0] = _resolve_target(parts[0])
         if _can_be_reached(parts[0]) is False:
             others = [i for i in _someone_is_waiting()
                       if i != parts[0] and _can_be_reached(i) is not False]
@@ -3908,6 +3944,7 @@ def speak(arg=None):
         # agent could not prove its own words were its own because it was never
         # allowed to say them. Reaching this line means the text is not a relay.
         _remember_said(text)
+        parts[0] = _resolve_target(parts[0])
         sent["agent_id"], sent["text"] = parts[0], text
         # The text is NOT sanitised beyond the whitespace collapse of
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
@@ -4049,11 +4086,10 @@ def _speak_candidates(limit=3):
     # unwrapped the way _merchant_label does.
     labels = []
     for agent_id in ids:
-        label = _plain(agent_id)
-        name = _plain(reachable.get(agent_id, {}).get("name"))
-        if name and "MC_UNTRUSTED" not in str(name):
-            label = f"{label} ({name})"
-        labels.append(label)
+        # The id ALONE. Rendering "<id> (Name)" put the display name inside the
+        # id when the agent copied it: "user-agent-28517152-... (Pepito)" reached
+        # the world as a target and matched nobody.
+        labels.append(_plain(agent_id))
     return "try-instead=" + " | ".join(labels)
 
 
