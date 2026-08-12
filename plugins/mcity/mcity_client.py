@@ -523,6 +523,7 @@ _REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
 _REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
+           "items_at_ms": 0,
            "status": None, "busy_for": None, "engaged": False, "space_kind": None,
            "district_now": None, "district_at_ms": 0}
 _SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
@@ -530,6 +531,7 @@ _SELF_ENGAGED_MIN_S = 3        # below this the action ends before the refusal h
 _THREAD_CONFIRM_RETRY_S = 2.0  # the world creates the thread just after accepting
 _last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
+_ITEMS_TTL_MS = 20000          # what we carry changes when we act
 VITALS_REFRESH_MS = 30000      # re-read vitals at most this often
 _vitals_refreshing = False     # guards the refresh path against reentry via _out
 
@@ -554,6 +556,7 @@ def reset_runtime_state():
     _WAITING.update({"at_ms": 0, "ids": []})
     _VITALS.clear()
     _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
+                    "items_at_ms": 0,
                     "status": None, "busy_for": None, "engaged": False,
                     "space_kind": None, "district_now": None,
                     "district_at_ms": 0})
@@ -643,6 +646,7 @@ def _harvest_vitals(payload):
                     pass
         if isinstance(items, dict):
             _VITALS["items"] = " ".join(f"{k}={v}" for k, v in sorted(items.items()))
+            _VITALS["items_at_ms"] = _now_ms()
         # status belongs in this list. Leaving it out meant a reply carrying
         # status=busy and nothing else never stamped the clock, so every
         # freshness-gated consumer treated a KNOWN-busy agent as unknown and
@@ -677,7 +681,17 @@ def _refresh_vitals_if_stale():
         _vitals_refreshing = True
     try:
         _skill_read("VITALS", "needs")
-        if not _VITALS.get("items"):
+        # Inventory used to be read only while items was empty, so it was read
+        # once per process and then frozen. It is the ONE vitals field the
+        # agent's own actions change, and the only one never re-read.
+        #
+        # Measured: the agent bought food - the world showed meat=13 - while
+        # holding= still said crystal=113950 meme_coin=17187. On that stale line
+        # the eat guard saw nothing edible and refused, and the vitals line went
+        # on naming the trade, so it kept BUYING meat it already had instead of
+        # eating any of it, with hunger climbing 74 to 79 the whole time.
+        eaten = _now_ms() - (_VITALS.get("items_at_ms") or 0)
+        if not _VITALS.get("items") or eaten >= _ITEMS_TTL_MS:
             _skill_read("VITALS", "inventory")
         _refresh_waiting_if_stale()
         # ONLY on a cold start. reachable= and talk-to= are what step five turns

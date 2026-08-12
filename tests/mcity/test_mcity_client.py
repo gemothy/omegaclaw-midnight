@@ -3188,3 +3188,24 @@ def test_hunger_does_not_put_two_commands_on_one_line():
     mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
     line = mc._vitals_line() or ""
     assert line.count("(mcity-") <= 1, line
+
+
+def test_the_item_list_does_not_freeze_for_the_life_of_the_process():
+    """Inventory was read only while items was empty, so it was read once and
+    then never again. It is the ONE vitals field the agent's own actions change.
+
+    Measured: the agent bought food - the world showed meat=13 - while holding=
+    still said crystal=113950 meme_coin=17187. On that stale line the eat guard
+    saw nothing edible and refused, and the vitals line went on naming the trade,
+    so it kept BUYING meat instead of eating any of it, hunger climbing 74 to 79."""
+    source = pathlib.Path(mc.__file__).read_text()
+    window = source[source.index("def _refresh_vitals_if_stale"):]
+    window = window[:window.index("_refresh_waiting_if_stale")]
+    assert "_ITEMS_TTL_MS" in window, (
+        "inventory must be re-read on a TTL, not only when it is empty")
+
+
+def test_a_fresh_read_stamps_the_item_list():
+    mc._harvest_vitals({"agent": {}, "inventory": {"meat": 13, "crystal": 5}})
+    assert mc._VITALS["items_at_ms"], "an unstamped list can never go stale"
+    assert "meat=13" in mc._VITALS["items"]
