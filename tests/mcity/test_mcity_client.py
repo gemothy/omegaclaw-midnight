@@ -3485,3 +3485,25 @@ def test_a_silent_waiting_row_adds_nothing():
     mc._WAITING.update({"at_ms": now, "ids": ["user-agent-quiet"], "said": {}})
     mc._VITALS.update({"at_ms": now, "hunger": "normal(20)", "items": "crystal=5"})
     assert "they-said=" not in (mc._vitals_line() or "")
+
+
+def test_the_person_talking_to_us_is_never_too_busy_to_hear_us():
+    """An agent in conversation with this one carries activeAction kind=engage,
+    which blocks everybody else and is exactly wrong for the person we are
+    mid-conversation with. 30 speak attempts in eight minutes were refused as
+    unreachable while the agent was trying to answer somebody who had just
+    written to it. The roster has carried isTalkingToYou on every row all along."""
+    entry = mc._parse_agent({"id": "user-agent-partner", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "isTalkingToYou": True,
+                             "activeAction": {"kind": "engage", "phase": "active"}})
+    assert mc._entry_engaged(entry) is False
+    assert mc._entry_reachable(entry) is True
+
+
+def test_somebody_engaged_with_a_third_party_is_still_busy():
+    entry = mc._parse_agent({"id": "user-agent-elsewhere", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "isTalkingToYou": False,
+                             "activeAction": {"kind": "engage", "phase": "active"}})
+    assert mc._entry_engaged(entry) is True

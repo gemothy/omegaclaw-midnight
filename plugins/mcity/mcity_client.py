@@ -1643,6 +1643,14 @@ def _entry_engaged(entry):
 
     Sleep and engage still count, because those are what the world actually
     refuses. An action shape we do not recognise keeps the cautious answer."""
+    # Engaged WITH US is the opposite of unreachable. An agent in conversation
+    # with this one carries activeAction kind=engage, which is a blocker for
+    # everybody else and is exactly wrong for the person we are mid-conversation
+    # with: 30 speak attempts in eight minutes were refused as unreachable while
+    # the agent was trying to answer somebody who had just written to it. The
+    # roster has said isTalkingToYou on every row all along.
+    if entry.get("talking") is True:
+        return False
     action = entry.get("action")
     if not isinstance(action, dict) or not action:
         return False
