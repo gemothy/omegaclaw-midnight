@@ -570,7 +570,7 @@ def reset_runtime_state():
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
     for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES, _WHO,
-                  _MET, _AIMED,
+                  _MET, _AIMED, _DISTRICTS,
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
@@ -2268,6 +2268,19 @@ def _cached_route():
         return ""
 
 
+# District ids the world has said we can travel to, harvested from any navigation
+# read. The list EXCLUDES wherever we currently are, which is what makes it usable
+# as a test: a space in here is somewhere that needs travel-district to reach.
+_DISTRICTS = {}
+_DISTRICTS_TTL_MS = 600000
+
+
+def _is_a_district(space):
+    """True when reaching this space means travelling, not walking."""
+    at = _DISTRICTS.get(str(space or ""))
+    return bool(at) and (_now_ms() - at) <= _DISTRICTS_TTL_MS
+
+
 def _travel_to_people_command():
     """Where to go when nobody here can talk, as a copyable command.
 
@@ -2305,6 +2318,18 @@ def _travel_to_people_command():
             best, count = _pick()
         if not best or not ID_RE.match(best):
             return None
+        # A different DISTRICT needs travel-district; only an area inside this
+        # one can be walked to. Getting that wrong stranded the agent: it sat in
+        # north for two hours - the only occupant, with 98 agents in central and
+        # 129 of the city's 285 mid-conversation - while the route kept handing
+        # it (mcity-move-area "central") and the world kept answering "area not
+        # found: central". Every roster row read canSpeak false and isOnSameMap
+        # false, which looks exactly like a friendless agent and was in fact an
+        # agent in the wrong district holding the wrong verb.
+        if _is_a_district(best):
+            return (f"Nobody here can talk. Go to {best}, where {count} idle "
+                    f"agents are, with (mcity-travel-district "
+                    f"_quote_{best}_quote_)")
         payload, error = _skill_read("VITALS", "areas")
         if error is None:
             areas = [item for item in (_find_list(payload, "areas") or [])
@@ -3264,7 +3289,10 @@ def navigation_options():
     rows.append("districts:")
     if isinstance(districts, list) and districts:
         for item in districts:
-            rows.append(_row((("id", _plain(_get(item, "id", "districtId", "spaceId"))),
+            district_id = _plain(_get(item, "id", "districtId", "spaceId"))
+            if district_id:
+                _DISTRICTS[str(district_id)] = _now_ms()
+            rows.append(_row((("id", district_id),
                               ("name", _plain(_get(item, "name", "label"))))))
     else:
         rows.append("- none")

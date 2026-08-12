@@ -3702,3 +3702,31 @@ def test_losing_the_lease_is_not_the_models_problem_to_fix():
     went out for a condition no command it could write would change."""
     assert "lease_lost" in mc._SKIP_REASONS
     assert "lease_expired" in mc._SKIP_REASONS
+
+
+def test_a_different_district_is_travelled_to_not_walked_to():
+    """The agent sat in north for two hours - its only occupant - with 98 agents
+    in central and 129 of the city's 285 mid-conversation, while the route handed
+    it (mcity-move-area "central") and the world answered "area not found:
+    central". Every roster row read canSpeak false and isOnSameMap false, which
+    looks exactly like a friendless agent and was an agent in the wrong district
+    holding the wrong verb."""
+    mc._DISTRICTS["central"] = mc._now_ms()
+    mc._VITALS.update({"space": "north", "space_kind": "outdoor",
+                       "at_ms": mc._now_ms()})
+    mc._AWAKE_PLACES["central"] = (98, mc._now_ms())
+    hint = mc._travel_to_people_command() or ""
+    assert "(mcity-travel-district _quote_central_quote_)" in hint, hint
+
+
+def test_a_place_in_this_district_is_still_walked_to():
+    """travel-district is refused for somewhere inside the district we stand in -
+    the world answers "district gateway not found" - so the test has to be which
+    it is, not which verb we prefer."""
+    mc._DISTRICTS.clear()
+    assert mc._is_a_district("central-plaza") is False
+
+
+def test_a_stale_district_list_is_not_trusted():
+    mc._DISTRICTS["old-town"] = mc._now_ms() - (mc._DISTRICTS_TTL_MS + 1000)
+    assert mc._is_a_district("old-town") is False

@@ -67,6 +67,15 @@ def all_threads(hours):
 
 
 def main():
+    # Liveness first. An hour of "0 answered, 0 inbound" once meant the lease had
+    # been taken fifty minutes earlier, and reading these counts as conversation
+    # data cost a whole pass of A/B tests against an agent that could not speak.
+    live = subprocess.run([sys.executable, "scripts/can_it_act.py", "20m"],
+                          capture_output=True, text=True)
+    if live.returncode != 0:
+        print(live.stdout.strip())
+        print("\n-- counts below describe an agent that could not act --\n")
+
     hours = int(sys.argv[1]) if len(sys.argv) > 1 else 6
     rows = all_threads(hours)
     if not rows:
