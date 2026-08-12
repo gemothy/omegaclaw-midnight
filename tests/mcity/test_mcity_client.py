@@ -2458,3 +2458,26 @@ def test_a_gone_id_is_forgotten_eventually(control):
     mc._GONE["user-agent-gone"] = mc._now_ms() - (mc._GONE_TTL_MS + 1000)
     _check(mc.speak("user-agent-gone hello there"))
     assert control.actions
+
+
+def test_a_delivered_message_is_confirmed_from_the_threads(control):
+    """The world's event feed returns [] and that feed is the only thing _submit
+    confirms against, so delivered messages came back PENDING while the thread
+    list plainly showed them landing."""
+    control.on_action = lambda action: []          # no events, ever
+    moved = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
+                          "threadLastMessageAtMs": mc._now_ms() + 5000}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(moved).encode())
+    result = _check(mc.speak("agent-2 the shipment cleared an hour ago"))
+    assert "MCITY-SPEAK-OK" in result
+    assert "confirmed-by=thread" in result, "the weaker evidence must be labelled"
+
+
+def test_a_thread_that_has_not_moved_stays_pending(control):
+    """It must never invent a delivery: an untouched thread is not evidence."""
+    control.on_action = lambda action: []
+    stale = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
+                          "threadLastMessageAtMs": mc._now_ms() - 60000}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(stale).encode())
+    result = _check(mc.speak("agent-2 hello there"))
+    assert "MCITY-SPEAK-PENDING" in result

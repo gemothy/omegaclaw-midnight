@@ -3490,6 +3490,34 @@ def exit_building():
     return result
 
 
+def _thread_shows_our_message(agent_id, since_ms):
+    """True when the thread with this agent has moved since we sent.
+
+    A fallback for a world that has stopped emitting events. It is deliberately
+    weaker evidence than an agent_spoke event and says so in the result -
+    confirmed-by=thread - because a message arriving FROM them in the same second
+    would look the same. It cannot invent a delivery that did not happen, only
+    mis-attribute one that did."""
+    try:
+        payload, error = _own_threads("SPEAK")
+        if error is not None:
+            return False
+        own_id = _c("agent_id", "")
+        for item in (_find_list(payload, "threads") or []):
+            if not isinstance(item, dict):
+                continue
+            parts = _get(item, "participants", "participantIds", "with") or ()
+            others = [str(x).strip() for x in parts
+                      if isinstance(x, str) and x.strip() != own_id]
+            if agent_id not in others:
+                continue
+            last = _number(_get(item, "threadLastMessageAtMs"), 0, 0, 10 ** 15)
+            return last >= since_ms
+        return False
+    except Exception:      # noqa: BLE001 - confirmation must never raise
+        return False
+
+
 def _someone_is_waiting():
     """The agent ids that owe a reply, per the last threads render, or []."""
     if not _WAITING["ids"] or not _WAITING["at_ms"]:
@@ -3853,7 +3881,18 @@ def speak(arg=None):
         # _norm_arg: confirmation needs payload.text == action.text byte for byte.
         return {"kind": "speak", "targetAgentId": parts[0], "text": text}, None
 
+    submitted_at = _now_ms()
     result = _mutate("SPEAK", build)
+    # The world's event feed is empty - recentEvents returns [] - and that feed is
+    # the only thing _submit confirms against, so every delivered message was
+    # coming back PENDING. Meanwhile the thread list showed the messages landing:
+    # activity six and eleven minutes old, four messages in one thread, nothing
+    # owed by us. Confirm from the threads instead when the events say nothing.
+    if sent.get("agent_id") and "MCITY-SPEAK-PENDING" in (result or ""):
+        landed = _thread_shows_our_message(sent["agent_id"], submitted_at)
+        if landed:
+            result = _line("SPEAK", "OK", (("outcome", "delivered"),
+                                           ("confirmed-by", "thread")))
     if sent and result.startswith("MCITY-SPEAK-OK") \
             and "outcome=delivered" in result.partition("\n")[0]:
         # Ground the delivery: spoke_count is the anti-greeting-loop counter
