@@ -2434,3 +2434,27 @@ def test_a_refusal_names_the_call_not_to_repeat(control):
     assert "do-NOT-repeat=(mcity-work)" in head, head
     assert "do-THIS=(mcity-move-area _quote_bison-valley_quote_)" in head
     assert "every worksite is taken" in promoted
+
+
+def test_an_id_the_world_does_not_know_is_not_tried_twice(control):
+    """The agent copies targets out of its own history and some of those agents
+    have since left: 6 of 14 world speak rejections in one window were 'target
+    not found'. An id that does not exist will not start existing."""
+    seq = itertools.count()
+    control.on_action = lambda action: [
+        event(f"e{next(seq)}", "action_failed", actionKind="speak",
+              targetAgentId="user-agent-gone", reason="target not found")]
+    _check(mc.speak("user-agent-gone hello there"))
+    assert mc._can_be_reached("user-agent-gone") is False
+    before = len(control.actions)
+    again = _check(mc.speak("user-agent-gone hello again"))
+    assert again.startswith("MCITY-SPEAK-SKIPPED reason=unreachable")
+    assert len(control.actions) == before, "no second call for an id that is gone"
+
+
+def test_a_gone_id_is_forgotten_eventually(control):
+    """Agents come back; the memory is long but not permanent."""
+    control.on_action = lambda action: []
+    mc._GONE["user-agent-gone"] = mc._now_ms() - (mc._GONE_TTL_MS + 1000)
+    _check(mc.speak("user-agent-gone hello there"))
+    assert control.actions

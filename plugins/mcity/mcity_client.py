@@ -396,6 +396,12 @@ _waiting_refreshing = False
 # people wait.
 _ASLEEP = {}
 _ASLEEP_TTL_MS = 300000        # assume nobody sleeps less than five minutes
+# Ids the world does not know. The agent copies targets out of its own history,
+# and some of those agents have since left: 6 of 14 world speak rejections in one
+# window were "target not found". An id that does not exist will not start
+# existing, so there is no reason to spend a second call on it.
+_GONE = {}
+_GONE_TTL_MS = 1800000
 _ENOUGH_MEME_COIN = 200        # the mission's own threshold for 'stop earning'
 # (target, exact words) -> when it was delivered. Repeating yourself verbatim
 # to the same person is the clearest tell of a bot.
@@ -469,8 +475,8 @@ def reset_runtime_state():
 
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
-    for cache in (_CAN_SPEAK, _ASLEEP, _LAST_READ, _SAID, _AWAKE_PLACES, _inbound,
-                  _my_texts):
+    for cache in (_CAN_SPEAK, _ASLEEP, _GONE, _LAST_READ, _SAID, _AWAKE_PLACES,
+                  _inbound, _my_texts):
         cache.clear()
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0})
@@ -1481,6 +1487,9 @@ def _note_can_speak(entry, at_ms=None):
 
 def _can_be_reached(agent_id):
     """True / False / None (unknown), from the freshest evidence we hold."""
+    gone = _GONE.get(agent_id)
+    if gone and (_now_ms() - gone) <= _GONE_TTL_MS:
+        return False
     at = _ASLEEP.get(agent_id)
     if at and (_now_ms() - at) <= _ASLEEP_TTL_MS:
         return False
@@ -3876,9 +3885,12 @@ def speak(arg=None):
         # A fourth refusal: "target only talks to friends". Social, not
         # temporal, so it will not clear on its own - all the more reason not to
         # spend another turn on that person.
-        if sent.get("agent_id") and ("target is sleeping" in lowered
-                                     or "target is in do not disturb" in lowered
-                                     or "only talks to friends" in lowered):
+        if sent.get("agent_id") and "target not found" in lowered:
+            _GONE[sent["agent_id"]] = _now_ms()
+            _prune(_GONE, _GONE_TTL_MS, lambda v: v)
+        elif sent.get("agent_id") and ("target is sleeping" in lowered
+                                       or "target is in do not disturb" in lowered
+                                       or "only talks to friends" in lowered):
             _ASLEEP[sent["agent_id"]] = _now_ms()
             _prune(_ASLEEP, _ASLEEP_TTL_MS, lambda v: v)
         elif "speaker is in do not disturb" in lowered:
