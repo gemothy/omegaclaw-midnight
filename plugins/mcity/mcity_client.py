@@ -1804,16 +1804,36 @@ def _note_met(agent_id, count, last_ms):
         return
 
 
+# Beyond this a past encounter is not a conversation to resume.
+_MET_IS_RECENT_MS = 1800000
+
+
 def _met_before(agent_id):
-    """met-before= for the vitals line, or None for a stranger."""
+    """met-before= for the vitals line, or None when this is effectively new.
+
+    The token tells the agent not to introduce itself and to pick up what was
+    left unfinished, which is right for somebody it spoke to minutes ago and
+    wrong for somebody from three hours back. Warming _MET from the store put
+    every old contact back in reach at once, and the agent - told it knows these
+    people but holding nothing about WHAT it knows - produced contentless
+    continuations: "Alan, checking in again - still looking for ore or lumber
+    trades?", "Hi Sinu, just checking in again". Thirty threads opened across two
+    hours, not one answered, where the hour before had been "Jack, any word on
+    the lumber supply chain shifts you mentioned?" and 5 of 6 answered.
+
+    Without the text of what was said - which stays out of context, because this
+    agent imitates whatever it is shown - recency is the only honest test of
+    whether there is a thread to pick up."""
     entry = _MET.get(agent_id)
     if not entry or not entry[0]:
         return None
     count, last_ms = entry
-    if last_ms and last_ms > 0:
-        mins = int((_now_ms() - last_ms) / 60000)
-        return f"met-before={count}x last={mins}m-ago"
-    return f"met-before={count}x"
+    if not last_ms or last_ms <= 0:
+        return None
+    ago = _now_ms() - last_ms
+    if ago > _MET_IS_RECENT_MS:
+        return None
+    return f"met-before={count}x last={int(ago / 60000)}m-ago"
 
 
 def _note_who(agent_id, entry):

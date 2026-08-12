@@ -3657,3 +3657,26 @@ def test_reachability_is_not_restored_from_a_stale_city():
     mc.reset_runtime_state()
     mc._warm_from_store()
     assert not mc._CAN_SPEAK, "reachability must come from a live roster read"
+
+
+def test_an_old_acquaintance_is_not_a_conversation_in_progress():
+    """met-before= tells the agent not to introduce itself and to pick up what
+    was left unfinished. Warming _MET from the store put every old contact back
+    in reach at once, and the agent - told it knows these people while holding
+    nothing about WHAT it knows - produced "Alan, checking in again", "Hi Sinu,
+    just checking in again". Thirty threads across two hours, none answered."""
+    mc._note_met("user-agent-ancient", 3, mc._now_ms() - 3 * 3600_000)
+    assert mc._met_before("user-agent-ancient") is None
+
+
+def test_somebody_from_ten_minutes_ago_still_counts():
+    mc._note_met("user-agent-recent", 2, mc._now_ms() - 600_000)
+    assert "met-before=2x" in (mc._met_before("user-agent-recent") or "")
+
+
+def test_warming_still_restores_the_clock():
+    """The silent-for clock is a fact about US and stays restored however old."""
+    source = pathlib.Path(mc.__file__).read_text()
+    window = source[source.index("def _warm_from_store"):]
+    window = window[:window.index("\ndef ")]
+    assert "_last_delivered_ms" in window
