@@ -2867,3 +2867,38 @@ def test_with_every_read_cooled_it_falls_back_to_an_action(control):
     for name in mc._READ_SKILLS:
         mc._read_at[name] = now
     assert mc._another_read_than("THREADS") is None
+
+
+def test_walking_somewhere_is_not_being_busy():
+    """The world answers this itself and the harness was not reading it. Any
+    activeAction at all counted as engagement, and the agent walks nearly
+    everywhere - status was traveling in 568 of 752 vitals samples - so the rule
+    refused 134 speaks in twenty-five minutes on the grounds that the world
+    refuses speech from a mid-action agent. In that same window the world said
+    'speaker is in do not disturb mode' zero times, and the payload during a walk
+    carries canStartConversation true."""
+    mc._harvest_vitals({"agent": {
+        "activeAction": {"kind": "move_to", "phase": "traveling",
+                         "engageTargetId": None, "endsAtMs": None},
+        "canStartConversation": True}})
+    assert mc._VITALS["engaged"] is False, (
+        "the world said we can start a conversation while walking")
+
+
+def test_the_world_still_gets_to_say_no():
+    """The 50-of-50 measurement was real - during work actions, kind engage.
+    Trusting the field must keep that protection, not trade one blind spot for
+    another."""
+    mc._harvest_vitals({"agent": {
+        "activeAction": {"kind": "engage", "phase": "active"},
+        "canStartConversation": False}})
+    assert mc._VITALS["engaged"] is True
+
+
+def test_without_the_field_the_old_guess_still_applies():
+    """The heuristic is entitled to answer only when the world did not."""
+    mc._harvest_vitals({"agent": {
+        "activeAction": {"kind": "engage", "phase": "active"}}})
+    assert mc._VITALS["engaged"] is True
+    mc._harvest_vitals({"agent": {"activeAction": None}})
+    assert mc._VITALS["engaged"] is False

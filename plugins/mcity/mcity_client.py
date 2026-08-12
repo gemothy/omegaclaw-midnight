@@ -604,10 +604,32 @@ def _harvest_vitals(payload):
             # and stays unreachable.
             action = agent.get("activeAction")
             _VITALS["busy_for"] = None
-            # Our own engagement, recorded the same way we record everyone
-            # else's. The world refused 50 of 50 replies with "speaker is in do
-            # not disturb mode" while this was set, and zero once it cleared.
-            _VITALS["engaged"] = isinstance(action, dict) and bool(action)
+            # Our own engagement - meaning, throughout, "the world will not
+            # take speech from us right now".
+            #
+            # The world answers this itself, in the same payload, and the
+            # harness was not reading it. Any activeAction at all counted as
+            # engagement, and the agent walks nearly everywhere: status was
+            # traveling in 568 of 752 vitals samples, so this refused 134 speaks
+            # in twenty-five minutes with the reason "the world refuses speech
+            # from a mid-action agent". In that same window the world said
+            # "speaker is in do not disturb mode" exactly zero times, and the
+            # raw payload during a walk reads:
+            #   activeAction.kind: move_to, phase: traveling,
+            #   engageTargetId: null, canStartConversation: TRUE
+            # The 50-of-50 measurement behind the old rule was real, but it was
+            # taken during work actions - kind engage - and generalised to every
+            # action including travel. Walking somewhere is not being busy.
+            #
+            # So ask the world rather than infer, exactly as _entry_reachable
+            # trusts canSpeak for everybody else. The heuristic stays as the
+            # fallback for when the field is missing, which is the only case it
+            # was ever entitled to answer.
+            can_start = agent.get("canStartConversation")
+            if isinstance(can_start, bool):
+                _VITALS["engaged"] = not can_start
+            else:
+                _VITALS["engaged"] = isinstance(action, dict) and bool(action)
             if isinstance(action, dict) and action.get("endsAtMs"):
                 try:
                     left = int(action["endsAtMs"]) - _now_ms()
