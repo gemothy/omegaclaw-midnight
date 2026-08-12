@@ -3527,3 +3527,31 @@ def test_a_stale_verdict_does_not_bury_somebody():
     assert "user-agent-old-no" not in mc.context_poison()
     mc._CAN_SPEAK["user-agent-back-now"] = (True, now)
     assert "user-agent-back-now" not in mc.context_poison()
+
+
+def test_a_reply_to_somebody_waiting_is_never_refused_locally(control):
+    """Over an hour five agents opened threads with this one and it answered none,
+    while aiming a reply at the right person on 83% of the turns it was told
+    somebody was owed one. Every speak in that window was SKIPPED here: canSpeak
+    comes back false for the person we are mid-thread with, and this gate believed
+    it. canSpeak answers "can this agent be approached", which is not the question
+    when a thread is open and they spoke last."""
+    now = mc._now_ms()
+    control.on_action = lambda action: []
+    mc._CAN_SPEAK["user-agent-owed"] = (False, now)
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-owed"], "said": {}})
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-owed yes, still on"))
+    assert not result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable"), result
+    assert len(control.actions) > before, "the world decides, not this gate"
+
+
+def test_a_stranger_the_world_refuses_is_still_skipped(control):
+    """The gate keeps its job for people who have not written to us."""
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-stranger"] = (False, now)
+    mc._WAITING.update({"at_ms": now, "ids": [], "said": {}})
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-stranger hello there"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable"), result
+    assert len(control.actions) == before

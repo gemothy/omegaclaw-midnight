@@ -4587,7 +4587,22 @@ def speak(arg=None):
         if _VITALS.get("engaged"):
             _last_self_probe_ms = _now_ms()
         parts[0] = _resolve_target(parts[0])
-        if _can_be_reached(parts[0]) is False:
+        # Somebody who has just written to us is answered, whatever the roster
+        # says about reaching them.
+        #
+        # Over the last hour five agents opened threads with this one and it
+        # answered none, while it aimed a reply at the right person on 83% of the
+        # turns it was told somebody was owed one. Every single speak in that
+        # window was SKIPPED here: canSpeak comes back false for the person we
+        # are mid-thread with, and this gate believed it.
+        #
+        # canSpeak is the world's answer to "can this agent be approached", which
+        # is not the question being asked when a thread is already open and they
+        # spoke last. The world still gets to refuse the send - it just is not
+        # this function's call to make. Refusing needs certainty, and we do not
+        # have it here.
+        if _can_be_reached(parts[0]) is False \
+                and parts[0] not in _someone_is_waiting():
             others = [i for i in _someone_is_waiting()
                       if i != parts[0] and _can_be_reached(i) is not False]
             # The row already said asleep=yes and the agent spoke to them anyway:
