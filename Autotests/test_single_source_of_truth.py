@@ -148,3 +148,14 @@ def test_the_vitals_line_never_offers_two_people_or_two_commands():
         "talk-to must yield to somebody who is owed a reply")
     assert "and not food_route" in body, (
         "the route must yield to a hungry agent's way to food")
+
+
+def test_only_one_rule_decides_that_an_action_blocks_talking():
+    """Asked about our own action and about everybody else's, and written twice
+    before: any-action-counts put 134 speaks out of reach in one window and 34 in
+    another, while the world said "speaker is in do not disturb" zero times."""
+    # the tuple's own declaration is not a caller of it
+    offenders = _callers_touching(
+        r"_ACTIONS_THAT_BLOCK_TALK(?! = \()", allowed={"_action_blocks_talk"})
+    assert not offenders, (
+        f"{offenders} decide this for themselves. Call _action_blocks_talk.")

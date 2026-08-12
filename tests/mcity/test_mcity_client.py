@@ -3555,3 +3555,25 @@ def test_a_stranger_the_world_refuses_is_still_skipped(control):
     result = _check(mc.speak("user-agent-stranger hello there"))
     assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable"), result
     assert len(control.actions) == before
+
+
+def test_our_own_walk_does_not_gag_us_when_the_world_is_silent():
+    """The world sends canStartConversation only sometimes - true two days ago,
+    absent today - so the fallback is what actually runs, and it counted ANY
+    action as engagement. 34 self_engaged skips in twenty minutes while the world
+    said "speaker is in do not disturb" zero times."""
+    mc._harvest_vitals({"agent": {
+        "activeAction": {"kind": "move_to", "phase": "traveling"}}})
+    assert mc._VITALS["engaged"] is False
+
+
+def test_our_own_work_still_gags_us():
+    mc._harvest_vitals({"agent": {
+        "activeAction": {"kind": "engage", "phase": "active"}}})
+    assert mc._VITALS["engaged"] is True
+
+
+def test_the_world_still_overrides_the_guess():
+    mc._harvest_vitals({"agent": {
+        "activeAction": {"kind": "move_to"}, "canStartConversation": False}})
+    assert mc._VITALS["engaged"] is True

@@ -648,7 +648,17 @@ def _harvest_vitals(payload):
             if isinstance(can_start, bool):
                 _VITALS["engaged"] = not can_start
             else:
-                _VITALS["engaged"] = isinstance(action, dict) and bool(action)
+                # The world sends canStartConversation only sometimes - it was
+                # true here two days ago and is absent today - so this fallback
+                # is what actually runs, and it used to count ANY action as
+                # engagement. That put us back to the behaviour the field was
+                # brought in to correct: 34 self_engaged skips in twenty minutes
+                # while the world said "speaker is in do not disturb" zero times.
+                #
+                # One rule for whether an action blocks talking, asked the same
+                # way about us and about everybody else. Third time this has been
+                # written twice.
+                _VITALS["engaged"] = _action_blocks_talk(action)
             if isinstance(action, dict) and action.get("endsAtMs"):
                 try:
                     left = int(action["endsAtMs"]) - _now_ms()
@@ -1631,6 +1641,23 @@ def _prune(store, ttl_ms, stamp):
 _ACTIONS_THAT_BLOCK_TALK = ("engage", "sleep")
 
 
+def _action_blocks_talk(action):
+    """Whether being inside this action stops a conversation.
+
+    The one answer, for our own action and for anybody else's. Sleep and engage
+    block; travel does not, which the world settled directly when it still sent
+    canStartConversation - our own payload read kind=move_to, phase=traveling,
+    canStartConversation TRUE. An action shape we do not recognise keeps the
+    cautious answer, because refusing to speak costs a turn and speaking into a
+    refusal costs a write."""
+    if not isinstance(action, dict) or not action:
+        return False
+    kind = (action.get("kind") or "").strip().lower()
+    if not kind:
+        return True
+    return any(blocker in kind for blocker in _ACTIONS_THAT_BLOCK_TALK)
+
+
 def _entry_engaged(entry):
     """True when this roster entry is inside an action that blocks conversation.
 
@@ -1651,13 +1678,7 @@ def _entry_engaged(entry):
     # roster has said isTalkingToYou on every row all along.
     if entry.get("talking") is True:
         return False
-    action = entry.get("action")
-    if not isinstance(action, dict) or not action:
-        return False
-    kind = (action.get("kind") or "").strip().lower()
-    if not kind:
-        return True
-    return any(blocker in kind for blocker in _ACTIONS_THAT_BLOCK_TALK)
+    return _action_blocks_talk(entry.get("action"))
 
 
 def _entry_reachable(entry):
