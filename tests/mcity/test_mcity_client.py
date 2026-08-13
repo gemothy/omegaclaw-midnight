@@ -1482,9 +1482,11 @@ def test_the_roster_column_and_the_cache_agree_on_reachability(control):
     ]}
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     result = _check(mc.agents())
-    engaged_row = [r for r in result.splitlines() if "user-agent-engaged" in r][0]
+    # Stronger than the column now: an agent the harness would refuse is not
+    # listed at all, because the model takes its targets from these ids and not
+    # from the can-speak= flag beside them.
+    assert "user-agent-engaged" not in result, result
     free_row = [r for r in result.splitlines() if "user-agent-free" in r][0]
-    assert "can-speak=no" in engaged_row, engaged_row
     assert "can-speak=yes" in free_row, free_row
     assert mc._can_be_reached("user-agent-engaged") is False
     assert mc._can_be_reached("user-agent-free") is True
@@ -2541,8 +2543,7 @@ def test_a_do_not_disturb_agent_is_not_recommended(control):
     assert mc._can_be_reached("user-agent-dnd") is False
     assert mc._can_be_reached("user-agent-open") is True
     assert mc._best_person_to_talk_to() == "user-agent-open"
-    dnd_row = [r for r in result.splitlines() if "user-agent-dnd" in r][0]
-    assert "can-speak=no" in dnd_row, dnd_row
+    assert "user-agent-dnd" not in result, result
 
 
 def test_a_do_not_disturb_target_is_skipped_before_the_call(control):
@@ -4210,3 +4211,54 @@ def test_a_payload_without_a_space_leaves_it_alone():
     mc.reset_runtime_state()
     mc._note_space_kind({})
     assert mc._VITALS.get("space_kind") is None
+
+
+def test_the_roster_lists_only_people_a_message_could_reach(control):
+    """The agent takes its targets from this list: 148 speak commands in
+    twenty-five minutes, 102 refused by the harness as unreachable before the
+    world ever saw them. It does not act on the can-speak= column, it acts on the
+    ids in front of it."""
+    now = mc._now_ms()
+    mc._VITALS.update({"space": "central"})
+    roster = {"agents": [
+        {"agentId": "user-agent-open9", "name": "Open", "distance": 1,
+         "canSpeak": True, "isOpenToTalk": True, "isOnSameMap": True,
+         "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+        {"agentId": "user-agent-shut9", "name": "Shut", "distance": 2,
+         "canSpeak": False, "isOpenToTalk": True, "isOnSameMap": True,
+         "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}},
+    ]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    result = _check(mc.agents())
+    assert "user-agent-open9" in result
+    assert "user-agent-shut9" not in result, "do not offer a target we will refuse"
+    assert "cannot-receive=1" in result, "but say how many are here"
+
+
+def test_an_empty_room_still_shows_something(control):
+    """Hiding everybody would leave the agent with no idea where it is."""
+    now = mc._now_ms()
+    mc._VITALS.update({"space": "central"})
+    roster = {"agents": [
+        {"agentId": "user-agent-shut8", "name": "Shut", "distance": 2,
+         "canSpeak": False, "isOpenToTalk": True, "isOnSameMap": True,
+         "status": "idle", "activeAction": None,
+         "position": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    result = _check(mc.agents())
+    assert "user-agent-shut8" in result
+
+
+def test_somebody_addressing_us_is_never_hidden_from_the_roster(control):
+    """isTalkingToYou is the world telling us a conversation is open. Filtering
+    them out of the roster would hide the one person most worth answering."""
+    mc._VITALS.update({"space": "central"})
+    roster = {"agents": [
+        {"agentId": "user-agent-talking9", "name": "Talking", "distance": 1,
+         "canSpeak": False, "isOpenToTalk": True, "isOnSameMap": True,
+         "isTalkingToYou": True, "status": "busy", "activeAction": None,
+         "position": {"spaceId": "central"}}]}
+    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
+    assert "user-agent-talking9" in _check(mc.agents())

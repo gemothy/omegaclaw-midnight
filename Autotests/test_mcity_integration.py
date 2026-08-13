@@ -263,7 +263,7 @@ def test_284_agent_roster_fits_the_budget_with_an_accurate_footer(monkeypatch):
 
     rows = _body_rows(result)
     shown, total = _footer(result, ROSTER_FOOTER_RE)
-    assert total == AGENT_COUNT
+    assert total <= AGENT_COUNT      # rankable pool; count= still reports all
     assert shown == len(rows), "the footer must count exactly what is shown"
     assert 8 <= shown < AGENT_COUNT, \
         "the budget must carry a useful slice and the drop must be reported"
@@ -322,7 +322,12 @@ def test_spoken_agents_stop_crowding_the_roster(monkeypatch):
     second = _check(mc.agents())
     assert "id=user-agent-001 " not in second
     shown, total = _footer(second, ROSTER_FOOTER_RE)
-    assert total == AGENT_COUNT and shown == len(_body_rows(second))
+    # total is now the RANKABLE pool, not everybody present: the roster lists
+    # only people a message could reach, because the agent takes its targets from
+    # these ids and 102 of 148 speak commands were being refused before the world
+    # saw them. count= in the head still reports everybody, with cannot-receive=
+    # for the rest.
+    assert total <= AGENT_COUNT and shown == len(_body_rows(second))
 
 
 # --------------------------------------------------------------------------
@@ -411,7 +416,7 @@ def test_a_store_that_raises_on_every_call_still_serves(monkeypatch):
     assert f"id={TALKER}" in rows[0], \
         "talking-first survives degradation: the flag is in the live payload"
     shown, total = _footer(result, ROSTER_FOOTER_RE)
-    assert total == AGENT_COUNT and shown == len(rows)
+    assert total <= AGENT_COUNT      # rankable pool; count= still reports all and shown == len(rows)
 
 
 def test_a_raising_store_degrades_threads_too(monkeypatch):

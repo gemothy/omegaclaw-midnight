@@ -3497,10 +3497,31 @@ def agents():
     ordered = [by_id[agent_id] for agent_id in ranked_ids] + rest
 
     total = len(ordered) or 1
+    # Only people a message could actually reach.
+    #
+    # The roster used to list everybody, and the agent took its targets from it:
+    # 148 speak commands in twenty-five minutes, 102 of them refused by this
+    # harness as unreachable before the world ever saw them. It does not act on
+    # the can-speak= column, it acts on the ids in front of it - which is the same
+    # lesson as the retired skills and the poisoned history, arriving a fourth
+    # time.
+    #
+    # The hidden ones are counted rather than silently dropped, so the agent still
+    # knows how full the room is and I can still see the ratio in the logs.
+    # Somebody already addressing us is never hidden, whatever else we think:
+    # isTalkingToYou is the world telling us a conversation is open.
+    speakable = [entry for entry in ordered
+                 if _worth_speaking_to(entry) or entry.get("talking") is True]
+    hidden = len(ordered) - len(speakable)
+    ordered = speakable or ordered[:1]
+    total = len(ordered) or 1
     rows = [(_agent_row(entry, spoke.get(entry["id"])), (total - index) / total)
             for index, entry in enumerate(ordered)]
 
+    # count stays the number of people here, which is what it has always meant.
     pairs = [("count", len(items))]
+    if hidden:
+        pairs.append(("cannot-receive", hidden))
     if _degraded(upsert_ok, rank_ok):
         pairs.append(("store", "degraded"))
     head = _line("AGENTS", "OK", pairs)
