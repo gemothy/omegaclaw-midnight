@@ -3032,8 +3032,10 @@ def test_a_thread_that_timed_out_does_not_close_the_person(control):
     _check(mc.threads())
     assert mc._refused_ago_ms("closed", "agent-2") is None, (
         "a stale_timeout is the world's lifecycle, not a refusal")
-    assert "agent-2" in mc._someone_is_waiting(), (
-        "somebody who asked us a question and got nothing back is waiting")
+    assert "agent-2" not in mc._someone_is_waiting(), (
+        "they are not refused, but that conversation is over - answering a "
+        "closed thread cannot land, and pointing the agent at 201 of them in "
+        "twenty-five minutes is how this was found")
 
 
 def test_the_world_saying_so_is_still_believed():
@@ -3938,3 +3940,31 @@ def test_not_knowing_where_somebody_is_does_not_refuse_them():
                              "isOpenToTalk": True, "isOnSameMap": True,
                              "activeAction": None})
     assert mc._entry_reachable(entry) is True
+
+
+def test_a_closed_thread_is_nobody_waiting(control):
+    """The world shuts every thread at sixty seconds and this list is mostly
+    closed ones, so "they spoke last and we never answered" was true of almost
+    every row we hold. waiting= read non-zero in 463 of 1372 samples and 201 turns
+    were told somebody was owed a reply, against FIVE inbound threads in three
+    hours. The agent was being sent to answer conversations that had ended."""
+    mine = "agent-1"
+    payload = {"threads": [
+        {"threadId": "dead", "threadStatus": "closed",
+         "threadCloseReason": "stale_timeout",
+         "initiatorAgentId": "user-agent-gone2", "recipientAgentId": mine,
+         "initiatorMessageCount": 1, "recipientMessageCount": 0},
+        {"threadId": "live", "threadStatus": "open",
+         "initiatorAgentId": "user-agent-live2", "recipientAgentId": mine,
+         "initiatorMessageCount": 1, "recipientMessageCount": 0},
+    ]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())
+    _check(mc.threads())
+    waiting = mc._someone_is_waiting()
+    assert "user-agent-live2" in waiting, waiting
+    assert "user-agent-gone2" not in waiting, "that conversation is over"
+
+
+def test_a_payload_without_a_status_falls_back_to_the_close_stamp():
+    assert mc._thread_closed({"threadClosedAtMs": 1786500000000}) is True
+    assert mc._thread_closed({"threadClosedAtMs": None}) is False

@@ -3592,6 +3592,17 @@ def recent_events():
     return _line("RECENT-EVENTS", "OK", (("count", len(items)),), rows or ["- none"])
 
 
+def _thread_closed(item):
+    """True when the world has already shut this thread.
+
+    threadStatus is the plain answer; threadClosedAtMs is the fallback for a
+    payload that omits it, and both appear on every row this world sends."""
+    status = _text(_get(item, "threadStatus"))
+    if status:
+        return status.lower() != "open"
+    return bool(_number(_get(item, "threadClosedAtMs"), 0, 0, 10 ** 15))
+
+
 def _thread_counterpart(item, own_id):
     """The other agent in a thread, however this world spells it.
 
@@ -3679,6 +3690,15 @@ def _refresh_waiting_if_stale():
                 continue
             who = _thread_counterpart(item, own_id)
             if _thread_mine(item, own_id) != "no":
+                continue
+            # A CLOSED thread is nobody waiting. The world shuts every thread at
+            # sixty seconds, and this list is mostly closed ones, so "they spoke
+            # last and we did not answer" was true of almost every row we hold:
+            # waiting= read non-zero in 463 of 1372 samples and 201 turns were
+            # told somebody was owed a reply, against FIVE inbound threads in
+            # three hours. The agent was being sent to answer conversations that
+            # had ended, which cannot land and cannot be answered.
+            if _thread_closed(item):
                 continue
             if who and ID_RE.match(who) and _can_be_reached(who) is not False:
                 found.append(who)
@@ -3810,6 +3830,10 @@ def threads(_ignored=None):
         # closing a quiet thread is its normal lifecycle; a refusal is something
         # the world says when we speak. That path still records it, below.
         asleep = False
+        # Same rule as the vitals refresh: a closed thread is nobody waiting.
+        # These two lists were built independently and only one of them knew.
+        if mine == "no" and _thread_closed(item):
+            mine = None
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
             # False only when the world has actually said so; unknown counts as
             # reachable, because refusing on a guess is what silenced the agent

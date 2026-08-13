@@ -171,3 +171,13 @@ def test_the_cold_open_throttle_can_be_cleared_as_well_as_set():
         "nothing clears the streak; the throttle only tightens")
     assert "_note_cold_open(refused=True)" in source
     assert "_note_cold_open_sent()" in source
+
+
+def test_both_waiting_lists_exclude_a_closed_thread():
+    """waiting= is built twice - once by the vitals refresh and once while
+    rendering mcity-threads - and only the refresh learned that a closed thread is
+    nobody waiting. The rendered one kept sending the agent to answer
+    conversations the world had already shut."""
+    source = CLIENT.read_text()
+    assert source.count("_thread_closed(item)") >= 2, (
+        "both waiting lists must apply it")
