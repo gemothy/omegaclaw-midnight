@@ -3775,17 +3775,18 @@ def recent_events():
 
 # How recently somebody must have spoken for a reply to be worth trying.
 #
-# Five minutes, and the number comes from the world rather than from taste.
-# Polling the thread list every twelve seconds and recording the age of each row
-# when it FIRST became visible: an inbound thread appeared at 146 seconds old,
-# already closed. The world does not publish somebody else's thread to us until
-# after it has timed out, so a two minute window - which is what this was - wrote
-# off every inbound message before the harness could ever see it.
+# Five minutes, chosen to cover a publication delay that VARIES.
 #
-# That is why waiting= read 0 in 289 consecutive samples while can_it_act reported
-# the last inbound message as 82 seconds ago, and why check_reply_path passed the
-# whole time: it redates a real thread to 20 seconds, an age the world never
-# actually shows us.
+# Polling the thread list and recording each row's age when it first became
+# visible gave 146 seconds (already closed) on one occasion and 4.4 seconds (still
+# open) on another. I originally read the first of those as a rule - "the world
+# only publishes somebody else's thread after it closes" - on a sample of one, and
+# it is not true. What is true is that the delay is sometimes long enough that a
+# two minute window misses the message entirely.
+#
+# The two minute version had waiting= reading 0 in 289 consecutive samples while
+# inbound messages were arriving every few minutes; at five minutes it fires, and
+# the agent aimed at the right person on 4 of 4 turns.
 #
 # Not longer than five minutes. The failure in the other direction is on record
 # too - with no age limit at all the harness announced 201 people owed a reply

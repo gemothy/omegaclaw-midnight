@@ -63,11 +63,11 @@ def main():
     now = int(time.time() * 1000)
     row = dict(unanswered[0])
     who = row.get("initiatorAgentId")
-    # 150 seconds, not 20. The world does not publish an inbound thread to us
-    # until after it has closed - measured, one appeared at 146s old - so a
-    # 20-second fixture models a state that never occurs, and this check passed
-    # for several passes while every real inbound message was being written off
-    # as too old. A check that models an impossible state is worse than none.
+    # 150 seconds, the SLOW end of a variable publication delay - measured at
+    # 146s once and 4.4s another time. The fixture models the slow case on
+    # purpose: a 20-second one passed for several passes while every real inbound
+    # message was being written off as too old, because it never exercised the
+    # age at which a message actually has to survive.
     row["threadLastMessageAtMs"] = now - 150000
     row["threadCreatedAtMs"] = now - 150000
 
