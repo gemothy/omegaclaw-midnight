@@ -69,6 +69,32 @@
 # Kept at 0.42 across the model change rather than tuned down: it is a known-good
 # number on this box, and the failure it guards against took the whole desktop
 # with it.
+# ENGINE CRASHES, three of them on 2026-08-12/13, each one a clean container exit
+# that Docker's restart policy recovered after about five minutes of dead agent.
+# They are not the wedge the watchdog exists for - the process really died. The
+# engine log gives the cause exactly:
+#
+#   RuntimeError: execute(...) failed: err 1 != CUDA_SUCCESS ::
+#     shimCuLaunchKernelEx     in _cudnn_gemm_fp8 -> fp8_gemm_sm100
+#                              via runner(inputs=inputs, tactic=tactic)
+#
+# A kernel launch failure inside an FP8 GEMM tactic that FlashInfer's autotuner
+# picked during warmup. This is a known family on SM100/Blackwell - vllm#26381,
+# #27751, #33543 all report autotune-selected FlashInfer kernels failing at
+# launch, and this box is a GB10.
+#
+# VLLM_FLASHINFER_AUTOTUNE_SKIP_OPS takes flashinfer's own op names, and
+# fp8_gemm_sm100 registers as "fp8_gemm" (flashinfer/gemm/gemm_base.py:1370).
+# Skipping it leaves that GEMM on its heuristic default instead of a tuned
+# tactic - which is what the autotuner falls back to anyway, and what the code
+# already does for fp4_gemm when cute-dsl is selected.
+#
+# NOT the blanket VLLM_DISABLE_FLASHINFER_AUTOTUNE that search results suggest:
+# no such flag exists in this build. The knobs it does have are listed by
+#   docker exec vllm-mcity python3 -c "import vllm.envs as e; print(dir(e))"
+#
+# Revert by deleting the --env line below; the crash is intermittent, so judge it
+# over days rather than hours.
 set -euo pipefail
 
 NAME="${VLLM_NAME:-vllm-mcity}"
@@ -97,6 +123,7 @@ docker run -d \
   --volume /home/gomiex/models:/models \
   --volume /home/gomiex/.cache/huggingface:/root/.cache/huggingface \
   --env HF_HUB_OFFLINE=1 \
+  --env VLLM_FLASHINFER_AUTOTUNE_SKIP_OPS=fp8_gemm \
   "$IMAGE" \
   "$MODEL" \
   --served-model-name "$MODEL" mcity-agent \
