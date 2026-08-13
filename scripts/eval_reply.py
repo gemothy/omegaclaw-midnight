@@ -16,6 +16,20 @@ the vitals line, and asks the model N times whether it writes back to THAT id.
 
 Scores three things, in the order they matter:
   answered      a speak aimed at the id the line said was waiting
+
+Results so far, same prompt, same harness, 2026-08-13:
+
+  nvidia/Qwen3.6-35B-A3B-NVFP4   0/20 answered - emits (mcity-threads) every
+                                 time, the two-step the mission was changed to
+                                 stop
+  nvidia/Qwen3-32B-FP4 (dense)   0/16 answered - speaks, but to somebody pulled
+                                 out of its own history rather than the waiting
+                                 id. Worse: the MoE at least takes a step toward
+                                 answering
+
+So the local alternative is not better, and the MoE stays. What both models share
+is that they will not act on "answer this id" as a bare instruction - which points
+at the harness owing them a copyable command, not at a model swap
   wrong-target  a speak aimed at somebody else - worse than silence, it burns
                 the write and leaves the person unanswered
   no-speak      no message at all
