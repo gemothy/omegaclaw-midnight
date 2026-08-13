@@ -4280,3 +4280,25 @@ def test_the_render_path_also_carries_what_they_said(control):
     _check(mc.threads())
     assert "user-agent-asked9" in mc._someone_is_waiting()
     assert "lumber deal" in str((mc._WAITING.get("said") or {}).get("user-agent-asked9"))
+
+
+def test_the_waiting_person_is_named_too(control):
+    """The waiting branch carried they-said= and no who=, so the agent had no name
+    for the person it was answering and took the only one in sight - its own, out
+    of their quoted message: "Gem, yes, the crystal shipment cleared customs",
+    addressed to itself."""
+    now = mc._now_ms()
+    entry = mc._parse_agent({"id": "user-agent-asker9", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "name": "Holly", "profession": "hacker",
+                             "activeAction": None,
+                             "position": {"spaceId": "central"}})
+    mc._note_can_speak(entry, now)
+    mc._VITALS.update({"at_ms": now, "hunger": "normal(20)", "items": "crystal=5",
+                       "space": "central"})
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-asker9"],
+                        "said": {"user-agent-asker9": "is the deal on?"},
+                        "at": {"user-agent-asker9": now}})
+    line = mc._vitals_line() or ""
+    assert "who=Holly,hacker" in line, line
+    assert "they-said=" in line, line

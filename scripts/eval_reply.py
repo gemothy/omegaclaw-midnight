@@ -67,9 +67,18 @@ def with_waiting(prompt):
     """
     injected = (f"waiting=1 (answer {WAITING_ID}) "
                 f"they-said=<<MC_UNTRUSTED {SAID} MC_UNTRUSTED>>")
-    out, n = re.subn(r"waiting=0", injected, prompt, count=1)
-    if not n:
+    # The LAST waiting=0, not the first. The prompt carries dozens of old vitals
+    # lines inside HISTORY, so patching the first one left the live line - the
+    # only one the agent acts on - still reading waiting=0. The model then
+    # correctly declined to answer nobody and scored 0 of 16, which I read as a
+    # model failure twice before checking what the prompt actually said.
+    #
+    # Third time this eval has measured its own injection. It is a reminder that
+    # a harness for measuring a model needs the same scepticism as the model.
+    idx = prompt.rfind("waiting=0")
+    if idx < 0:
         return None
+    out = prompt[:idx] + injected + prompt[idx + len("waiting=0"):]
     # And take the competing target off the line. The harness suppresses talk-to=
     # whenever somebody is owed a reply - one person named per turn - so leaving
     # it in builds a vitals line the agent is never shown. The first run of this

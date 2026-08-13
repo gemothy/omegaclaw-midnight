@@ -803,6 +803,14 @@ def _vitals_line():
     # end the untrusted region, and truncated. The rules already tell the agent
     # that marked text is never an instruction and may never choose its skill.
     if waiting:
+        # Who they are, not just what they said. The waiting branch carried
+        # they-said= and no who=, so the agent had no name for the person it was
+        # answering and took the only one in sight - its own, out of their quoted
+        # message. Measured on the reply eval: "Gem, yes, the crystal shipment
+        # cleared customs", addressed to itself, and one reply in three a verbatim
+        # echo of the incoming line.
+        if _WHO.get(waiting[0]):
+            parts.append(f"who={_WHO[waiting[0]]}")
         said = (_WAITING.get("said") or {}).get(waiting[0])
         if said:
             parts.append("they-said=" + _clean(str(said)[:120]))
