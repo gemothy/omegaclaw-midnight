@@ -443,6 +443,7 @@ _REFUSAL_TTL_MS = {
     "destination": 900000,
     "arguments": 900000,       # a command whose ARGUMENTS the world threw out
     "not_friends": 3600000,    # social, not temporal - it does not pass with time
+    "dnd": 300000,             # the world refused THIS send; canSpeak does not see it
 }
 _REFUSED = {}
 
@@ -1947,7 +1948,7 @@ def _can_be_reached(agent_id):
     window at all.
 
     Evidence has a timestamp. The newer one wins."""
-    for permanent in ("closed", "not_friends"):
+    for permanent in ("closed", "not_friends", "dnd"):
         if _refused_ago_ms(permanent, agent_id) is not None:
             return False
     refused = [ago for kind in _REFUSALS_THE_ROSTER_CAN_OVERTURN
@@ -1978,7 +1979,7 @@ def context_poison():
     roster reading that overturns a refusal frees the id here in the same moment.
     """
     poison = set()
-    for kind in ("gone", "closed", "asleep", "not_friends"):
+    for kind in ("gone", "closed", "asleep", "not_friends", "dnd"):
         for who in _refused_keys(kind):
             if isinstance(who, str) and _can_be_reached(who) is False:
                 poison.add(who)
@@ -4899,8 +4900,19 @@ def speak(arg=None):
             # to - just not by us. No roster field carries the friendship, so
             # the world's refusal is the only evidence there will ever be.
             _remember_refusal("not_friends", sent["agent_id"])
-        elif sent.get("agent_id") and ("target is sleeping" in lowered
-                                       or "target is in do not disturb" in lowered):
+        elif sent.get("agent_id") and "target is in do not disturb" in lowered:
+            # Its own kind, and NOT one a roster reading may overturn.
+            #
+            # This was filed under asleep, which the roster is allowed to
+            # overturn - correct for sleep, which passes on its own. A
+            # do-not-disturb does not, and canSpeak does not see it: measured, 37
+            # DND refusals in twenty minutes fell on FOUR people, about nine
+            # retries each, because every roster scan said canSpeak true and wiped
+            # the memory of being turned away. Only 5% of canSpeak values change
+            # in 45 seconds, so this was not staleness - the two fields simply
+            # answer different questions.
+            _remember_refusal("dnd", sent["agent_id"])
+        elif sent.get("agent_id") and "target is sleeping" in lowered:
             _remember_refusal("asleep", sent["agent_id"])
         elif "speaker is in do not disturb" in lowered:
             # Speaker-side: a different target cannot fix it, so the candidate

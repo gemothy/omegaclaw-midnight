@@ -3779,3 +3779,29 @@ def test_the_world_still_gets_the_final_no():
                              "isOpenToTalk": True, "isOnSameMap": True,
                              "activeAction": None})
     assert mc._entry_reachable(entry) is False
+
+
+def test_a_do_not_disturb_is_not_wiped_by_the_next_roster_read():
+    """37 DND refusals in twenty minutes fell on FOUR people - about nine retries
+    each - because DND was filed under asleep, which a fresher roster reading may
+    overturn. Sleep passes on its own; a do-not-disturb the world just issued does
+    not, and canSpeak does not see it. Only 5% of canSpeak values change in 45
+    seconds, so this was never staleness: the two fields answer different
+    questions."""
+    now = mc._now_ms()
+    mc._remember_refusal("dnd", "user-agent-quiet2")
+    mc._CAN_SPEAK["user-agent-quiet2"] = (True, now + 1000)
+    assert mc._can_be_reached("user-agent-quiet2") is False
+
+
+def test_sleep_is_still_overturned_by_a_later_look():
+    """The overturning rule keeps the kind it was written for."""
+    now = mc._now_ms()
+    mc._REFUSED[("asleep", "user-agent-napper2")] = now - 60000
+    mc._CAN_SPEAK["user-agent-napper2"] = (True, now)
+    assert mc._can_be_reached("user-agent-napper2") is True
+
+
+def test_a_do_not_disturb_target_leaves_the_agents_context():
+    mc._remember_refusal("dnd", "user-agent-quiet3")
+    assert "user-agent-quiet3" in mc.context_poison()
