@@ -2536,6 +2536,16 @@ def _travel_to_people_command():
                     "(mcity-exit-building)")
 
         if not best or not ID_RE.match(best):
+            # Why no route, in the log rather than the prompt. The exit door has
+            # never fired in production while working perfectly when driven by
+            # hand against the same live payloads, and two passes of reasoning
+            # from the outside have not closed that gap.
+            logger.info(
+                "mcity route: none (space=%s kind=%s indoors=%s reachable=%s "
+                "places=%d nolink=%s)",
+                _VITALS.get("space"), _VITALS.get("space_kind"), indoors,
+                _REACHABLE.get("n"), len(_AWAKE_PLACES),
+                _now_ms() < _no_link_exit_until_ms)
             return None
         # A different DISTRICT needs travel-district; only an area inside this
         # one can be walked to. Getting that wrong stranded the agent: it sat in
