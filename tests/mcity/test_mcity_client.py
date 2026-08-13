@@ -4373,3 +4373,24 @@ def test_the_answerable_window_outlasts_the_worlds_publication_delay():
     now = mc._now_ms()
     assert mc._thread_closed({"threadLastMessageAtMs": now - 150000}) is False
     assert mc._thread_closed({"threadLastMessageAtMs": now - 3600000}) is True
+
+
+def test_a_stale_space_kind_does_not_make_a_district_indoors():
+    """The route diagnostic caught "space=central kind=interior indoors=True" - a
+    district treated as a building because the agent had been inside one when
+    navigation-options was last read. Everything gated on indoors, the exit door
+    above all, would then fire outdoors."""
+    mc.reset_runtime_state()
+    mc._note_space_kind({"currentSpace": {"id": "hacker-house-interior",
+                                          "kind": "interior"}})
+    mc._VITALS["space"] = "hacker-house-interior"
+    assert mc._space_kind_now() == "interior"
+    mc._VITALS["space"] = "central"          # walked out; no fresh read yet
+    assert mc._space_kind_now() is None, "that kind described a different room"
+
+
+def test_a_matching_space_kind_is_still_used():
+    mc.reset_runtime_state()
+    mc._note_space_kind({"currentSpace": {"id": "central", "kind": "district"}})
+    mc._VITALS["space"] = "central"
+    assert mc._space_kind_now() == "district"

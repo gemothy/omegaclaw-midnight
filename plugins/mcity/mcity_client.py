@@ -2506,14 +2506,14 @@ def _travel_to_people_command():
     spaceId, so this turns that into an instruction."""
     try:
         here = _VITALS.get("space")
-        if _VITALS.get("space_kind") is None:
+        if _space_kind_now() is None:
             # navigation-options, not the retired context skill: this read also
             # populates the teleport exit and the district list, and the context
             # endpoint was never actually being called from here.
             payload, error = _skill_read("VITALS", "navigation-options")
             if error is None and isinstance(payload, dict):
                 _note_space_kind(payload)
-        indoors = (_VITALS.get("space_kind") or "").lower() == "interior"
+        indoors = (_space_kind_now() or "").lower() == "interior"
 
         def _pick():
             now = _now_ms()
@@ -4716,8 +4716,27 @@ def _note_space_kind(payload):
             kind = _text(space.get("kind"))
             if kind:
                 _VITALS["space_kind"] = kind
+                # Remember WHICH space that kind describes. Without this the kind
+                # outlives the room: the route diagnostic caught
+                # "space=central kind=interior indoors=True", which is a district
+                # being treated as a building because the agent had been indoors
+                # when navigation-options was last read. Everything gated on
+                # indoors - the exit door above all - would then fire outdoors.
+                _VITALS["space_kind_of"] = _text(space.get("id")) or None
     except Exception:      # noqa: BLE001
         return
+
+
+def _space_kind_now():
+    """The kind of the space we are in NOW, or None if we only know an old one."""
+    kind = _VITALS.get("space_kind")
+    if not kind:
+        return None
+    described = _VITALS.get("space_kind_of")
+    here = _VITALS.get("space")
+    if described and here and str(described) != str(here):
+        return None
+    return kind
 
 
 def _teleport_exit():
