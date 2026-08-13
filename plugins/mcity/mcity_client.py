@@ -2334,21 +2334,21 @@ def _last_aimed_at(agent_id):
     return max(stored, said, _AIMED.get(agent_id, 0))
 
 
-# NOTE, measured 2026-08-13 across ~90 minutes of live threads: 15 threads this
-# agent opened got 0 replies, and the targets covered every state - idle 5,
-# sleeping 5, trade_crypto 3, chop_wood 1, mine_ore 1 - with no state doing
-# better than another. In the same window 4 agents opened threads with us, we
-# answered 3, and NONE of those three ever spoke again.
+# NOTE on how often an opener is answered here, and a correction.
 #
-# The population of this city does not sustain conversation. One message each way
-# is the practical ceiling, and the world closes every thread at sixty seconds
-# regardless. So the reply rate to our openers is not a harness defect and
-# rewriting openers will not move it - that was already tried, and the register
-# fix ("market stall" in mcity.metta) changed the messages without changing the
-# outcome.
+# A sample of 15 openers drew 0 replies and I concluded this city had a hard
+# ceiling - that nobody answers a stranger and the reply rate was not worth
+# chasing. A larger sample says otherwise: 22 openers to strangers drew 4 replies,
+# about 18%. Getting 0 from 15 at that rate happens roughly one time in twenty,
+# which is what I sampled and then wrote down as a law.
 #
-# What IS ours to control is answering the people who write first, which works:
-# 3 of 4 in a good window. Rank openers cheaply and spend the effort there.
+# So openers ARE worth sending and the register of them plausibly matters. What
+# has not been shown is that any particular targeting rule beats another: the
+# preference for people who once wrote to us stands at 0 of 2, which is too few
+# to mean anything in either direction.
+#
+# Answering people who write first remains the metric most under our control, and
+# it works when the harness lets it - 3 of 4 in a good window.
 def _best_person_to_talk_to():
     """One reachable agent id, preferring somebody we have not spoken to.
 
