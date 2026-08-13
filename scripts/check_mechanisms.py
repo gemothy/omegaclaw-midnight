@@ -20,6 +20,13 @@ quiet for good reasons - so read this as a list of things to ASK about, not a
 verdict. The ones that have never fired across several windows are the suspects.
 
     python3 scripts/check_mechanisms.py [window]
+
+READ THE COUNTS AS BOOLEANS, NOT RATES. Cross-checked against a second log
+reader over the same window: some agree exactly (9 vs 9, 8 vs 8, 41 vs 39) and
+some do not (who= 196 vs 155, cold_opens_paused 16 vs 0). Window boundaries
+account for the small gaps; the large one is unexplained. Whether a mechanism
+fired at all is the question this tool answers well, and it is the question that
+found both dead ones.
 """
 import re
 import subprocess
