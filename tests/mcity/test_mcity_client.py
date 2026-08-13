@@ -3893,3 +3893,17 @@ def test_a_fresh_engagement_still_holds_speech(control):
     mc._last_self_probe_ms = mc._now_ms()
     result = _check(mc.speak("user-agent-abc hello there"))
     assert result.startswith("MCITY-SPEAK-SKIPPED reason=self_engaged"), result
+
+
+def test_the_throttle_tolerates_an_ordinary_run_of_bad_luck():
+    """Measured on what the world DID with each send: cold opens are accepted 27
+    times in 71 - 38% - and replies 7 in 33. At a 62% refusal rate a run of five
+    comes up about once in eleven attempts, so a threshold of five fired on noise.
+    Ten is 0.8%: a wall rather than a bad afternoon."""
+    mc.reset_runtime_state()
+    for _ in range(5):
+        mc._note_cold_open(refused=True)
+    assert mc._cold_opens_paused() == 0, "five in a row is ordinary at 62% refusal"
+    for _ in range(5):
+        mc._note_cold_open(refused=True)
+    assert mc._cold_opens_paused() > 0, "ten in a row is a wall"

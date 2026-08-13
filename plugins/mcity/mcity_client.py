@@ -1940,7 +1940,17 @@ _REFUSALS_THE_ROSTER_CAN_OVERTURN = ("gone", "asleep")
 # mostly does not, and every wasted open is one of twelve writes a minute.
 _cold_opens_refused = 0
 _cold_open_paused_until_ms = 0
-_COLD_OPEN_STREAK = 5          # refusals in a row before we stop for a moment
+# Ten, not five. Measured directly on what the world DID with each send, rather
+# than by joining refusals against a roster snapshot taken later: cold opens are
+# accepted 27 times in 71 - 38% - and replies only 7 in 33. Opening conversations
+# works, and works better than answering, which is the opposite of what this
+# throttle was built on.
+#
+# At a 62% refusal rate a run of five is ordinary luck - it comes up about once
+# in eleven attempts - so the throttle was firing on noise. A run of ten is 0.8%,
+# which is a wall rather than a bad afternoon. Writes are 5.3 a minute against
+# the twelve allowed, so there is room for the attempts this lets through.
+_COLD_OPEN_STREAK = 10
 _COLD_OPEN_PAUSE_MS = 60000
 
 
