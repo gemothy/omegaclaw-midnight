@@ -196,3 +196,14 @@ def test_the_reachable_count_respects_refusals():
         "a reachable count that ignores refusals cannot fall to zero")
     assert source.count("_worth_speaking_to") >= 4, (
         "every reachable count must use the one verdict")
+
+
+def test_no_helper_is_hiding_between_a_guard_and_its_skill():
+    """Twice now a helper has been inserted between @_guard("X") and the def it
+    decorates, which silently makes the HELPER the skill: _teleport_exit started
+    returning "MCITY-EXIT-BUILDING-FAILED reason=internal" instead of an action,
+    and the merchants block before it was a SyntaxError."""
+    source = CLIENT.read_text()
+    offenders = re.findall(r"@_guard\([^\)]*\)\n(?!def )", source)
+    assert not offenders, (
+        f"{len(offenders)} decorator(s) do not sit directly above their def")

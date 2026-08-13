@@ -4479,6 +4479,36 @@ def enter_building(arg=None):
     return _mutate("ENTER-BUILDING", build)
 
 
+def _teleport_exit():
+    """The move that leaves a teleport-exit building, or None.
+
+    Reads the world's own exitBuilding block rather than guessing a destination:
+    it names the target space and the exact entry tile to arrive on."""
+    try:
+        payload, error = _skill_read("EXIT-BUILDING", "navigation-options")
+        if error is not None or not isinstance(payload, dict):
+            return None
+        exit_block = payload.get("exitBuilding")
+        if not isinstance(exit_block, dict):
+            return None
+        if _text(exit_block.get("kind")) != "teleport":
+            return None
+        target = _text(exit_block.get("targetSpaceId"))
+        entry = ((exit_block.get("targetSpace") or {}).get("entry")
+                 if isinstance(exit_block.get("targetSpace"), dict) else None)
+        if not target:
+            return None
+        destination = {"spaceId": target}
+        if isinstance(entry, dict):
+            for axis in ("x", "y"):
+                value = _number(entry.get(axis), None, -10 ** 6, 10 ** 6)
+                if value is not None:
+                    destination[axis] = int(value)
+        return {"kind": "move_to", "destination": destination}
+    except Exception:      # noqa: BLE001
+        return None
+
+
 @_guard("EXIT-BUILDING")
 def exit_building():
     # This building's exit is a teleport, not a link, and exit_building only
@@ -4492,6 +4522,28 @@ def exit_building():
                     "the world said moments ago that this building has no linked "
                     "exit, so this door does not open that way"),
             _cached_route() or _next_action_command())
+    # A teleport exit, walked through as a move. The world publishes it on
+    # navigation-options and this code never read it:
+    #
+    #   exitBuilding: {kind: teleport, targetSpaceId: central,
+    #                  teleportId: hacker-house-exit,
+    #                  targetSpace: {entry: {spaceId: central, x: 2, y: 9}}}
+    #
+    # Meanwhile exit_building submitted {kind: exit_building}, which is the LINK
+    # door, and the world answered "agent is not inside a linked building" every
+    # time. The agent sat in hacker-house-interior for over an hour: 214 speaks
+    # into a room where all 55 occupants refused, and no way out because the only
+    # exit skill it had was for a different kind of door.
+    #
+    # The entry point is the world's own, so this is not a guess about where to
+    # land - only about which action carries us there, and move_to is the one
+    # this harness already uses for every other destination.
+    teleport = _teleport_exit()
+    if teleport is not None:
+        result = _mutate("EXIT-BUILDING", lambda: (teleport, None))
+        if "MCITY-EXIT-BUILDING-FAILED" not in (result or ""):
+            _no_link_exit_until_ms = 0
+            return result
     result = _mutate("EXIT-BUILDING", lambda: ({"kind": "exit_building"}, None))
     if "not inside a linked building" in (result or "").lower():
         _no_link_exit_until_ms = _now_ms() + _NO_LINK_EXIT_MS

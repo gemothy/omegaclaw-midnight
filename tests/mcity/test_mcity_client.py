@@ -4038,3 +4038,30 @@ def test_a_room_that_has_refused_us_stops_counting_as_reachable():
     mc._remember_refusal("dnd", "user-agent-refuser")
     assert mc._worth_speaking_to(entry) is False, (
         "the world has already turned us away from this one")
+
+
+def test_a_teleport_exit_is_read_from_the_world(control):
+    """The agent sat in hacker-house-interior for over an hour - 214 speaks into a
+    room where all 55 occupants refused - because exit_building only ever
+    submitted {kind: exit_building}, the LINK door, and the world answered "agent
+    is not inside a linked building" every time. navigation-options publishes the
+    teleport, with the exact entry tile to arrive on."""
+    control.force("/api/skill/agents/agent-1/navigation-options", 200, json.dumps({
+        "exitBuilding": {"kind": "teleport", "targetSpaceId": "central",
+                         "teleportId": "hacker-house-exit",
+                         "targetSpace": {"entry": {"spaceId": "central",
+                                                   "x": 2, "y": 9}}}}).encode())
+    action = mc._teleport_exit()
+    assert action == {"kind": "move_to",
+                      "destination": {"spaceId": "central", "x": 2, "y": 9}}, action
+
+
+def test_a_linked_door_is_left_to_the_old_path(control):
+    control.force("/api/skill/agents/agent-1/navigation-options", 200,
+                  json.dumps({"exitBuilding": {"kind": "link"}}).encode())
+    assert mc._teleport_exit() is None
+
+
+def test_no_exit_block_is_not_a_crash(control):
+    control.force("/api/skill/agents/agent-1/navigation-options", 200, b'{}')
+    assert mc._teleport_exit() is None
