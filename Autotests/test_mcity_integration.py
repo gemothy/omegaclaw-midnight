@@ -877,10 +877,15 @@ def _busy_city_routes():
         {"agentId": "user-agent-awake", "name": "Awake", "distance": 4,
          "isOpenToTalk": True, "canSpeak": True, "status": "idle",
          "activeAction": None, "position": {"spaceId": "central"}},
-        # waiting on us but mid-engagement: still owed a reply, cannot hear it
+        # waiting on us but at a crypto terminal: still owed a reply, cannot hear
+        # it. canSpeak false is how the world says this - measured live, agents at
+        # trade_crypto had it true 4 times in 55, while harvesters at mine_ore and
+        # chop_wood had it true 72 times in 76. The activity is the world's call,
+        # not ours; engage alone never meant unreachable.
         {"agentId": "user-agent-engaged", "name": "Engaged", "distance": 2,
-         "isOpenToTalk": True, "canSpeak": True, "status": "busy",
-         "activeAction": {"kind": "engage", "phase": "active"},
+         "isOpenToTalk": True, "canSpeak": False, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active",
+                          "activity": "trade_crypto"},
          "position": {"spaceId": "central"}},
         # asleep, off-map
         {"agentId": "user-agent-sleeper", "name": "Sleeper", "distance": None,

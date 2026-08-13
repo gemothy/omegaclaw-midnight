@@ -1091,24 +1091,35 @@ def test_the_opener_fetches_a_name_when_it_has_none(control):
     assert "(mcity-speak _quote_user-agent-awake" in opener
 
 
-def test_an_engaged_target_is_unreachable_despite_can_speak(control):
-    """Three targets that refused with 'target is in do not disturb mode' all
-    carried canSpeak true while running an activeAction of kind engage. It is the
-    same state the world put us in, and ours cleared the moment we went idle, so
-    the rule is symmetric."""
+def test_the_world_decides_which_engaged_agents_can_hear_us(control):
+    """Rewritten on measurement, and it reconciles two findings that looked
+    contradictory.
+
+    engage in this world means engaged with a WORKSITE, not with a person: all
+    131 engaged agents carried an engageTargetId and the activities were
+    trade_crypto, chop_wood and mine_ore. The world then sets canSpeak per
+    activity - mine_ore 35 of 36 true, chop_wood 37 of 40, trade_crypto only 4 of
+    55. The original evidence here was three DND refusals from agents at
+    trade_crypto, which is exactly the activity canSpeak already excludes.
+
+    So treating engage as a blocker discarded about 72 reachable people to avoid
+    51 the world had already ruled out for us."""
     roster = {"agents": [
-        {"agentId": "user-agent-engaged", "name": "Busy", "distance": 1,
+        {"agentId": "user-agent-mining", "name": "Miner", "distance": 1,
          "canSpeak": True, "status": "busy",
          "activeAction": {"kind": "engage", "phase": "active",
-                          "activity": "trade_crypto"}},
-        {"agentId": "user-agent-free", "name": "Free", "distance": 50,
-         "canSpeak": True, "status": "idle"},
+                          "activity": "mine_ore", "engageTargetId": "site-1"}},
+        {"agentId": "user-agent-crypto", "name": "Trader", "distance": 2,
+         "canSpeak": False, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active",
+                          "activity": "trade_crypto", "engageTargetId": "site-2"}},
     ]}
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     _check(mc.agents())
-    assert mc._can_be_reached("user-agent-engaged") is False
-    assert mc._can_be_reached("user-agent-free") is True
-    assert "user-agent-free" in (mc._reachable_opener() or "")
+    assert mc._can_be_reached("user-agent-mining") is True, (
+        "the world said this harvester can hear us")
+    assert mc._can_be_reached("user-agent-crypto") is False, (
+        "and said this one cannot")
 
 
 def test_a_friends_only_refusal_is_remembered_too(control):
@@ -1263,14 +1274,19 @@ def test_the_waiting_refresh_agrees_with_the_rendered_rows(control):
 
 
 def test_the_agent_is_sent_where_the_free_people_are(control):
-    """All 52 agents on our map could be spoken to and every one was engaged at a
-    terminal, while all 24 idle agents were off-map and so marked canSpeak false,
-    18 of them in one place. Nobody was unreachable - the agent was standing in
-    the wrong room."""
+    """All 52 agents on our map were at crypto terminals, while all 24 idle agents
+    were off-map and so marked canSpeak false, 18 of them in one place. The agent
+    was standing in the wrong room.
+
+    The local row now carries canSpeak false with activity trade_crypto, which is
+    how the world says this: measured live, trade_crypto agents had canSpeak true
+    4 times in 55 while harvesters had it true 72 times in 76. Being engaged was
+    never the thing that made somebody unreachable - the terminal was."""
     roster = {"agents": [
         {"agentId": "user-agent-here", "name": "Here", "distance": 1,
-         "canSpeak": True, "status": "busy",
-         "activeAction": {"kind": "engage", "phase": "active"},
+         "canSpeak": False, "status": "busy",
+         "activeAction": {"kind": "engage", "phase": "active",
+                          "activity": "trade_crypto"},
          "position": {"spaceId": "hacker-house-interior"}},
         {"agentId": "user-agent-away", "name": "Away", "distance": None,
          "canSpeak": False, "status": "idle", "activeAction": None,
@@ -1459,7 +1475,7 @@ def test_the_roster_column_and_the_cache_agree_on_reachability(control):
     told yes about people the harness itself would refuse to send to."""
     roster = {"agents": [
         {"agentId": "user-agent-engaged", "name": "Engaged", "distance": 1,
-         "canSpeak": True, "status": "busy",
+         "canSpeak": False, "status": "busy",
          "activeAction": {"kind": "engage", "phase": "active"}},
         {"agentId": "user-agent-free", "name": "Free", "distance": 2,
          "canSpeak": True, "status": "idle", "activeAction": None},
@@ -1787,7 +1803,7 @@ def test_suggestions_never_name_someone_the_harness_would_refuse(control):
     could recommend a mid-engagement agent that the very next check refuses."""
     roster = {"agents": [
         {"agentId": "user-agent-engaged", "name": "Engaged", "distance": 1,
-         "isOpenToTalk": True, "canSpeak": True, "status": "busy",
+         "isOpenToTalk": True, "canSpeak": False, "status": "busy",
          "activeAction": {"kind": "engage", "phase": "active"}},
         {"agentId": "user-agent-free", "name": "Free", "distance": 40,
          "isOpenToTalk": True, "canSpeak": True, "status": "idle",
@@ -1809,7 +1825,7 @@ def test_vitals_says_how_many_people_can_be_reached(control):
         {"agentId": "user-agent-free", "name": "Free", "distance": 2,
          "canSpeak": True, "status": "idle", "activeAction": None},
         {"agentId": "user-agent-engaged", "name": "Busy", "distance": 3,
-         "canSpeak": True, "status": "busy",
+         "canSpeak": False, "status": "busy",
          "activeAction": {"kind": "engage", "phase": "active"}},
         {"agentId": "nyx", "name": "NPC", "distance": 4,
          "canSpeak": True, "status": "idle", "activeAction": None},
@@ -3239,9 +3255,12 @@ def test_a_sleeping_neighbour_is_still_out_of_reach():
     assert mc._entry_engaged(entry) is True
 
 
-def test_an_engaged_neighbour_is_still_out_of_reach():
+def test_a_sleeping_neighbour_is_out_of_reach():
+    """What is left of the old engage rule. canSpeak answers sleep too - 165 of
+    285 sleeping agents had it false - so this only catches the race where
+    somebody drops off between the scan and the send."""
     entry = {"can_speak": True, "open": True, "same_map": True,
-             "action": {"kind": "engage", "phase": "active"}}
+             "action": {"kind": "sleep", "phase": "active"}}
     assert mc._entry_engaged(entry) is True
 
 
@@ -3501,12 +3520,15 @@ def test_the_person_talking_to_us_is_never_too_busy_to_hear_us():
     assert mc._entry_reachable(entry) is True
 
 
-def test_somebody_engaged_with_a_third_party_is_still_busy():
+def test_somebody_engaged_with_a_third_party_can_still_hear_us():
+    """Rewritten on measurement. The world called 95 agents speakable and 77 were
+    mid-conversation, so treating engage as a blocker vetoed four of every five
+    people available. Midnight City lets an agent hold more than one thread."""
     entry = mc._parse_agent({"id": "user-agent-elsewhere", "canSpeak": True,
                              "isOpenToTalk": True, "isOnSameMap": True,
                              "isTalkingToYou": False,
                              "activeAction": {"kind": "engage", "phase": "active"}})
-    assert mc._entry_engaged(entry) is True
+    assert mc._entry_engaged(entry) is False
 
 
 def test_somebody_the_roster_says_we_cannot_reach_leaves_the_context():
@@ -3730,3 +3752,30 @@ def test_a_place_in_this_district_is_still_walked_to():
 def test_a_stale_district_list_is_not_trusted():
     mc._DISTRICTS["old-town"] = mc._now_ms() - (mc._DISTRICTS_TTL_MS + 1000)
     assert mc._is_a_district("old-town") is False
+
+
+def test_being_in_one_conversation_does_not_bar_another():
+    """The world called 95 agents speakable and 77 of them were mid-conversation,
+    so excluding engaged agents vetoed four of every five people available -
+    vitals read reachable=0 in 624 of 726 samples with ninety-odd agents standing
+    in the same square. Midnight City lets an agent hold more than one thread."""
+    entry = mc._parse_agent({"id": "user-agent-busy", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": {"kind": "engage", "phase": "active"}})
+    assert mc._entry_engaged(entry) is False
+    assert mc._entry_reachable(entry) is True
+
+
+def test_a_sleeper_is_still_left_alone():
+    entry = mc._parse_agent({"id": "user-agent-asleep2", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": {"kind": "sleep", "phase": "active"}})
+    assert mc._entry_engaged(entry) is True
+
+
+def test_the_world_still_gets_the_final_no():
+    """Dropping our guess must not drop the world's answer."""
+    entry = mc._parse_agent({"id": "user-agent-shut", "canSpeak": False,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": None})
+    assert mc._entry_reachable(entry) is False

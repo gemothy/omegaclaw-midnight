@@ -670,7 +670,8 @@ def _harvest_vitals(payload):
                 # One rule for whether an action blocks talking, asked the same
                 # way about us and about everybody else. Third time this has been
                 # written twice.
-                _VITALS["engaged"] = _action_blocks_talk(action)
+                _VITALS["engaged"] = _action_blocks_talk(
+                    action, _OUR_ACTIONS_THAT_GAG_US)
             if isinstance(action, dict) and action.get("endsAtMs"):
                 try:
                     left = int(action["endsAtMs"]) - _now_ms()
@@ -1650,25 +1651,39 @@ def _prune(store, ttl_ms, stamp):
         pass
 
 
-# Actions that genuinely stop somebody hearing us. Travel is not one of them.
-_ACTIONS_THAT_BLOCK_TALK = ("engage", "sleep")
+# Two different questions, and I merged them once by mistake.
+#
+# "Can I speak while I am busy" and "can I speak to somebody who is busy" have
+# different answers in this world, both measured:
+#
+#   ourselves  the world refused 50 of 50 sends while we were mid-work, and zero
+#              once it cleared. Engage really does gag US.
+#   others     the world called 95 agents speakable - canSpeak AND isOpenToTalk
+#              AND isOnSameMap - and 77 of those were mid-conversation. Midnight
+#              City lets an agent hold more than one thread, and it says so on
+#              every row.
+#
+# Travel is in neither list: our own payload read kind=move_to, phase=traveling,
+# canStartConversation TRUE.
+_OUR_ACTIONS_THAT_GAG_US = ("engage", "sleep")
+# For everybody else this is belt and braces only. canSpeak already answers it -
+# 165 of 285 sleeping agents had it false - so this catches the race where
+# somebody drops off between the scan and the send, and nothing more.
+_ACTIONS_THAT_BLOCK_TALK = ("sleep",)
 
 
-def _action_blocks_talk(action):
+def _action_blocks_talk(action, blockers=_ACTIONS_THAT_BLOCK_TALK):
     """Whether being inside this action stops a conversation.
 
-    The one answer, for our own action and for anybody else's. Sleep and engage
-    block; travel does not, which the world settled directly when it still sent
-    canStartConversation - our own payload read kind=move_to, phase=traveling,
-    canStartConversation TRUE. An action shape we do not recognise keeps the
-    cautious answer, because refusing to speak costs a turn and speaking into a
-    refusal costs a write."""
+    One implementation, two blocker lists - see the note above them. An action
+    shape we do not recognise keeps the cautious answer, because refusing to
+    speak costs a turn and speaking into a refusal costs a write."""
     if not isinstance(action, dict) or not action:
         return False
     kind = (action.get("kind") or "").strip().lower()
     if not kind:
         return True
-    return any(blocker in kind for blocker in _ACTIONS_THAT_BLOCK_TALK)
+    return any(blocker in kind for blocker in blockers)
 
 
 def _entry_engaged(entry):
