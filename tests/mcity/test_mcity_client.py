@@ -4192,3 +4192,21 @@ def test_the_rosters_current_no_is_not_overridden_by_an_old_message():
     now = mc._now_ms()
     mc._CAN_SPEAK["user-agent-shut-now"] = (False, now)
     assert mc._still_worth_answering("user-agent-shut-now", now - 1000) is False
+
+
+def test_being_indoors_is_learned_without_the_retired_context_skill():
+    """space_kind decides whether the exit door is ever offered, and it came only
+    from the context endpoint - which the harness reads ZERO times in twenty
+    minutes. So indoors was always False and the door built to free the agent from
+    a building could never be suggested: it sat in hacker-house-interior for a
+    whole window, reachable 0 in 385 samples, 180 do-not-disturb refusals."""
+    mc.reset_runtime_state()
+    mc._note_space_kind({"currentSpace": {"id": "hacker-house-interior",
+                                          "kind": "interior", "name": "Hacker House"}})
+    assert mc._VITALS.get("space_kind") == "interior"
+
+
+def test_a_payload_without_a_space_leaves_it_alone():
+    mc.reset_runtime_state()
+    mc._note_space_kind({})
+    assert mc._VITALS.get("space_kind") is None

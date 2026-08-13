@@ -2487,9 +2487,12 @@ def _travel_to_people_command():
     try:
         here = _VITALS.get("space")
         if _VITALS.get("space_kind") is None:
-            # Only the context endpoint carries it, and the vitals refresh reads
-            # needs, so without this the indoor check never had its input.
-            _skill_read("VITALS", "context")
+            # navigation-options, not the retired context skill: this read also
+            # populates the teleport exit and the district list, and the context
+            # endpoint was never actually being called from here.
+            payload, error = _skill_read("VITALS", "navigation-options")
+            if error is None and isinstance(payload, dict):
+                _note_space_kind(payload)
         indoors = (_VITALS.get("space_kind") or "").lower() == "interior"
 
         def _pick():
@@ -4590,6 +4593,28 @@ def enter_building(arg=None):
     return _mutate("ENTER-BUILDING", build)
 
 
+def _note_space_kind(payload):
+    """Learn whether we are indoors from a read we already perform.
+
+    space_kind decides whether the exit door is ever offered, and it came only
+    from the context endpoint - which this harness reads ZERO times in twenty
+    minutes, because mcity-context was retired and the internal fallback sits
+    behind a route branch that never runs. So space_kind was always None, indoors
+    was always False, and the door built to free the agent from a building could
+    never be suggested. It sat in hacker-house-interior for the whole window with
+    reachable at 0 in 385 samples and 180 do-not-disturb refusals.
+
+    navigation-options carries currentSpace.kind and is read anyway."""
+    try:
+        space = payload.get("currentSpace")
+        if isinstance(space, dict):
+            kind = _text(space.get("kind"))
+            if kind:
+                _VITALS["space_kind"] = kind
+    except Exception:      # noqa: BLE001
+        return
+
+
 def _teleport_exit():
     """The move that leaves a teleport-exit building, or None.
 
@@ -4599,6 +4624,7 @@ def _teleport_exit():
         payload, error = _skill_read("EXIT-BUILDING", "navigation-options")
         if error is not None or not isinstance(payload, dict):
             return None
+        _note_space_kind(payload)
         exit_block = payload.get("exitBuilding")
         if not isinstance(exit_block, dict):
             return None

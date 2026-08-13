@@ -984,7 +984,16 @@ def test_the_context_skill_is_not_offered_either():
     assert "add-skill mcity-context" not in metta
     assert "(= (mcity-context)" in metta, "the binding stays for replayed history"
     client = (repo / "plugins" / "mcity" / "mcity_client.py").read_text()
-    assert '"VITALS", "context"' in client, "the harness still reads it itself"
+    # Updated 2026-08-13. The harness used to read the context endpoint itself
+    # for currentSpace.kind - except it never did: zero requests to it in twenty
+    # minutes, because the call sits behind a route branch that does not run. So
+    # space_kind stayed None, indoors stayed False, and the exit door could never
+    # be offered while the agent sat in a building. navigation-options carries the
+    # same field and IS read.
+    assert '_note_space_kind' in client, (
+        "something must still learn currentSpace.kind")
+    assert '"VITALS", "navigation-options"' in client, (
+        "and it must come from a read that actually happens")
     helper = (repo / "src" / "helper.py").read_text()
     assert '"mcity-context"' in helper, "and history must stop teaching it"
 
