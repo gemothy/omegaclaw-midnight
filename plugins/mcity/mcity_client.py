@@ -865,7 +865,19 @@ def _vitals_line():
         # calling mcity-agents entirely - as instructed - so the only code path
         # that offered a route was a work-backoff refusal, and for four deploys
         # running it saw no route at all while nine free agents stood in central.
-        if _REACHABLE["n"] == 0 and not food_route:
+        # Ask for a route when the room is empty OR when it will not talk to us.
+        #
+        # Last pass I taught the route function to offer the door on a throttled
+        # room and it changed nothing, because the CALLER still only asked for a
+        # route when reachable was 0. The trap recurred within the hour: 247
+        # samples in hacker-house-interior, 80 openers throttled, 18.5 refusals
+        # per accepted message, and the door offered zero times because the route
+        # was never consulted.
+        #
+        # Fixing a condition inside a function that nobody calls is the same
+        # mistake as gating a mechanism on a read that never happens, which this
+        # file has now done three times.
+        if (_REACHABLE["n"] == 0 or _cold_opens_paused()) and not food_route:
             # Not while a food command is already on this line. The agent is told
             # a parenthesised command is the next move, so offering two makes the
             # instruction meaningless and it picks whichever it likes.

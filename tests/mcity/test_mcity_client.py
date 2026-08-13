@@ -4329,3 +4329,31 @@ def test_a_room_that_is_talking_keeps_us_inside():
     mc._REACHABLE.update({"n": 29, "at_ms": mc._now_ms()})
     hint = mc._travel_to_people_command() or ""
     assert "(mcity-exit-building)" not in hint, hint
+
+
+def test_a_throttled_room_asks_for_a_route_at_all(control):
+    """Teaching the route function to offer the door on a throttled room changed
+    nothing, because the caller only asked for a route when reachable was 0. The
+    trap recurred within the hour: 247 samples in hacker-house-interior, 80
+    openers throttled, 18.5 refusals per accepted, door offered zero times."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(20)",
+                       "items": "crystal=5", "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    mc._REACHABLE.update({"n": 29, "at_ms": mc._now_ms()})
+    mc._ROUTE.update({"text": "GO-THIS-WAY", "at_ms": mc._now_ms(),
+                      "from": "hacker-house-interior"})
+    for _ in range(mc._COLD_OPEN_STREAK):
+        mc._note_cold_open(refused=True)
+    line = mc._vitals_line() or ""
+    assert "GO-THIS-WAY" in line, line
+
+
+def test_a_talking_room_still_gets_no_route(control):
+    mc.reset_runtime_state()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(20)",
+                       "items": "crystal=5", "space": "central"})
+    mc._REACHABLE.update({"n": 29, "at_ms": mc._now_ms()})
+    mc._ROUTE.update({"text": "GO-THIS-WAY", "at_ms": mc._now_ms(),
+                      "from": "central"})
+    assert "GO-THIS-WAY" not in (mc._vitals_line() or "")
