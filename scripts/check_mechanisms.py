@@ -28,6 +28,7 @@ was reading a window of unknown size and reporting cold_opens_paused 16 times
 where the true count was 0. Whether a mechanism fired at all is still the question
 it answers best, and it is the question that found both dead ones.
 """
+import pathlib
 import re
 import subprocess
 import sys
@@ -65,6 +66,27 @@ MECHANISMS = {
     "diagnostic: route declined":
         (r"mcity route: none", "the route always had an answer"),
 }
+
+
+def derived_mechanisms():
+    """Every skip reason the client can emit, read out of the source.
+
+    The hand-written table below is the curated half: it names the vitals tokens
+    and world outcomes worth watching, with an innocent explanation for silence.
+    But a hand-written list is exactly how a mechanism goes unwatched - both dead
+    ones were dead because nobody was looking - so the skip reasons are taken from
+    _SKIP_REASONS directly. A guard added tomorrow appears here without anybody
+    remembering to add it.
+    """
+    src = pathlib.Path("plugins/mcity/mcity_client.py").read_text()
+    block = re.search(r"_SKIP_REASONS = frozenset\(\((.*?)\)\)", src, re.S)
+    if not block:
+        return {}
+    found = {}
+    for reason in sorted(set(re.findall(r'"(\w+)"', block.group(1)))):
+        found[f"skip: {reason}"] = (rf"reason={reason}\b",
+                                    "nothing has needed this guard")
+    return found
 
 
 def main():
@@ -106,10 +128,15 @@ def main():
 
     text = "\n".join(line for line in text.splitlines() if not _is_prompt(line))
 
+    watched = dict(MECHANISMS)
+    for name, entry in derived_mechanisms().items():
+        watched.setdefault(name, entry)
+
     fired, silent = [], []
-    for name, (pattern, excuse) in MECHANISMS.items():
+    for name, (pattern, excuse) in watched.items():
         hits = len(re.findall(pattern, text))
         (fired if hits else silent).append((name, hits, excuse))
+    total_watched = len(watched)
 
     print(f"in the last {window}:\n")
     for name, hits, _ in sorted(fired, key=lambda r: -r[1]):
@@ -118,7 +145,7 @@ def main():
     for name, _, excuse in silent:
         print(f"  SILENT        {name}")
         print(f"                could be legitimate: {excuse}")
-    print(f"\n{len(fired)} of {len(MECHANISMS)} mechanisms left a trace. A "
+    print(f"\n{len(fired)} of {total_watched} mechanisms left a trace. A "
           "mechanism silent across SEVERAL windows is worth opening the code "
           "for - both dead ones found so far looked exactly like this.")
     return 0
