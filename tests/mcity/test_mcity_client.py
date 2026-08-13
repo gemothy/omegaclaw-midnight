@@ -3805,3 +3805,38 @@ def test_sleep_is_still_overturned_by_a_later_look():
 def test_a_do_not_disturb_target_leaves_the_agents_context():
     mc._remember_refusal("dnd", "user-agent-quiet3")
     assert "user-agent-quiet3" in mc.context_poison()
+
+
+def test_a_run_of_refused_openers_pauses_the_cold_calling(control):
+    """386 speak failures in twenty-five minutes, 369 of them do-not-disturb,
+    across 101 DIFFERENT people - not a retry loop, a hundred cold calls that were
+    all going to fail. Acceptance by target activity: trade_crypto 0 of 115, sleep
+    1 of 68, idle 0 of 8. Every wasted opener is one of twelve writes a minute."""
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": [], "said": {}})
+    for _ in range(mc._COLD_OPEN_STREAK):
+        mc._note_cold_open(refused=True)
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-stranger2 hello there"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=cold_opens_paused"), result
+    assert len(control.actions) == before
+
+
+def test_answering_somebody_is_never_paused(control):
+    """The conversations that work come from the other direction: five people
+    wrote to us, we answered three, four threads went two-way - against two cold
+    opens producing one."""
+    now = mc._now_ms()
+    control.on_action = lambda action: []
+    for _ in range(mc._COLD_OPEN_STREAK):
+        mc._note_cold_open(refused=True)
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-asked"], "said": {}})
+    before = len(control.actions)
+    _check(mc.speak("user-agent-asked yes, still here"))
+    assert len(control.actions) > before, "a reply must always go out"
+
+
+def test_one_accepted_opener_clears_the_streak():
+    for _ in range(mc._COLD_OPEN_STREAK - 1):
+        mc._note_cold_open(refused=True)
+    mc._note_cold_open(refused=False)
+    assert mc._cold_opens_paused() == 0

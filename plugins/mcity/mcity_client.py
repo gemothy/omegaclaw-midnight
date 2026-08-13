@@ -591,7 +591,8 @@ def reset_runtime_state():
                      _dnd_streak=0, _last_rich_nudge_ms=0,
                      _worksite_busy_until_ms=0, _last_roster_read_ms=0,
                      _last_areas_read_ms=0, _no_link_exit_until_ms=0,
-                     _last_delivered_ms=0, _warmed=False)
+                     _last_delivered_ms=0, _warmed=False,
+                     _cold_opens_refused=0, _cold_open_paused_until_ms=0)
 
 
 def _harvest_vitals(payload):
@@ -961,6 +962,7 @@ _SKIP_REASONS = frozenset((
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
     "no_link_exit", "target_asleep", "busy", "just_read",
     "known_bad_destination", "no_food", "lease_lost", "lease_expired",
+    "cold_opens_paused",
 ))
 
 
@@ -1921,6 +1923,43 @@ def _note_can_speak(entry, at_ms=None):
 # refusal about the CONVERSATION is not - the roster says nothing about thread
 # state, and "conversation recently closed" comes back however awake somebody is.
 _REFUSALS_THE_ROSTER_CAN_OVERTURN = ("gone", "asleep")
+
+
+# Consecutive world refusals of a message to somebody who did not write to us
+# first. Replies never touch this counter and are never paused by it.
+#
+# Measured over twenty-five minutes: 386 speak failures, 369 of them "target is
+# in do not disturb", spread across 101 DIFFERENT people - so not a retry loop,
+# just a hundred cold calls that were all going to fail. By target activity the
+# acceptance rate was trade_crypto 0 of 115, sleep 1 of 68, idle 0 of 8.
+#
+# In that same window the conversations that DID happen came from the other
+# direction: five people wrote to us, we answered three, and four threads went
+# two-way - against two cold opens that produced one. Answering works and opening
+# mostly does not, and every wasted open is one of twelve writes a minute.
+_cold_opens_refused = 0
+_cold_open_paused_until_ms = 0
+_COLD_OPEN_STREAK = 5          # refusals in a row before we stop for a moment
+_COLD_OPEN_PAUSE_MS = 60000
+
+
+def _note_cold_open(refused):
+    """Record how an unsolicited opener went."""
+    global _cold_opens_refused, _cold_open_paused_until_ms
+    if not refused:
+        _cold_opens_refused = 0
+        _cold_open_paused_until_ms = 0
+        return
+    _cold_opens_refused += 1
+    if _cold_opens_refused >= _COLD_OPEN_STREAK:
+        _cold_open_paused_until_ms = _now_ms() + _COLD_OPEN_PAUSE_MS
+        _cold_opens_refused = 0
+
+
+def _cold_opens_paused():
+    """Seconds left of the pause, or 0. Never applies to a reply."""
+    left = _cold_open_paused_until_ms - _now_ms()
+    return int(left / 1000) + 1 if left > 0 else 0
 
 
 def _world_has_refused(agent_id):
@@ -4792,6 +4831,18 @@ def speak(arg=None):
         # spoke last. The world still gets to refuse the send - it just is not
         # this function's call to make. Refusing needs certainty, and we do not
         # have it here.
+        waiting_on_us = parts[0] in _someone_is_waiting()
+        paused = _cold_opens_paused()
+        if paused and not waiting_on_us:
+            # build() returns (action, error); anything else is swallowed by the
+            # guard as reason=internal.
+            return None, _promote_command(
+                _failed("SPEAK", "cold_opens_paused",
+                        f"the world refused {_COLD_OPEN_STREAK} openers in a row "
+                        f"to people who had not written to you; pausing them for "
+                        f"{paused}s. Answering somebody who wrote to you is never "
+                        "paused"),
+                _another_read_than("SPEAK") or _next_action_command())
         if _can_be_reached(parts[0]) is False \
                 and (parts[0] not in _someone_is_waiting()
                      or _world_has_refused(parts[0])):
@@ -4901,6 +4952,8 @@ def speak(arg=None):
             # the world's refusal is the only evidence there will ever be.
             _remember_refusal("not_friends", sent["agent_id"])
         elif sent.get("agent_id") and "target is in do not disturb" in lowered:
+            if sent["agent_id"] not in _someone_is_waiting():
+                _note_cold_open(refused=True)
             # Its own kind, and NOT one a roster reading may overturn.
             #
             # This was filed under asleep, which the roster is allowed to
