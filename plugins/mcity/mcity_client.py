@@ -2298,6 +2298,21 @@ def _last_aimed_at(agent_id):
     return max(stored, said, _AIMED.get(agent_id, 0))
 
 
+# NOTE, measured 2026-08-13 across ~90 minutes of live threads: 15 threads this
+# agent opened got 0 replies, and the targets covered every state - idle 5,
+# sleeping 5, trade_crypto 3, chop_wood 1, mine_ore 1 - with no state doing
+# better than another. In the same window 4 agents opened threads with us, we
+# answered 3, and NONE of those three ever spoke again.
+#
+# The population of this city does not sustain conversation. One message each way
+# is the practical ceiling, and the world closes every thread at sixty seconds
+# regardless. So the reply rate to our openers is not a harness defect and
+# rewriting openers will not move it - that was already tried, and the register
+# fix ("market stall" in mcity.metta) changed the messages without changing the
+# outcome.
+#
+# What IS ours to control is answering the people who write first, which works:
+# 3 of 4 in a good window. Rank openers cheaply and spend the effort there.
 def _best_person_to_talk_to():
     """One reachable agent id, preferring somebody we have not spoken to.
 
