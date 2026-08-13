@@ -4065,3 +4065,26 @@ def test_a_linked_door_is_left_to_the_old_path(control):
 def test_no_exit_block_is_not_a_crash(control):
     control.force("/api/skill/agents/agent-1/navigation-options", 200, b'{}')
     assert mc._teleport_exit() is None
+
+
+def test_a_dead_end_room_offers_the_door_without_a_destination():
+    """This needed a known better place, and _pick() skips our own space - so with
+    the whole crowd inside this building there was no elsewhere on record, no
+    route, and no door. The agent sat in hacker-house-interior for over an hour
+    with reachable falling to zero and nothing on the line to act on."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"space": "hacker-house-interior", "space_kind": "interior",
+                       "at_ms": mc._now_ms()})
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
+    hint = mc._travel_to_people_command() or ""
+    assert "(mcity-exit-building)" in hint, hint
+
+
+def test_a_room_with_somebody_reachable_keeps_us_inside():
+    """The door is for a dead end, not for every quiet moment."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"space": "hacker-house-interior", "space_kind": "interior",
+                       "at_ms": mc._now_ms()})
+    mc._REACHABLE.update({"n": 3, "at_ms": mc._now_ms()})
+    hint = mc._travel_to_people_command() or ""
+    assert "(mcity-exit-building)" not in hint, hint

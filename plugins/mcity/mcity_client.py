@@ -2493,6 +2493,27 @@ def _travel_to_people_command():
             # agents at central, and no route offered for three deploys.
             _refresh_can_speak_if_unknown((), force=True)
             best, count = _pick()
+        # Leaving is right even when we do not yet know where to go.
+        #
+        # This branch used to need `best` - a known better place - and _pick()
+        # skips our own space, so with the whole crowd inside this building there
+        # was no elsewhere on record, no route, and therefore no door: the agent
+        # sat in hacker-house-interior for over an hour with reachable falling to
+        # zero and nothing on the vitals line to act on.
+        #
+        # It sits AFTER the forced refresh deliberately. Offering the door before
+        # that skipped the one thing that can still find somewhere better, and
+        # broke the test written for exactly that regression.
+        #
+        # The exit is now offered whenever we are indoors and nobody here is worth
+        # speaking to. Outside, the roster and the district list are visible
+        # again, which is the only way to learn where anybody is.
+        if (best is None and indoors and _REACHABLE.get("n") == 0
+                and _now_ms() >= _no_link_exit_until_ms):
+            return ("nobody in this building can be reached. Get outside where "
+                    "you can see the districts and the people in them, exactly: "
+                    "(mcity-exit-building)")
+
         if not best or not ID_RE.match(best):
             return None
         # A different DISTRICT needs travel-district; only an area inside this
@@ -2550,9 +2571,10 @@ def _travel_to_people_command():
         # The anchored move-area above is checked against the world's own areas
         # list; nothing else here is, so nothing else is offered.
         if indoors and _now_ms() >= _no_link_exit_until_ms:
-            # Only when the door is still worth trying. It is not, in this
-            # building: exit_building handles a buildingLink and this exit is a
-            # teleport, so suggesting it just spends a turn on a known refusal.
+            # Still gated here. The memory is written when the world says "not
+            # inside a linked building", which now only happens after the
+            # teleport attempt has ALSO failed - a genuinely sealed room, where
+            # suggesting the door again just spends turns.
             return (f"{count} free agents are out in {best}, and you are inside a "
                     f"building with no area reaching it. Try the door: "
                     f"exactly: (mcity-exit-building)")
