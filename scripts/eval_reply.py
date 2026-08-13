@@ -17,6 +17,17 @@ the vitals line, and asks the model N times whether it writes back to THAT id.
 Scores three things, in the order they matter:
   answered      a speak aimed at the id the line said was waiting
 
+BASELINE, measured 2026-08-13 once the injection was finally correct: the current
+model answers roughly half to two thirds of the time, and the run-to-run spread is
+large. Five runs of 10-14 samples each gave 42%, 100%, 90%, 30%, 60%. Two of those
+had near-identical history composition (21 speaks / 4 reads versus 21 / 5) and
+scored 9/10 and 3/10, so the swing is not explained by what the agent did lately -
+it is sampling noise at this sample size.
+
+Read that as: a single run of this eval decides nothing. Anything under about
+forty samples cannot separate a prompt change from the noise, and the earlier "0%"
+and "18%" figures in this file were injection bugs plus that same variance.
+
 Results so far, same prompt, same harness, 2026-08-13:
 
   nvidia/Qwen3.6-35B-A3B-NVFP4   0/20 answered - emits (mcity-threads) every
