@@ -35,7 +35,28 @@ def parse_window(text):
     return int(match.group(1)) * _UNITS[match.group(2)]
 
 
-def read_window(container, window, timeout=30.0, tail=4000, strip_ts=True):
+def strip_prompt(text):
+    """Drop the lines that are the PROMPT rather than the agent's behaviour.
+
+    The mission text NAMES most of the tokens worth counting - "the vitals line
+    carries who=", "carries they-said= with their own words" - and it is echoed
+    into the log on every turn. Counting a log without removing it measures the
+    instructions, not the agent: they-said= read 656 in a window where the true
+    count was 0, and waiting=, which is emitted in the SAME statement, read 0.
+
+    That mistake has now been made three times in this project - twice in ad hoc
+    greps and once inside the mechanism audit - so read_window does it by default
+    and callers that genuinely want the prompt must ask.
+    """
+    return "\n".join(
+        line for line in (text or "").splitlines()
+        if "CHARS_SENT:" not in line and "PROMPT:" not in line
+        and "MIDNIGHT_CITY" not in line and "SKILLS:" not in line
+        and len(line) <= 2000)
+
+
+def read_window(container, window, timeout=30.0, tail=4000, strip_ts=True,
+                include_prompt=False):
     """Return (text, error).
 
     error is a string when the logs could not be read at all, when the container
@@ -102,7 +123,7 @@ def read_window(container, window, timeout=30.0, tail=4000, strip_ts=True):
 
     if not records:
         # No parseable timestamps: return everything rather than silently nothing.
-        return raw, None
+        return (raw if include_prompt else strip_prompt(raw)), None
 
     if cutoff is not None and newest is not None and newest < cutoff:
         stale = (_dt.datetime.now(_dt.timezone.utc) - newest).total_seconds()
@@ -121,10 +142,13 @@ def read_window(container, window, timeout=30.0, tail=4000, strip_ts=True):
     # missing and every count off it is low. Report it as an error, because a
     # truncated window returned as whole is exactly the silent undercount this
     # module exists to prevent.
+    body = "\n".join(kept)
+    if not include_prompt:
+        body = strip_prompt(body)
     if saturated and records and cutoff is not None and records[0][0] >= cutoff:
-        return "\n".join(kept), (
+        return body, (
             f"log window is truncated: --tail {tail} filled up and the oldest "
             f"line fetched is still inside the {window} window, so earlier "
             f"entries are missing. Counts from this text are LOW. Ask for a "
             f"shorter window.")
-    return "\n".join(kept), None
+    return body, None
