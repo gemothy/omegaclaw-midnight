@@ -78,8 +78,17 @@ def main():
     # the same statement. The first number was my own instructions, read back to
     # me. That mistake has been made in this project before and it is exactly the
     # kind a tool like this is supposed to prevent.
-    text = "\n".join(line for line in text.splitlines()
-                     if "CHARS_SENT:" not in line and "PROMPT:" not in line)
+    # Dropping lines that carry PROMPT: is not enough - the raw docker log wraps
+    # the prompt across many lines, so most of the mission text survived and
+    # they-said= "fired" 10 times in a window where the real count was 0. The
+    # prompt is also the only thing here longer than a couple of thousand
+    # characters, and the only thing carrying the MIDNIGHT_CITY banner.
+    def _is_prompt(line):
+        return ("CHARS_SENT:" in line or "PROMPT:" in line
+                or "MIDNIGHT_CITY" in line or "SKILLS:" in line
+                or len(line) > 2000)
+
+    text = "\n".join(line for line in text.splitlines() if not _is_prompt(line))
 
     fired, silent = [], []
     for name, (pattern, excuse) in MECHANISMS.items():

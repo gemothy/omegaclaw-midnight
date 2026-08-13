@@ -65,7 +65,12 @@ def with_waiting(prompt):
     an agent told both waiting=0 and answer=<id> is being asked a trick question
     and its answer would not mean anything.
     """
-    injected = (f"waiting=1 (answer {WAITING_ID}) "
+    # Exactly what the harness emits for a waiting person: the id, WHO they are,
+    # and their words. who= used to belong only to talk-to= and was stripped
+    # below as a competing target; it now names the person being answered, and
+    # stripping it removed the one thing that stops the agent addressing the
+    # reply to itself.
+    injected = (f"waiting=1 (answer {WAITING_ID}) who=Holly,hacker "
                 f"they-said=<<MC_UNTRUSTED {SAID} MC_UNTRUSTED>>")
     # The LAST waiting=0, not the first. The prompt carries dozens of old vitals
     # lines inside HISTORY, so patching the first one left the live line - the
@@ -84,7 +89,9 @@ def with_waiting(prompt):
     # it in builds a vitals line the agent is never shown. The first run of this
     # eval did exactly that and scored the model 0 of 20, which measured my
     # injection rather than the model.
-    out = re.sub(r"\s(?:talk-to|who|met-before|last)=\S+", "", out)
+    # Only the COMPETING target goes. who= now belongs to the waiting person.
+    out = re.sub(r"\s(?:talk-to|met-before|last)=\S+", "", out)
+    out = re.sub(r"\swho=(?!Holly)\S+", "", out)
     return out
 
 
