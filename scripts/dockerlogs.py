@@ -71,13 +71,22 @@ def read_window(container, window, timeout=30.0, tail=4000, strip_ts=True):
         return None, (f"container {container!r} produced no log output at all "
                       f"(cannot verify anything)")
 
+    # SATURATION. --tail is capped because larger values make Docker hand back a
+    # rotated segment and drop the current one entirely (see above), but a busy
+    # window can exceed the cap: measured, a twenty minute window held 4053 lines
+    # against tail=4000, so the oldest 53 were dropped and every count taken from
+    # it was quietly low. Say so rather than return a truncated window as if it
+    # were whole - the whole point of this module is that a checker which looks at
+    # less than it thinks is worse than no checker.
+    saturated = len(raw.splitlines()) >= tail
+
     seconds = parse_window(window)
     cutoff = None
     if seconds is not None:
         cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=seconds)
 
     # (timestamp, [line, continuation...]) so a rotated segment cannot reorder us.
-    records, newest = [], None
+    records, newest, _ = [], None, saturated
     for line in raw.splitlines():
         match = _TS.match(line)
         if not match:
@@ -106,4 +115,16 @@ def read_window(container, window, timeout=30.0, tail=4000, strip_ts=True):
     kept = [text for when, block in records
             if cutoff is None or when >= cutoff
             for text in block]
+
+    # A saturated tail whose OLDEST line still falls inside the window means the
+    # window is bigger than what we fetched: everything before that line is
+    # missing and every count off it is low. Report it as an error, because a
+    # truncated window returned as whole is exactly the silent undercount this
+    # module exists to prevent.
+    if saturated and records and cutoff is not None and records[0][0] >= cutoff:
+        return "\n".join(kept), (
+            f"log window is truncated: --tail {tail} filled up and the oldest "
+            f"line fetched is still inside the {window} window, so earlier "
+            f"entries are missing. Counts from this text are LOW. Ask for a "
+            f"shorter window.")
     return "\n".join(kept), None

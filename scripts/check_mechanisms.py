@@ -21,12 +21,12 @@ verdict. The ones that have never fired across several windows are the suspects.
 
     python3 scripts/check_mechanisms.py [window]
 
-READ THE COUNTS AS BOOLEANS, NOT RATES. Cross-checked against a second log
-reader over the same window: some agree exactly (9 vs 9, 8 vs 8, 41 vs 39) and
-some do not (who= 196 vs 155, cold_opens_paused 16 vs 0). Window boundaries
-account for the small gaps; the large one is unexplained. Whether a mechanism
-fired at all is the question this tool answers well, and it is the question that
-found both dead ones.
+The counts now agree exactly with an independent reader over the same window
+(114 and 114, 34 and 34, 0 and 0). They did not before: this tool used
+`docker logs --since`, and the daemon on this host runs four hours behind, so it
+was reading a window of unknown size and reporting cold_opens_paused 16 times
+where the true count was 0. Whether a mechanism fired at all is still the question
+it answers best, and it is the question that found both dead ones.
 """
 import re
 import subprocess
@@ -69,11 +69,20 @@ MECHANISMS = {
 
 def main():
     window = sys.argv[1] if len(sys.argv) > 1 else "25m"
-    out = subprocess.run(["docker", "logs", "--since", window, "omegaclaw"],
-                         capture_output=True, text=True, timeout=180)
-    text = (out.stdout or "") + (out.stderr or "")
+    # dockerlogs, not `docker logs --since`. The daemon on this host runs four
+    # hours behind it, so --since does not describe the window it is asked for -
+    # which is why this tool counted cold_opens_paused 16 times where a
+    # clock-correct reader over "the same" window saw 0. That module exists
+    # precisely because a checker looking at the wrong span reports nonsense
+    # confidently.
+    sys.path.insert(0, "scripts")
+    from dockerlogs import read_window                     # noqa: E402
+    text, error = read_window("omegaclaw", window)
+    if error:
+        print(f"cannot read the window honestly: {error}")
+        return 1
     if not text:
-        print("no logs")
+        print("no logs in that window")
         return 1
 
     # Drop the prompt lines before counting anything.
