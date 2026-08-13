@@ -181,3 +181,18 @@ def test_both_waiting_lists_exclude_a_closed_thread():
     source = CLIENT.read_text()
     assert source.count("_thread_closed(item)") >= 2, (
         "both waiting lists must apply it")
+
+
+def test_the_reachable_count_respects_refusals():
+    """reachable= counted roster rows and ignored every refusal we held, so it
+    read 55 in a room where all 55 refused - 174 do-not-disturb rejections in
+    twenty minutes and not one move command, because the route that would have
+    moved the agent only fires at reachable=0 and the count could never get
+    there."""
+    offenders = _callers_touching(
+        r'_REACHABLE\["n"\] = sum', allowed=set())
+    source = CLIENT.read_text()
+    assert "_entry_reachable(entry) and _looks_speakable" not in source, (
+        "a reachable count that ignores refusals cannot fall to zero")
+    assert source.count("_worth_speaking_to") >= 4, (
+        "every reachable count must use the one verdict")

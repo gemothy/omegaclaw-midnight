@@ -1713,6 +1713,24 @@ def _entry_engaged(entry):
     return _action_blocks_talk(entry.get("action"))
 
 
+def _worth_speaking_to(entry):
+    """Reachable AND not somebody the world has already turned us away from.
+
+    reachable= counted roster rows and ignored every refusal we hold, so it read
+    55 in a room where all 55 refused: 174 do-not-disturb rejections in twenty
+    minutes, 243 openers throttled, and not one move, travel or exit command in
+    the whole window. The agent sat in hacker-house-interior for over an hour
+    talking to a wall, because the route that would have moved it only fires at
+    reachable=0 and the count could never get there.
+
+    canSpeak says whether an agent CAN be addressed. It does not say they will
+    accept, and this world's answer to that arrives only when we try - so a
+    refusal we have already been given is the better evidence of the two."""
+    return (_entry_reachable(entry)
+            and _looks_speakable(entry["id"])
+            and _can_be_reached(entry["id"]) is not False)
+
+
 def _entry_reachable(entry):
     """The one verdict on whether a message to this agent can land.
 
@@ -2608,8 +2626,8 @@ def _refresh_can_speak_if_unknown(agent_ids, force=False):
                 for entry in entries:
                     _note_can_speak(entry, scan_at)
                 if entries:
-                    _REACHABLE["n"] = sum(1 for e in entries if _entry_reachable(e)
-                                          and _looks_speakable(e["id"]))
+                    _REACHABLE["n"] = sum(1 for e in entries
+                                          if _worth_speaking_to(e))
                     _REACHABLE["at_ms"] = scan_at
             _can_speak_at_ms = _now_ms()
         finally:
@@ -3387,8 +3405,7 @@ def agents():
     # this counted inside _speak_candidates, which only runs on a failed speak,
     # so reachable= never appeared for a plain mcity-agents read - the exact call
     # it exists to make unnecessary.
-    _REACHABLE["n"] = sum(1 for entry in roster
-                          if _entry_reachable(entry) and _looks_speakable(entry["id"]))
+    _REACHABLE["n"] = sum(1 for entry in roster if _worth_speaking_to(entry))
     _REACHABLE["at_ms"] = now
 
     # Ground every observation BEFORE rendering anything: the store keeps all
@@ -5175,8 +5192,7 @@ def _speak_candidates(limit=3):
     roster = [_parse_agent(item) for item in items if isinstance(item, dict)]
     for entry in roster:
         _note_can_speak(entry, now)
-    _REACHABLE["n"] = sum(1 for entry in roster
-                          if _entry_reachable(entry) and _looks_speakable(entry["id"]))
+    _REACHABLE["n"] = sum(1 for entry in roster if _worth_speaking_to(entry))
     _REACHABLE["at_ms"] = now
     reachable = {entry["id"]: entry for entry in roster if entry["id"]}
     if AgentObservation is not None:

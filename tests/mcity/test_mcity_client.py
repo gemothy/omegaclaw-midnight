@@ -4022,3 +4022,19 @@ def test_a_closed_thread_still_tells_us_who_starts_conversations(control):
     _check(mc.threads())
     assert mc._once_wrote_to_us("user-agent-missed9")
     assert "user-agent-missed9" not in mc._someone_is_waiting()
+
+
+def test_a_room_that_has_refused_us_stops_counting_as_reachable():
+    """The agent sat in hacker-house-interior for over an hour talking to a wall:
+    reachable=55, 174 do-not-disturb refusals, 243 openers throttled, zero moves.
+    The route out only fires at reachable=0."""
+    now = mc._now_ms()
+    mc._VITALS.update({"space": "hacker-house-interior"})
+    entry = mc._parse_agent({"id": "user-agent-refuser", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": None,
+                             "position": {"spaceId": "hacker-house-interior"}})
+    assert mc._worth_speaking_to(entry) is True
+    mc._remember_refusal("dnd", "user-agent-refuser")
+    assert mc._worth_speaking_to(entry) is False, (
+        "the world has already turned us away from this one")
