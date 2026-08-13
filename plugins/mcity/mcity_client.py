@@ -3774,7 +3774,24 @@ def recent_events():
 
 
 # How recently somebody must have spoken for a reply to be worth trying.
-_STILL_ANSWERABLE_MS = 120000
+#
+# Five minutes, and the number comes from the world rather than from taste.
+# Polling the thread list every twelve seconds and recording the age of each row
+# when it FIRST became visible: an inbound thread appeared at 146 seconds old,
+# already closed. The world does not publish somebody else's thread to us until
+# after it has timed out, so a two minute window - which is what this was - wrote
+# off every inbound message before the harness could ever see it.
+#
+# That is why waiting= read 0 in 289 consecutive samples while can_it_act reported
+# the last inbound message as 82 seconds ago, and why check_reply_path passed the
+# whole time: it redates a real thread to 20 seconds, an age the world never
+# actually shows us.
+#
+# Not longer than five minutes. The failure in the other direction is on record
+# too - with no age limit at all the harness announced 201 people owed a reply
+# when five had written all afternoon, and sent the agent to answer conversations
+# that had ended hours before.
+_STILL_ANSWERABLE_MS = 300000
 
 
 def _thread_closed(item):

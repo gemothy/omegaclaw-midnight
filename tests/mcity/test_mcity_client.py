@@ -4357,3 +4357,19 @@ def test_a_talking_room_still_gets_no_route(control):
     mc._ROUTE.update({"text": "GO-THIS-WAY", "at_ms": mc._now_ms(),
                       "from": "central"})
     assert "GO-THIS-WAY" not in (mc._vitals_line() or "")
+
+
+def test_the_answerable_window_outlasts_the_worlds_publication_delay():
+    """Measured by polling the thread list every twelve seconds and recording each
+    row's age when it FIRST became visible: an inbound thread appeared at 146
+    seconds old, already closed. A two minute window wrote off every inbound
+    message before the harness could see it - waiting= read 0 in 289 consecutive
+    samples while the last inbound had arrived 82 seconds earlier."""
+    assert mc._STILL_ANSWERABLE_MS > 146000, (
+        "the world does not show us an inbound thread until it has closed")
+    assert mc._STILL_ANSWERABLE_MS <= 600000, (
+        "with no limit the harness announced 201 people owed a reply when five "
+        "had written all afternoon")
+    now = mc._now_ms()
+    assert mc._thread_closed({"threadLastMessageAtMs": now - 150000}) is False
+    assert mc._thread_closed({"threadLastMessageAtMs": now - 3600000}) is True
