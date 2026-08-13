@@ -4088,3 +4088,39 @@ def test_a_room_with_somebody_reachable_keeps_us_inside():
     mc._REACHABLE.update({"n": 3, "at_ms": mc._now_ms()})
     hint = mc._travel_to_people_command() or ""
     assert "(mcity-exit-building)" not in hint, hint
+
+
+def test_we_do_not_leave_a_populated_street_for_an_empty_room(control):
+    """The agent spent a third of one window in charging-house-interior, where
+    reachable was 0 in 296 of 296 samples, having walked to charging-house-bed-01
+    nineteen times. There is no sleep need in this world - needs carries hunger
+    and nothing else - so a bed is a destination with no purpose, and 92 of the
+    120 areas the world lists are of kind building."""
+    mc.reset_runtime_state()
+    mc._note_area_kinds({"areas": [{"id": "charging-house-bed-01",
+                                    "kind": "building"}]})
+    mc._REACHABLE.update({"n": 12, "at_ms": mc._now_ms()})
+    before = len(control.actions)
+    result = _check(mc.move_area("charging-house-bed-01"))
+    assert result.startswith("MCITY-MOVE-AREA-SKIPPED reason=leaves_the_people"), result
+    assert len(control.actions) == before
+
+
+def test_an_empty_street_may_still_go_indoors(control):
+    """A room is a fine destination when the street is empty too."""
+    mc.reset_runtime_state()
+    mc._note_area_kinds({"areas": [{"id": "charging-house-bed-01",
+                                    "kind": "building"}]})
+    mc._REACHABLE.update({"n": 0, "at_ms": mc._now_ms()})
+    before = len(control.actions)
+    _check(mc.move_area("charging-house-bed-01"))
+    assert len(control.actions) > before
+
+
+def test_a_park_is_never_refused_this_way(control):
+    mc.reset_runtime_state()
+    mc._note_area_kinds({"areas": [{"id": "central-plaza", "kind": "park"}]})
+    mc._REACHABLE.update({"n": 12, "at_ms": mc._now_ms()})
+    before = len(control.actions)
+    _check(mc.move_area("central-plaza"))
+    assert len(control.actions) > before

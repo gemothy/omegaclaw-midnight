@@ -572,6 +572,7 @@ def reset_runtime_state():
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
     for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES, _WHO,
+                  _AREA_KIND,
                   _MET, _AIMED, _DISTRICTS, _WROTE_TO_US,
                   _inbound, _my_texts, _read_at):
         cache.clear()
@@ -963,6 +964,7 @@ _SKIP_REASONS = frozenset((
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
     "no_link_exit", "target_asleep", "busy", "just_read",
     "known_bad_destination", "no_food", "lease_lost", "lease_expired",
+    "leaves_the_people",
     "cold_opens_paused",
 ))
 
@@ -2530,6 +2532,7 @@ def _travel_to_people_command():
                     f"_quote_{best}_quote_)")
         payload, error = _skill_read("VITALS", "areas")
         if error is None:
+            _note_area_kinds(payload)
             areas = [item for item in (_find_list(payload, "areas") or [])
                      if isinstance(item, dict)
                      and _get(item, "moveAreaAvailable") is not False]
@@ -3351,6 +3354,7 @@ def areas():
     # step there instead. Refusals steer well when they replace a wrong action;
     # this one had nothing to replace, because moving was never in the procedure.
     payload, error = _skill_read("AREAS", "areas")
+    _note_area_kinds(payload)
     if error is not None:
         return error
     items = _find_list(payload, "areas")
@@ -4395,6 +4399,47 @@ _DESTINATION_REJECTIONS = ("area not found", "district gateway not found",
                            "not a valid destination", "unknown area")
 
 
+# id -> the world's own kind for that area, harvested from any areas read.
+_AREA_KIND = {}
+_AREA_KIND_TTL_MS = 600000
+_AREA_KIND_AT = {"ms": 0}
+
+
+def _note_area_kinds(payload):
+    """Remember what the world calls each area. Free: the route already reads
+    this list."""
+    try:
+        for item in (_find_list(payload, "areas") or []):
+            if not isinstance(item, dict):
+                continue
+            area_id, kind = _text(_get(item, "id")), _text(_get(item, "kind"))
+            if area_id and kind:
+                _AREA_KIND[area_id] = kind
+        _AREA_KIND_AT["ms"] = _now_ms()
+    except Exception:      # noqa: BLE001
+        return
+
+
+def _is_an_empty_room(area_id):
+    """True when walking here would take us off a populated street into a room.
+
+    The agent spent a third of one window in charging-house-interior, where
+    reachable was 0 in 296 of 296 samples, having walked to charging-house-bed-01
+    nineteen times. There is no sleep need in this world - the needs endpoint
+    carries hunger and nothing else - so a bed is a destination with no purpose,
+    and 92 of the 120 areas the world lists are of kind "building".
+
+    Only counts when somebody is reachable where we already stand. An empty room
+    is a fine destination when the street is empty too, and the exit door handles
+    it either way."""
+    if _text(_AREA_KIND.get(str(area_id))) != "building":
+        return False
+    if (_now_ms() - _AREA_KIND_AT["ms"]) > _AREA_KIND_TTL_MS:
+        return False
+    here = _REACHABLE.get("n")
+    return bool(here) and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS
+
+
 def _destination_action(verb, arg, key, usage, kind=None):
     def build():
         value = _norm_arg(arg)
@@ -4414,6 +4459,14 @@ def _destination_action(verb, arg, key, usage, kind=None):
         # perfectly reasonable from here and the world answers "agent is already
         # in district central" - six times in twelve minutes. The world is the
         # only thing that knows, so remember what it said.
+        if verb == "MOVE-AREA" and _is_an_empty_room(value):
+            return None, _promote_command(
+                _failed(verb, "leaves_the_people",
+                        f"{_REACHABLE['n']} agents can be reached where you are "
+                        f"standing, and {value} is a building - the last one this "
+                        "agent walked into had nobody in it for the whole time it "
+                        "was there"),
+                _next_action_command())
         rejected = _refused_ago_ms("destination", (verb, value))
         if rejected is not None:
             ago = int(rejected / 60000)
