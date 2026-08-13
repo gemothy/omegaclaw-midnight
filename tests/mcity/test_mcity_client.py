@@ -4302,3 +4302,30 @@ def test_the_waiting_person_is_named_too(control):
     line = mc._vitals_line() or ""
     assert "who=Holly,hacker" in line, line
     assert "they-said=" in line, line
+
+
+def test_a_room_that_will_not_talk_opens_the_door_even_when_it_looks_full():
+    """reachable read 27 to 30 for a solid fifteen minutes in
+    hacker-house-interior, never 0, while 123 openers were throttled and 92 sends
+    refused - 46 refusals per accepted against 1.4 an hour earlier. The door was
+    gated on a count that could not fall: the refusal memory expires after five
+    minutes, faster than the agent works through thirty people."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"space": "hacker-house-interior", "space_kind": "interior",
+                       "at_ms": mc._now_ms()})
+    mc._REACHABLE.update({"n": 29, "at_ms": mc._now_ms()})
+    for _ in range(mc._COLD_OPEN_STREAK):
+        mc._note_cold_open(refused=True)
+    assert mc._cold_opens_paused() > 0
+    hint = mc._travel_to_people_command() or ""
+    assert "(mcity-exit-building)" in hint, hint
+
+
+def test_a_room_that_is_talking_keeps_us_inside():
+    """The door is for a room that refuses, not for every busy moment."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"space": "hacker-house-interior", "space_kind": "interior",
+                       "at_ms": mc._now_ms()})
+    mc._REACHABLE.update({"n": 29, "at_ms": mc._now_ms()})
+    hint = mc._travel_to_people_command() or ""
+    assert "(mcity-exit-building)" not in hint, hint

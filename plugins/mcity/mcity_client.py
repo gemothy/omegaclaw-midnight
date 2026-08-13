@@ -2537,7 +2537,19 @@ def _travel_to_people_command():
         # The exit is now offered whenever we are indoors and nobody here is worth
         # speaking to. Outside, the roster and the district list are visible
         # again, which is the only way to learn where anybody is.
-        if (best is None and indoors and _REACHABLE.get("n") == 0
+        # "Nobody here will TALK to us" is the condition, not "nobody here is
+        # nominally reachable". Measured in hacker-house-interior: reachable read
+        # 27 to 30 for a solid fifteen minutes, never 0, while 123 openers were
+        # throttled and 92 sends refused - 46 refusals per accepted message
+        # against 1.4 an hour earlier. The door stayed shut the whole time because
+        # it was gated on a count that could not fall: the refusal memory expires
+        # after five minutes, faster than the agent works through thirty people,
+        # so the count kept recovering just enough to keep the agent inside.
+        #
+        # The throttle already measures the thing that matters - ten refused
+        # openers in a row - and nothing was using it.
+        if (best is None and indoors
+                and (_REACHABLE.get("n") == 0 or _cold_opens_paused())
                 and _now_ms() >= _no_link_exit_until_ms):
             return ("nobody in this building can be reached. Get outside where "
                     "you can see the districts and the people in them, exactly: "
@@ -2610,7 +2622,8 @@ def _travel_to_people_command():
         # when it happened to be right about the name but wrong about the need.
         # The anchored move-area above is checked against the world's own areas
         # list; nothing else here is, so nothing else is offered.
-        if indoors and _now_ms() >= _no_link_exit_until_ms:
+        if indoors and _now_ms() >= _no_link_exit_until_ms \
+                and (_REACHABLE.get("n") == 0 or _cold_opens_paused()):
             # Still gated here. The memory is written when the world says "not
             # inside a linked building", which now only happens after the
             # teleport attempt has ALSO failed - a genuinely sealed room, where
