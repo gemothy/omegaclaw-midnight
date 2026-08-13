@@ -2408,11 +2408,27 @@ def _best_person_to_talk_to():
                 continue
             if not _looks_speakable(agent_id):
                 continue
-            # Somebody who once wrote to us outranks a stranger, however long
-            # ago we last wrote to either. Proven initiators are rare here and
-            # everybody else is close to a coin toss.
+            # Three tiers, then least-recently-written-to inside each.
+            #
+            # About three quarters of openers are refused by the world with "target
+            # is in do not disturb", and it is not a retry loop - 61 refusals fell
+            # on 57 different people, 53 of them refused exactly once. canSpeak is
+            # true for all of them, so it predicts almost nothing about who will
+            # actually accept, and the agent rediscovers the same 75% every hour.
+            #
+            # What does predict it is what already happened. Somebody who once
+            # wrote to US is a proven initiator; somebody the world has accepted a
+            # delivery for is at least reachable in practice. spoke_count carries
+            # that second fact and only ever increments on a confirmed delivery,
+            # so it costs nothing to consult.
+            #
+            # Least-recently-written-to still orders within each tier, which is
+            # what stops this collapsing back into talking to one person forever.
             when = _last_aimed_at(agent_id)
-            rank = (0 if _once_wrote_to_us(agent_id) else 1, when)
+            met = _MET.get(agent_id)
+            spoken_before = bool(met and met[0])
+            rank = (0 if _once_wrote_to_us(agent_id)
+                    else 1 if spoken_before else 2, when)
             if best is None or rank < best[1]:
                 best = (agent_id, rank)
         return best[0] if best else None

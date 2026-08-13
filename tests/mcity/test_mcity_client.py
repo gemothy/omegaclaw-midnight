@@ -4124,3 +4124,38 @@ def test_a_park_is_never_refused_this_way(control):
     before = len(control.actions)
     _check(mc.move_area("central-plaza"))
     assert len(control.actions) > before
+
+
+def test_somebody_who_has_accepted_a_message_outranks_an_unknown():
+    """About three quarters of openers are refused with "target is in do not
+    disturb", and it is not a retry loop - 61 refusals fell on 57 different
+    people, 53 refused exactly once. canSpeak is true for all of them, so it
+    predicts almost nothing; what already happened does. spoke_count only ever
+    increments on a confirmed delivery."""
+    now = mc._now_ms()
+    for who in ("user-agent-unknown8", "user-agent-delivered8"):
+        entry = mc._parse_agent({"id": who, "canSpeak": True, "isOpenToTalk": True,
+                                 "isOnSameMap": True, "activeAction": None,
+                                 "position": {"spaceId": "central"}})
+        mc._note_can_speak(entry, now)
+    mc._VITALS.update({"space": "central"})
+    mc._REACHABLE.update({"n": 2, "at_ms": now})
+    # the unknown is the one we wrote to least recently, so time alone picks them
+    mc._note_aimed_at("user-agent-delivered8")
+    mc._note_met("user-agent-delivered8", 2, now - 900000)
+    assert mc._best_person_to_talk_to() == "user-agent-delivered8"
+
+
+def test_a_proven_initiator_still_outranks_both():
+    now = mc._now_ms()
+    for who in ("user-agent-delivered7", "user-agent-wrote7"):
+        entry = mc._parse_agent({"id": who, "canSpeak": True, "isOpenToTalk": True,
+                                 "isOnSameMap": True, "activeAction": None,
+                                 "position": {"spaceId": "central"}})
+        mc._note_can_speak(entry, now)
+    mc._VITALS.update({"space": "central"})
+    mc._REACHABLE.update({"n": 2, "at_ms": now})
+    mc._note_met("user-agent-delivered7", 5, now - 900000)
+    mc._note_wrote_to_us("user-agent-wrote7", now - 60000)
+    mc._note_aimed_at("user-agent-wrote7")
+    assert mc._best_person_to_talk_to() == "user-agent-wrote7"
