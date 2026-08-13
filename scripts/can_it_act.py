@@ -19,6 +19,7 @@ conclusions.
 """
 import collections
 import re
+import time
 import subprocess
 import sys
 
@@ -66,6 +67,32 @@ def main():
     degraded = len(re.findall(r"store=degraded", text))
     verdicts.append(("store healthy", degraded == 0,
                      "clear" if not degraded else f"{degraded} degraded results"))
+
+    # When did anybody last write to us? Without this, waiting=0 reads as a
+    # broken reply path, and I have twice started debugging one that was working:
+    # the freshest inbound thread was 1196 seconds old while I was staring at
+    # "waiting non-zero: 0 of 817" over a thirty minute window. Nothing had
+    # arrived. A quiet city and a deaf agent look identical from the log alone.
+    try:
+        import json as _json
+        agent = "user-agent-ow0v8z9lg4v5kyr"
+        got = subprocess.run(
+            ["docker", "exec", "omegaclaw", "sh", "-c",
+             f"curl -s -m 20 'http://localhost:8080/mcity/api/agents/{agent}"
+             f"/threads?limit=40'"],
+            capture_output=True, text=True, timeout=90)
+        rows = _json.loads(got.stdout).get("threads") or []
+        inbound = [r for r in rows if r.get("initiatorAgentId") != agent]
+        now = time.time() * 1000
+        ages = sorted(int((now - (r.get("threadLastMessageAtMs") or 0)) / 1000)
+                      for r in inbound)
+        if ages:
+            print(f"  --    last inbound message   {ages[0]}s ago "
+                  f"({len([a for a in ages if a < 900])} in the last 15 min)")
+        else:
+            print("  --    last inbound message   none in the visible history")
+    except Exception:      # noqa: BLE001
+        print("  --    last inbound message   could not read the world")
 
     ok_all = True
     for name, good, detail in verdicts:
