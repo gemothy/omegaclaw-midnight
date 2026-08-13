@@ -4159,3 +4159,36 @@ def test_a_proven_initiator_still_outranks_both():
     mc._note_wrote_to_us("user-agent-wrote7", now - 60000)
     mc._note_aimed_at("user-agent-wrote7")
     assert mc._best_person_to_talk_to() == "user-agent-wrote7"
+
+
+def test_somebody_who_writes_to_us_is_never_filtered_out_by_our_own_refusal(control):
+    """The harness refuses about 57 different people an hour with do-not-disturb
+    and remembers each for five minutes, so any of them who then wrote to us was
+    dropped from the waiting list without trace: waiting= read 0 in 963 of 963
+    samples while five people opened threads, and the reply path checked out fine
+    in isolation."""
+    now = mc._now_ms()
+    # refused BEFORE they wrote - that is the case their message supersedes
+    mc._REFUSED[("dnd", "user-agent-wrote-anyway")] = now - 120000
+    payload = {"threads": [
+        {"threadId": "t9", "threadStatus": "closed",
+         "threadLastMessageAtMs": now - 20000,
+         "initiatorAgentId": "user-agent-wrote-anyway", "recipientAgentId": "agent-1",
+         "initiatorMessageCount": 1, "recipientMessageCount": 0}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())
+    _check(mc.threads())
+    assert "user-agent-wrote-anyway" in mc._someone_is_waiting(), (
+        "their message is newer evidence than our refusal")
+
+
+def test_a_refusal_after_their_message_still_stands():
+    """The rule is which evidence is newer, not that a message wipes the slate."""
+    now = mc._now_ms()
+    mc._REFUSED[("dnd", "user-agent-refused-after")] = now
+    assert mc._still_worth_answering("user-agent-refused-after", now - 60000) is False
+
+
+def test_the_rosters_current_no_is_not_overridden_by_an_old_message():
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-shut-now"] = (False, now)
+    assert mc._still_worth_answering("user-agent-shut-now", now - 1000) is False

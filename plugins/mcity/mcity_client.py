@@ -387,7 +387,7 @@ _REPEATABLE_READS = frozenset((
 # waiting person outranks working, and it still started long actions with two
 # people waiting - and a long action makes it unreachable for the duration, so
 # the thread dies. Prose is not enforcement; this is.
-_WAITING = {"at_ms": 0, "ids": [], "said": {}}
+_WAITING = {"at_ms": 0, "ids": [], "said": {}, "at": {}}
 _WAITING_STALE_MS = 90000      # older than this and we no longer claim to know
 # How often vitals re-checks who is waiting.
 #
@@ -580,7 +580,7 @@ def reset_runtime_state():
     _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
-    _WAITING.update({"at_ms": 0, "ids": [], "said": {}})
+    _WAITING.update({"at_ms": 0, "ids": [], "said": {}, "at": {}})
     _VITALS.clear()
     _VITALS.update({"at_ms": 0, "hunger": None, "space": None, "items": None,
                     "items_at_ms": 0,
@@ -3812,6 +3812,7 @@ def _refresh_waiting_if_stale():
         own_id = _c("agent_id", "")
         found = []
         said = {}
+        spoke_at = {}
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -3830,13 +3831,27 @@ def _refresh_waiting_if_stale():
                                            0, 0, 10 ** 15))
             if _thread_closed(item):
                 continue
-            if who and ID_RE.match(who) and _can_be_reached(who) is not False:
+            # NOT filtered on _can_be_reached. Somebody who has just written to
+            # us is available to us, whatever we recorded earlier: their message
+            # is newer evidence than our refusal, and the same freshest-evidence
+            # rule already governs the roster.
+            #
+            # This mattered. The harness refuses about 57 different people an hour
+            # with do-not-disturb and remembers each for five minutes, so any of
+            # them who then wrote to us was dropped from the waiting list without
+            # trace - waiting= read 0 in 963 of 963 samples while five people
+            # opened threads, and the reply path checked out fine in isolation.
+            if who and ID_RE.match(who):
                 found.append(who)
+                spoke_at[who] = _number(_get(item, "threadLastMessageAtMs"),
+                                        0, 0, 10 ** 15)
                 said[who] = _get(item, "latestMessagePreview", "lastMessageBody",
                                  "preview", "lastMessage", "lastMessagePreview")
         _WAITING["at_ms"] = _now_ms()
-        _WAITING["ids"] = found
+        _WAITING["ids"] = [w for w in found
+                           if _still_worth_answering(w, spoke_at.get(w))]
         _WAITING["said"] = said
+        _WAITING["at"] = spoke_at
         _waiting_refresh_at_ms = _now_ms()
     except Exception:      # noqa: BLE001 - grounding must never break a skill
         pass
@@ -3975,9 +3990,13 @@ def threads(_ignored=None):
             # reachable, because refusing on a guess is what silenced the agent
             # before. A counterpart who cannot hear us is still waiting, but must
             # not be what the turn is spent on.
+            # Same rule as the vitals refresh: their message outranks our
+            # memory of being turned away. The row still renders asleep=yes so
+            # the agent knows what it is walking into.
             asleep = _can_be_reached(others[0]) is False
-            if not asleep:
-                waiting_ids.append(others[0])
+            waiting_ids.append(others[0])
+            _WAITING.setdefault("at", {})[others[0]] = _number(
+                _get(item, "threadLastMessageAtMs"), 0, 0, 10 ** 15)
         # An unreachable person ranks below a reachable one: the budget should
         # spend its rows on threads the agent can actually answer this turn.
         band = 1.0 if mine == "no" else (0.3 if mine == "yes" else 0.6)
@@ -4011,7 +4030,8 @@ def threads(_ignored=None):
     if links:
         _unused, link_ok = _store_call(lambda store: store.upsert_agents(links))
 
-    reachable_waiting = [i for i in waiting_ids if _can_be_reached(i) is not False]
+    reachable_waiting = [i for i in waiting_ids
+                         if _still_worth_answering(i, (_WAITING.get("at") or {}).get(i))]
     # waiting= is the number the procedure turns on, so it must count only the
     # people who can actually hear a reply. Live: 56 agents were reachable and
     # the agent still answered nobody, because every row it was told to answer
@@ -4742,6 +4762,35 @@ def _thread_shows_our_message(agent_id, since_ms):
         return False
     except Exception:      # noqa: BLE001 - confirmation must never raise
         return False
+
+
+def _still_worth_answering(agent_id, message_ms):
+    """True unless the world turned us away AFTER they wrote.
+
+    Two findings meet here and both are right. Answering somebody whose roster row
+    says do-not-disturb fails - 56 agents reachable and nobody answered, because
+    every row offered was in that state. And somebody who has just written to us
+    is available to us whatever we recorded earlier.
+
+    The difference is which evidence is newer. A refusal from before their message
+    has been superseded by the message; one from after it has not."""
+    try:
+        # The roster's CURRENT verdict still stands on its own: a row saying
+        # canSpeak false describes them now, not before they wrote.
+        known = _CAN_SPEAK.get(agent_id)
+        if known and known[0] is False \
+                and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
+            return False
+        for kind in _REFUSAL_TTL_MS:
+            ago = _refused_ago_ms(kind, agent_id)
+            if ago is None:
+                continue
+            refused_at = _now_ms() - ago
+            if refused_at >= (message_ms or 0):
+                return False
+        return True
+    except Exception:      # noqa: BLE001
+        return True
 
 
 def _someone_is_waiting():
