@@ -552,6 +552,7 @@ _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
            "district_now": None, "district_at_ms": 0}
 _SELF_PROBE_MS = 30000         # never let our own rule silence us for longer
 _SELF_ENGAGED_MIN_S = 3        # below this the action ends before the refusal helps
+_ENGAGED_IS_FRESH_MS = 15000   # older than this is a memory, not a state
 _THREAD_CONFIRM_RETRY_S = 2.0  # the world creates the thread just after accepting
 _last_self_probe_ms = 0
 _VITALS_STALE_MS = 120000
@@ -4822,8 +4823,14 @@ def speak(arg=None):
         global _last_self_probe_ms
         left = _VITALS.get("busy_for")
         long_action = left is None or left > _SELF_ENGAGED_MIN_S
+        # The engagement reading has to be RECENT, not merely unexpired. This
+        # allowed one up to _VITALS_STALE_MS old - two minutes - while this
+        # agent's actions last seconds, so it refused to speak on the memory of
+        # having been busy. Measured over twenty-five minutes: every time this
+        # gate fired, our own status was idle (5) or traveling (2), never busy,
+        # and the world issued speaker-side do-not-disturb ZERO times.
         if (_VITALS.get("engaged") and long_action and _VITALS.get("at_ms")
-                and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS
+                and (_now_ms() - _VITALS["at_ms"]) <= _ENGAGED_IS_FRESH_MS
                 and not _someone_is_waiting()
                 and (_now_ms() - _last_self_probe_ms) < _SELF_PROBE_MS):
             wait = _VITALS.get("busy_for")

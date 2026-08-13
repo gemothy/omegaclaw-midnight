@@ -3868,3 +3868,28 @@ def test_the_throttle_lets_a_burst_through_after_it_lifts():
     mc._note_cold_open_sent()
     assert mc._cold_opens_paused() == 0, (
         "once lifted, an opener must not immediately re-arm it")
+
+
+def test_we_do_not_gag_ourselves_on_a_two_minute_old_memory(control):
+    """This gate accepted an engagement reading up to _VITALS_STALE_MS old - two
+    minutes - while this agent's actions last seconds. Measured over twenty-five
+    minutes, every time it fired our own status was idle (5) or traveling (2),
+    never busy, and the world issued speaker-side do-not-disturb zero times."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms() - 60000, "engaged": True,
+                       "busy_for": 40})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": [], "said": {}})
+    mc._last_self_probe_ms = mc._now_ms()
+    before = len(control.actions)
+    _check(mc.speak("user-agent-abc hello there"))
+    assert len(control.actions) > before, "a minute-old reading is not a state"
+
+
+def test_a_fresh_engagement_still_holds_speech(control):
+    """The rule keeps its job when the reading is current."""
+    control.on_action = lambda action: []
+    mc._VITALS.update({"at_ms": mc._now_ms(), "engaged": True, "busy_for": 40})
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": [], "said": {}})
+    mc._last_self_probe_ms = mc._now_ms()
+    result = _check(mc.speak("user-agent-abc hello there"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=self_engaged"), result
