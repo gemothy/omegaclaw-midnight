@@ -207,3 +207,19 @@ def test_no_helper_is_hiding_between_a_guard_and_its_skill():
     offenders = re.findall(r"@_guard\([^\)]*\)\n(?!def )", source)
     assert not offenders, (
         f"{len(offenders)} decorator(s) do not sit directly above their def")
+
+
+def test_no_guard_depends_on_a_read_that_never_happens():
+    """Twice now a mechanism has been gated on data nobody fetched: space_kind
+    came only from the retired context skill, and the area-kind table only from
+    the retired areas skill. Both guards were dead in production while passing
+    every test, because the tests populated the table by hand."""
+    source = CLIENT.read_text()
+    for table, filler in (("_AREA_KIND", "_note_area_kinds"),
+                          ("space_kind", "_note_space_kind")):
+        assert filler in source, f"{table} has no populator"
+    # each populator must be reachable from a read the harness actually performs
+    assert 'if (not _AREA_KIND' in source, (
+        "the area-kind table must fetch itself when empty")
+    assert '"VITALS", "navigation-options"' in source, (
+        "space_kind must come from a read that runs")

@@ -4502,9 +4502,22 @@ def _is_an_empty_room(area_id):
     Only counts when somebody is reachable where we already stand. An empty room
     is a fine destination when the street is empty too, and the exit door handles
     it either way."""
+    # Fetch the table if nobody has. It was fed only by the route's occasional
+    # areas read and by mcity-areas, which is retired - so it stayed empty, the
+    # guard could never fire, and the agent walked into ada-arena-interior 28
+    # times in twenty-five minutes while this skip fired twice. That room peaks at
+    # ONE reachable person and is empty 78% of the time, against central's 102.
+    #
+    # Second time a guard has been gated on a read that does not happen; the
+    # first was space_kind and the retired context skill. A read is not free but
+    # it is nearly so - nginx allows 900 a minute and this one is bounded by the
+    # same TTL that decides whether the table is stale.
+    if (not _AREA_KIND
+            or (_now_ms() - _AREA_KIND_AT["ms"]) > _AREA_KIND_TTL_MS):
+        payload, error = _skill_read("VITALS", "areas")
+        if error is None:
+            _note_area_kinds(payload)
     if _text(_AREA_KIND.get(str(area_id))) != "building":
-        return False
-    if (_now_ms() - _AREA_KIND_AT["ms"]) > _AREA_KIND_TTL_MS:
         return False
     here = _REACHABLE.get("n")
     return bool(here) and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS
