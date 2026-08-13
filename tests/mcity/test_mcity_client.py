@@ -3907,3 +3907,34 @@ def test_the_throttle_tolerates_an_ordinary_run_of_bad_luck():
     for _ in range(5):
         mc._note_cold_open(refused=True)
     assert mc._cold_opens_paused() > 0, "ten in a row is a wall"
+
+
+def test_somebody_in_another_room_is_not_reachable():
+    """isOnSameMap is not the same question. The world answered "target is in
+    another space" six times in twenty-five minutes for agents whose rows said
+    isOnSameMap true - the crowd splits between central and
+    hacker-house-interior, and a map holds both."""
+    mc._VITALS.update({"space": "central"})
+    entry = mc._parse_agent({"id": "user-agent-indoors", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": None,
+                             "position": {"spaceId": "hacker-house-interior"}})
+    assert mc._entry_reachable(entry) is False
+
+
+def test_somebody_in_this_room_still_is():
+    mc._VITALS.update({"space": "central"})
+    entry = mc._parse_agent({"id": "user-agent-here2", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": None,
+                             "position": {"spaceId": "central"}})
+    assert mc._entry_reachable(entry) is True
+
+
+def test_not_knowing_where_somebody_is_does_not_refuse_them():
+    """Guessing wrong in that direction is the mistake this file keeps making."""
+    mc._VITALS.update({"space": "central"})
+    entry = mc._parse_agent({"id": "user-agent-nowhere", "canSpeak": True,
+                             "isOpenToTalk": True, "isOnSameMap": True,
+                             "activeAction": None})
+    assert mc._entry_reachable(entry) is True

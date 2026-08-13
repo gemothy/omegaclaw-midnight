@@ -1728,7 +1728,26 @@ def _entry_reachable(entry):
             and entry.get("open") is not False
             # "target is in another space" is a world refusal we can see coming.
             and entry.get("same_map") is not False
-            and not _entry_engaged(entry))
+            and not _entry_engaged(entry)
+            and not _entry_elsewhere(entry))
+
+
+def _entry_elsewhere(entry):
+    """True when this agent stands in a different SPACE from us.
+
+    isOnSameMap is not the same question. The world answered "target is in
+    another space" six times in twenty-five minutes for agents whose rows said
+    isOnSameMap true - the crowd splits between central and
+    hacker-house-interior, and a map holds both.
+
+    Fails open on a missing spaceId either side: not knowing where somebody is
+    has never been a reason to refuse to speak to them, and guessing wrong in
+    that direction is the mistake this file keeps making."""
+    here = _VITALS.get("space")
+    there = entry.get("space")
+    if not here or not there:
+        return False
+    return str(here) != str(there)
 
 
 # id -> a short human fact about that person, harvested free from any roster read.
