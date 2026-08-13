@@ -3842,16 +3842,29 @@ def test_one_accepted_opener_clears_the_streak():
     assert mc._cold_opens_paused() == 0
 
 
-def test_the_throttle_still_lets_an_opener_through_each_minute():
-    """The first version blocked openers outright and the agent opened ZERO
-    conversations in an hour - the correct response to a wall, and the wrong
-    behaviour for an agent whose job is to be among people. Worse, only an
-    accepted opener cleared the streak, and it was no longer sending any."""
+def test_the_throttle_engages_on_a_run_of_refusals():
+    """It exists to stop a hundred cold calls into a wall, not to mute the agent.
+    Rewritten: this test previously asserted that an opener re-arms the gap, which
+    was the bug - the counter stayed pinned at the threshold, every opener
+    re-armed, and two messages reached the world in twelve minutes."""
     mc.reset_runtime_state()
     for _ in range(mc._COLD_OPEN_STREAK):
         mc._note_cold_open(refused=True)
     assert mc._cold_opens_paused() > 0
     mc._cold_open_paused_until_ms = mc._now_ms() - 1
-    assert mc._cold_opens_paused() == 0, "the gap expires and one may go"
+    assert mc._cold_opens_paused() == 0, "and it lifts on its own"
+
+
+def test_the_throttle_lets_a_burst_through_after_it_lifts():
+    """Pinning the counter at the threshold made every opener re-arm the gap, so
+    the agent went near-silent: 54 of 74 speak skips were this throttle and two
+    messages reached the world in twelve minutes. A throttle that can only tighten
+    is a mute button with extra steps."""
+    mc.reset_runtime_state()
+    for _ in range(mc._COLD_OPEN_STREAK):
+        mc._note_cold_open(refused=True)
+    assert mc._cold_opens_paused() > 0, "it engages"
+    mc._cold_open_paused_until_ms = mc._now_ms() - 1
     mc._note_cold_open_sent()
-    assert mc._cold_opens_paused() > 0, "and the next waits its turn"
+    assert mc._cold_opens_paused() == 0, (
+        "once lifted, an opener must not immediately re-arm it")

@@ -1959,7 +1959,13 @@ def _note_cold_open(refused):
         # free, and costs one write of twelve rather than the eight and a half
         # that started this.
         _cold_open_paused_until_ms = _now_ms() + _COLD_OPEN_PAUSE_MS
-        _cold_opens_refused = _COLD_OPEN_STREAK - 1
+        # Back to zero, so the next pause needs five FRESH refusals. Leaving it
+        # pinned at the threshold made _note_cold_open_sent's condition
+        # permanently true, and every opener re-armed the gap: the agent went
+        # near-silent - 54 of 74 speak skips were this throttle and two messages
+        # reached the world in twelve minutes. A throttle that can only tighten
+        # is a mute button with extra steps.
+        _cold_opens_refused = 0
 
 
 def _cold_opens_paused():
