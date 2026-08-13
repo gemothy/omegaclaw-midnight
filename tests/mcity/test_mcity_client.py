@@ -3023,6 +3023,7 @@ def test_a_thread_that_timed_out_does_not_close_the_person(control):
     essentially always: of 36 threads other agents opened with us, we answered 3."""
     payload = {"threads": [{"threadId": "t1", "threadStatus": "closed",
                             "threadCloseReason": "stale_timeout",
+                            "threadLastMessageAtMs": mc._now_ms() - 3600000,
                             "initiatorAgentId": "agent-2",
                             "recipientAgentId": "agent-1",
                             "initiatorMessageCount": 1,
@@ -3952,9 +3953,11 @@ def test_a_closed_thread_is_nobody_waiting(control):
     payload = {"threads": [
         {"threadId": "dead", "threadStatus": "closed",
          "threadCloseReason": "stale_timeout",
+         "threadLastMessageAtMs": mc._now_ms() - 3600000,
          "initiatorAgentId": "user-agent-gone2", "recipientAgentId": mine,
          "initiatorMessageCount": 1, "recipientMessageCount": 0},
-        {"threadId": "live", "threadStatus": "open",
+        {"threadId": "live", "threadStatus": "closed",
+         "threadLastMessageAtMs": mc._now_ms() - 20000,
          "initiatorAgentId": "user-agent-live2", "recipientAgentId": mine,
          "initiatorMessageCount": 1, "recipientMessageCount": 0},
     ]}
@@ -3962,12 +3965,21 @@ def test_a_closed_thread_is_nobody_waiting(control):
     _check(mc.threads())
     waiting = mc._someone_is_waiting()
     assert "user-agent-live2" in waiting, waiting
-    assert "user-agent-gone2" not in waiting, "that conversation is over"
+    assert "user-agent-gone2" not in waiting, "an hour old is over"
 
 
-def test_a_payload_without_a_status_falls_back_to_the_close_stamp():
-    assert mc._thread_closed({"threadClosedAtMs": 1786500000000}) is True
-    assert mc._thread_closed({"threadClosedAtMs": None}) is False
+def test_a_conversation_is_answerable_by_age_not_by_status():
+    """Filtering on threadStatus broke the reply path outright: every thread this
+    world hands back is already closed - sampled three times over a minute, the
+    ten newest rows were closed every time and the freshest was 96 seconds old -
+    so waiting= sat at zero in 885 of 885 samples and the agent answered 0 of 4
+    inbound in an hour, against 3 of 4 before."""
+    now = mc._now_ms()
+    assert mc._thread_closed({"threadStatus": "closed",
+                              "threadLastMessageAtMs": now - 30000}) is False
+    assert mc._thread_closed({"threadStatus": "closed",
+                              "threadLastMessageAtMs": now - 3600000}) is True
+    assert mc._thread_closed({"threadLastMessageAtMs": None}) is False
 
 
 def test_somebody_who_once_wrote_to_us_outranks_a_stranger():
@@ -4003,6 +4015,7 @@ def test_a_closed_thread_still_tells_us_who_starts_conversations(control):
     payload = {"threads": [
         {"threadId": "dead2", "threadStatus": "closed",
          "threadCloseReason": "stale_timeout", "threadCreatedAtMs": mc._now_ms(),
+         "threadLastMessageAtMs": mc._now_ms() - 3600000,
          "initiatorAgentId": "user-agent-missed9", "recipientAgentId": "agent-1",
          "initiatorMessageCount": 1, "recipientMessageCount": 0}]}
     control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())

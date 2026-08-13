@@ -3647,15 +3647,28 @@ def recent_events():
     return _line("RECENT-EVENTS", "OK", (("count", len(items)),), rows or ["- none"])
 
 
-def _thread_closed(item):
-    """True when the world has already shut this thread.
+# How recently somebody must have spoken for a reply to be worth trying.
+_STILL_ANSWERABLE_MS = 120000
 
-    threadStatus is the plain answer; threadClosedAtMs is the fallback for a
-    payload that omits it, and both appear on every row this world sends."""
-    status = _text(_get(item, "threadStatus"))
-    if status:
-        return status.lower() != "open"
-    return bool(_number(_get(item, "threadClosedAtMs"), 0, 0, 10 ** 15))
+
+def _thread_closed(item):
+    """True when this conversation is too old to answer.
+
+    NOT threadStatus, which was the first version of this and broke the reply
+    path outright. Every thread this world hands back is already closed - sampled
+    three times over a minute, the ten newest rows were closed every time and the
+    freshest was 96 seconds old - so filtering on status left waiting= at zero in
+    885 of 885 samples and the agent answered 0 of 4 inbound threads in an hour.
+    Before that filter it answered 3 of 4, into threads that were closed by the
+    same test: replying to a recently-shut thread evidently lands.
+
+    So the question is age, not status. A conversation from two minutes ago is
+    worth a reply; the hour-old ones are what had the harness announcing 201
+    people owed an answer when five had written all afternoon."""
+    last = _number(_get(item, "threadLastMessageAtMs"), 0, 0, 10 ** 15)
+    if not last:
+        return False
+    return (_now_ms() - last) > _STILL_ANSWERABLE_MS
 
 
 def _thread_counterpart(item, own_id):
