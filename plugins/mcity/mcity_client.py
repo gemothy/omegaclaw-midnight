@@ -572,7 +572,7 @@ def reset_runtime_state():
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
     for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES, _WHO,
-                  _MET, _AIMED, _DISTRICTS,
+                  _MET, _AIMED, _DISTRICTS, _WROTE_TO_US,
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
@@ -1973,6 +1973,42 @@ _COLD_OPEN_STREAK = 10
 _COLD_OPEN_PAUSE_MS = 60000
 
 
+# People who wrote to us and never got an answer, from any thread scan.
+#
+# The city has a conversation ceiling - 15 threads we opened drew 0 replies, from
+# targets in every state - so a cold open to a stranger is close to a coin toss
+# with a weighted coin. But somebody who opened a thread with us has PROVEN they
+# start conversations, which is the one thing almost nobody here does.
+#
+# They are missed for ordinary reasons: their thread closed inside its sixty
+# seconds, or the harness was down. Two arrived during a ten minute model swap
+# this session and were dead before it came back. The thread cannot be revived -
+# the world will not reopen it - but the person is still there, and they are the
+# best cold-open target available anywhere in the roster.
+_WROTE_TO_US = {}
+_WROTE_TO_US_TTL_MS = 3600000
+_WROTE_TO_US_CAP = 200
+
+
+def _note_wrote_to_us(agent_id, at_ms):
+    """Remember that this person opened a thread with us."""
+    try:
+        if not agent_id:
+            return
+        if agent_id not in _WROTE_TO_US and len(_WROTE_TO_US) >= _WROTE_TO_US_CAP:
+            _WROTE_TO_US.pop(next(iter(_WROTE_TO_US)), None)
+        _WROTE_TO_US[agent_id] = max(int(at_ms or 0),
+                                     _WROTE_TO_US.get(agent_id, 0))
+    except Exception:      # noqa: BLE001
+        return
+
+
+def _once_wrote_to_us(agent_id):
+    """True when this person opened a thread with us recently enough to matter."""
+    at = _WROTE_TO_US.get(agent_id)
+    return bool(at) and (_now_ms() - at) <= _WROTE_TO_US_TTL_MS
+
+
 def _note_cold_open(refused):
     """Record how an unsolicited opener went."""
     global _cold_opens_refused, _cold_open_paused_until_ms
@@ -2352,9 +2388,13 @@ def _best_person_to_talk_to():
                 continue
             if not _looks_speakable(agent_id):
                 continue
+            # Somebody who once wrote to us outranks a stranger, however long
+            # ago we last wrote to either. Proven initiators are rare here and
+            # everybody else is close to a coin toss.
             when = _last_aimed_at(agent_id)
-            if best is None or when < best[1]:
-                best = (agent_id, when)
+            rank = (0 if _once_wrote_to_us(agent_id) else 1, when)
+            if best is None or rank < best[1]:
+                best = (agent_id, rank)
         return best[0] if best else None
     except Exception:      # noqa: BLE001 - vitals must never break a skill
         return None
@@ -3713,6 +3753,9 @@ def _refresh_waiting_if_stale():
             # told somebody was owed a reply, against FIVE inbound threads in
             # three hours. The agent was being sent to answer conversations that
             # had ended, which cannot land and cannot be answered.
+            # Even a closed one tells us who starts conversations.
+            _note_wrote_to_us(who, _number(_get(item, "threadCreatedAtMs"),
+                                           0, 0, 10 ** 15))
             if _thread_closed(item):
                 continue
             if who and ID_RE.match(who) and _can_be_reached(who) is not False:
@@ -3847,8 +3890,14 @@ def threads(_ignored=None):
         asleep = False
         # Same rule as the vitals refresh: a closed thread is nobody waiting.
         # These two lists were built independently and only one of them knew.
-        if mine == "no" and _thread_closed(item):
-            mine = None
+        if mine == "no":
+            # Whether or not it is still open, it names a proven initiator.
+            if len(others) == 1 and ID_RE.match(others[0]):
+                _note_wrote_to_us(others[0],
+                                  _number(_get(item, "threadCreatedAtMs"),
+                                          0, 0, 10 ** 15))
+            if _thread_closed(item):
+                mine = None
         if mine == "no" and len(others) == 1 and ID_RE.match(others[0]):
             # False only when the world has actually said so; unknown counts as
             # reachable, because refusing on a guess is what silenced the agent

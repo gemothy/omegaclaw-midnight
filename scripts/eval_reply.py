@@ -27,9 +27,14 @@ Results so far, same prompt, same harness, 2026-08-13:
                                  id. Worse: the MoE at least takes a step toward
                                  answering
 
-So the local alternative is not better, and the MoE stays. What both models share
-is that they will not act on "answer this id" as a bare instruction - which points
-at the harness owing them a copyable command, not at a model swap
+So the local alternative is not better, and the MoE stays.
+
+CAVEAT, added after the fact: this samples ONE turn, and the agent works across
+turns. The MoE answering with (mcity-threads) is not necessarily a failure - it
+may be reading the thread and replying next turn, which live logs have measured
+at 25 of 45 answered within four turns. So "0/20" is a compliance score, not an
+outcome, and only the dense model's wrong-target result is unambiguously bad.
+Treat this eval as a comparison between models, not as a verdict on either
   wrong-target  a speak aimed at somebody else - worse than silence, it burns
                 the write and leaves the person unanswered
   no-speak      no message at all

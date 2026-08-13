@@ -3968,3 +3968,44 @@ def test_a_closed_thread_is_nobody_waiting(control):
 def test_a_payload_without_a_status_falls_back_to_the_close_stamp():
     assert mc._thread_closed({"threadClosedAtMs": 1786500000000}) is True
     assert mc._thread_closed({"threadClosedAtMs": None}) is False
+
+
+def test_somebody_who_once_wrote_to_us_outranks_a_stranger():
+    """The city has a conversation ceiling - 15 threads we opened drew 0 replies
+    from targets in every state - so a cold open to a stranger is a weighted coin
+    toss. Somebody who opened a thread with us has proven they start
+    conversations, which almost nobody here does."""
+    now = mc._now_ms()
+    for who in ("user-agent-stranger9", "user-agent-initiator9"):
+        entry = mc._parse_agent({"id": who, "canSpeak": True, "isOpenToTalk": True,
+                                 "isOnSameMap": True, "activeAction": None,
+                                 "position": {"spaceId": "central"}})
+        mc._note_can_speak(entry, now)
+    mc._VITALS.update({"space": "central"})
+    mc._REACHABLE.update({"n": 2, "at_ms": now})
+    # the stranger is the one we wrote to LEAST recently, so ordering by that
+    # alone would pick them
+    mc._note_aimed_at("user-agent-initiator9")
+    mc._note_wrote_to_us("user-agent-initiator9", now - 600000)
+    assert mc._best_person_to_talk_to() == "user-agent-initiator9"
+
+
+def test_an_old_acquaintance_stops_counting_eventually():
+    mc._note_wrote_to_us("user-agent-ancient9",
+                         mc._now_ms() - (mc._WROTE_TO_US_TTL_MS + 1000))
+    assert mc._once_wrote_to_us("user-agent-ancient9") is False
+
+
+def test_a_closed_thread_still_tells_us_who_starts_conversations(control):
+    """Their thread died inside its sixty seconds, or the harness was down - two
+    arrived during a model swap this session. The thread cannot be revived; the
+    person is still there."""
+    payload = {"threads": [
+        {"threadId": "dead2", "threadStatus": "closed",
+         "threadCloseReason": "stale_timeout", "threadCreatedAtMs": mc._now_ms(),
+         "initiatorAgentId": "user-agent-missed9", "recipientAgentId": "agent-1",
+         "initiatorMessageCount": 1, "recipientMessageCount": 0}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())
+    _check(mc.threads())
+    assert mc._once_wrote_to_us("user-agent-missed9")
+    assert "user-agent-missed9" not in mc._someone_is_waiting()
