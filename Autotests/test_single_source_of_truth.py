@@ -223,3 +223,13 @@ def test_no_guard_depends_on_a_read_that_never_happens():
         "the area-kind table must fetch itself when empty")
     assert '"VITALS", "navigation-options"' in source, (
         "space_kind must come from a read that runs")
+
+
+def test_both_waiting_builders_store_the_same_three_things():
+    """ids, when they spoke, and what they said. The render path stored the first
+    two and not the third, so the agent was told who to answer with nothing to
+    answer - waiting= fired 5 times and they-said= not once."""
+    source = CLIENT.read_text()
+    assert source.count('_WAITING') >= 6
+    for field in ('"said"', '"at"'):
+        assert source.count(field) >= 2, f"{field} is set in only one builder"

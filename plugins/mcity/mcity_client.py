@@ -4031,6 +4031,16 @@ def threads(_ignored=None):
             waiting_ids.append(others[0])
             _WAITING.setdefault("at", {})[others[0]] = _number(
                 _get(item, "threadLastMessageAtMs"), 0, 0, 10 ** 15)
+            # ...and what they said, which is the whole point of naming them.
+            #
+            # Only the vitals refresh stored this. When the waiting list was built
+            # here instead, the agent was handed "answer <id>" with no message to
+            # answer - waiting= fired 5 times in twenty-five minutes and
+            # they-said= not once, which is exactly the two-turn procedure
+            # they-said= was added to replace.
+            _WAITING.setdefault("said", {})[others[0]] = _get(
+                item, "latestMessagePreview", "lastMessageBody", "preview",
+                "lastMessage", "lastMessagePreview")
         # An unreachable person ranks below a reachable one: the budget should
         # spend its rows on threads the agent can actually answer this turn.
         band = 1.0 if mine == "no" else (0.3 if mine == "yes" else 0.6)

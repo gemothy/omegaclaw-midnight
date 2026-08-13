@@ -4262,3 +4262,21 @@ def test_somebody_addressing_us_is_never_hidden_from_the_roster(control):
          "position": {"spaceId": "central"}}]}
     control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
     assert "user-agent-talking9" in _check(mc.agents())
+
+
+def test_the_render_path_also_carries_what_they_said(control):
+    """Only the vitals refresh stored the preview. When the waiting list was built
+    while rendering mcity-threads instead, the agent got "answer <id>" with no
+    message to answer: waiting= fired 5 times in twenty-five minutes and
+    they-said= not once - the two-turn procedure they-said= exists to replace."""
+    now = mc._now_ms()
+    payload = {"threads": [
+        {"threadId": "t-said", "threadStatus": "closed",
+         "threadLastMessageAtMs": now - 20000,
+         "initiatorAgentId": "user-agent-asked9", "recipientAgentId": "agent-1",
+         "initiatorMessageCount": 1, "recipientMessageCount": 0,
+         "latestMessagePreview": "Gem, is the lumber deal still on?"}]}
+    control.force("/api/agents/agent-1/threads", 200, json.dumps(payload).encode())
+    _check(mc.threads())
+    assert "user-agent-asked9" in mc._someone_is_waiting()
+    assert "lumber deal" in str((mc._WAITING.get("said") or {}).get("user-agent-asked9"))
