@@ -233,3 +233,24 @@ def test_both_waiting_builders_store_the_same_three_things():
     assert source.count('_WAITING') >= 6
     for field in ('"said"', '"at"'):
         assert source.count(field) >= 2, f"{field} is set in only one builder"
+
+
+def test_every_skip_reason_is_actually_emitted_somewhere():
+    """Dead vocabulary in _SKIP_REASONS is not harmless. Each entry becomes a
+    permanently SILENT line in the mechanism audit, and a permanently silent line
+    is noise that hides the one mechanism that is silent for a bad reason - which
+    is the only thing that audit exists to find.
+
+    nobody_reachable, target_asleep and repeat sat here emitted by nothing at all,
+    left behind when the paths that raised them were retired."""
+    source = CLIENT.read_text()
+    block = re.search(r"_SKIP_REASONS = frozenset\(\((.*?)\)\)", source, re.S)
+    assert block, "_SKIP_REASONS not found"
+    declared = set(re.findall(r'"(\w+)"', block.group(1)))
+    body = source[block.end():]
+    # _ensure_lease returns its reason as a value, so those are named there
+    lease = set(re.findall(r'return "(\w+)"', source))
+    orphans = sorted(r for r in declared
+                     if f'"{r}"' not in body and r not in lease)
+    assert not orphans, (
+        f"{orphans} are tagged skippable but nothing emits them")

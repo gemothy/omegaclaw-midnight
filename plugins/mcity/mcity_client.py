@@ -968,9 +968,9 @@ def _line(verb, tag, pairs=(), lines=()):
 # These come back as SKIPPED instead: nothing went wrong, the call was simply not
 # worth making, and re-invoking is exactly what must not happen.
 _SKIP_REASONS = frozenset((
-    "repeat", "rich_enough", "worksite_busy", "nobody_reachable", "unreachable",
+    "rich_enough", "worksite_busy", "unreachable",
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
-    "no_link_exit", "target_asleep", "busy", "just_read",
+    "no_link_exit", "busy", "just_read",
     "known_bad_destination", "no_food", "lease_lost", "lease_expired",
     "leaves_the_people",
     "cold_opens_paused",
