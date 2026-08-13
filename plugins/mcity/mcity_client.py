@@ -1952,14 +1952,27 @@ def _note_cold_open(refused):
         return
     _cold_opens_refused += 1
     if _cold_opens_refused >= _COLD_OPEN_STREAK:
+        # A RATE, not a stop. The first version blocked openers outright for a
+        # minute and the agent opened ZERO conversations in the following hour -
+        # the right response to a wall, the wrong behaviour for an agent whose
+        # job is to be among people. One a minute still finds whoever has become
+        # free, and costs one write of twelve rather than the eight and a half
+        # that started this.
         _cold_open_paused_until_ms = _now_ms() + _COLD_OPEN_PAUSE_MS
-        _cold_opens_refused = 0
+        _cold_opens_refused = _COLD_OPEN_STREAK - 1
 
 
 def _cold_opens_paused():
-    """Seconds left of the pause, or 0. Never applies to a reply."""
+    """Seconds until the next opener may go, or 0. Never applies to a reply."""
     left = _cold_open_paused_until_ms - _now_ms()
     return int(left / 1000) + 1 if left > 0 else 0
+
+
+def _note_cold_open_sent():
+    """An opener has just gone out; hold the next one for the gap."""
+    global _cold_open_paused_until_ms
+    if _cold_opens_refused >= _COLD_OPEN_STREAK - 1:
+        _cold_open_paused_until_ms = _now_ms() + _COLD_OPEN_PAUSE_MS
 
 
 def _world_has_refused(agent_id):
@@ -4839,9 +4852,9 @@ def speak(arg=None):
             return None, _promote_command(
                 _failed("SPEAK", "cold_opens_paused",
                         f"the world refused {_COLD_OPEN_STREAK} openers in a row "
-                        f"to people who had not written to you; pausing them for "
-                        f"{paused}s. Answering somebody who wrote to you is never "
-                        "paused"),
+                        f"to people who had not written to you, so openers are "
+                        f"down to one a minute; the next may go in {paused}s. "
+                        "Answering somebody who wrote to you is never paused"),
                 _another_read_than("SPEAK") or _next_action_command())
         if _can_be_reached(parts[0]) is False \
                 and (parts[0] not in _someone_is_waiting()
@@ -4886,6 +4899,13 @@ def speak(arg=None):
     if sent.get("agent_id") and "MCITY-SPEAK-" in (result or "") \
             and "SKIPPED" not in (result or ""):
         _note_aimed_at(sent["agent_id"])
+        # The accepted-opener path. This was written into an earlier commit and
+        # the edit silently failed to apply, so nothing ever cleared the streak
+        # and the throttle only ever tightened.
+        if sent["agent_id"] not in _someone_is_waiting():
+            _note_cold_open_sent()
+            if "MCITY-SPEAK-FAILED" not in (result or ""):
+                _note_cold_open(refused=False)
     if sent.get("agent_id") and "MCITY-SPEAK-PENDING" in (result or ""):
         # Look twice. The world creates the thread a moment after it accepts the
         # message, so a single check right after the confirm window can run

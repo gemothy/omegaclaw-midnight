@@ -3840,3 +3840,18 @@ def test_one_accepted_opener_clears_the_streak():
         mc._note_cold_open(refused=True)
     mc._note_cold_open(refused=False)
     assert mc._cold_opens_paused() == 0
+
+
+def test_the_throttle_still_lets_an_opener_through_each_minute():
+    """The first version blocked openers outright and the agent opened ZERO
+    conversations in an hour - the correct response to a wall, and the wrong
+    behaviour for an agent whose job is to be among people. Worse, only an
+    accepted opener cleared the streak, and it was no longer sending any."""
+    mc.reset_runtime_state()
+    for _ in range(mc._COLD_OPEN_STREAK):
+        mc._note_cold_open(refused=True)
+    assert mc._cold_opens_paused() > 0
+    mc._cold_open_paused_until_ms = mc._now_ms() - 1
+    assert mc._cold_opens_paused() == 0, "the gap expires and one may go"
+    mc._note_cold_open_sent()
+    assert mc._cold_opens_paused() > 0, "and the next waits its turn"

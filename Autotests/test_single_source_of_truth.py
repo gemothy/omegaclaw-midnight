@@ -159,3 +159,15 @@ def test_only_one_rule_decides_that_an_action_blocks_talking():
         r"_ACTIONS_THAT_BLOCK_TALK(?! = \()", allowed={"_action_blocks_talk"})
     assert not offenders, (
         f"{offenders} decide this for themselves. Call _action_blocks_talk.")
+
+
+def test_the_cold_open_throttle_can_be_cleared_as_well_as_set():
+    """Both halves must exist. The accepted-opener path was written into a commit
+    whose edit silently failed to apply, so nothing ever cleared the streak and
+    the throttle could only tighten - shipped, and described in the commit message
+    as working."""
+    source = CLIENT.read_text()
+    assert "_note_cold_open(refused=False)" in source, (
+        "nothing clears the streak; the throttle only tightens")
+    assert "_note_cold_open(refused=True)" in source
+    assert "_note_cold_open_sent()" in source
