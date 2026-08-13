@@ -51,8 +51,17 @@ def main():
         print("no inbound thread in the last 40 to model; try again later")
         return 0
 
+    # One we have NOT already answered. inbound[0] can be a thread we replied to,
+    # in which case _thread_mine is correctly None - nobody is owed anything - and
+    # the check fails on its own fixture rather than on the harness.
+    unanswered = [t for t in inbound if not (t.get("recipientMessageCount") or 0)]
+    if not unanswered:
+        print("every inbound thread in view has already been answered; "
+              "nothing to model")
+        return 0
+
     now = int(time.time() * 1000)
-    row = dict(inbound[0])
+    row = dict(unanswered[0])
     who = row.get("initiatorAgentId")
     # 150 seconds, not 20. The world does not publish an inbound thread to us
     # until after it has closed - measured, one appeared at 146s old - so a
@@ -65,7 +74,7 @@ def main():
     print(f"modelling a real inbound thread from {who}")
     print(f"  status={row.get('threadStatus')} "
           f"i={row.get('initiatorMessageCount')} "
-          f"r={row.get('recipientMessageCount')}, redated to 20s ago")
+          f"r={row.get('recipientMessageCount')}, redated to 150s ago - the age the world actually hands one over at")
 
     mc._c = lambda key, default=None: AGENT if key == "agent_id" else default
     closed = mc._thread_closed(row)
