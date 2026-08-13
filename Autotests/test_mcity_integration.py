@@ -1070,3 +1070,21 @@ def test_the_rules_never_use_a_retired_skill_as_an_example():
     for name in names:
         assert f"({name})" not in rules, (
             f"the rules show retired {name} as an example to copy")
+
+
+def test_the_mission_never_names_an_unregistered_skill():
+    """Even a prohibition teaches the name. mcity-context was retired from SKILLS
+    and the mission still said "NEVER spend a turn on mcity-needs, mcity-inventory
+    or mcity-context" - naming, in the one document the agent reads every turn, a
+    command it cannot call. Retiring mcity-work took four attempts because the
+    habit kept being taught somewhere else; this is the same trap with a negative
+    sign in front of it."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    metta = (root / "plugins/mcity/mcity.metta").read_text()
+    registered = set(re.findall(r"add-skill (mcity-[a-z-]+)", metta))
+    prompt = " ".join(line for line in metta.splitlines()
+                      if "MIDNIGHT_CITY" in line or len(line) > 400)
+    named = set(re.findall(r"mcity-[a-z-]+", prompt))
+    ghosts = sorted(n for n in named if n not in registered)
+    assert not ghosts, (
+        f"the prompt names {ghosts}, which the agent cannot call")
