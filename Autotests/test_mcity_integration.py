@@ -29,6 +29,7 @@ Run:
     OMEGACLAW_SKIP_LIVE_CLEANUP=1 python3 -m pytest Autotests/test_mcity_integration.py -q
 """
 import os
+import pathlib
 import re
 import sys
 
@@ -1048,3 +1049,24 @@ def test_recent_events_is_not_offered_to_the_agent():
     assert "add-skill mcity-recent-events" not in metta
     assert "(= (mcity-recent-events)" in metta, "the binding stays for replayed history"
     assert "check mcity-recent-events" not in metta, "the stale advice must go too"
+
+
+def test_the_rules_never_use_a_retired_skill_as_an_example():
+    """This agent imitates examples - it is the most repeated finding in the
+    client - and the rules used (mcity-work) to illustrate a ready-to-copy
+    command. mcity-work is retired: unregistered from SKILLS, filtered out of the
+    projected history, and its binding kept only so replayed history does not
+    error. Showing it as the exemplar teaches the one command nothing should
+    produce."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    metta = (root / "plugins/mcity/mcity.metta").read_text()
+    helper = (root / "src/helper.py").read_text()
+    retired = re.search(r"RETIRED_COMMANDS = \((.*?)\)", helper, re.S)
+    assert retired, "RETIRED_COMMANDS not found"
+    names = [n for n in re.findall(r'"([\w-]+)"', retired.group(1))
+             if n.startswith("mcity-")]
+    rules = metta[metta.index("MIDNIGHT_CITY_RULES"):]
+    rules = rules[:rules.index("MIDNIGHT_CITY:")] if "MIDNIGHT_CITY:" in rules else rules
+    for name in names:
+        assert f"({name})" not in rules, (
+            f"the rules show retired {name} as an example to copy")
