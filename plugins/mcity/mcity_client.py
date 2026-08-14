@@ -2618,6 +2618,8 @@ def _travel_to_people_command():
             payload, error = _skill_read("VITALS", "navigation-options")
             if error is None and isinstance(payload, dict):
                 _note_space_kind(payload)
+                _note_districts(payload)
+        _note_districts(payload)
         indoors = (_space_kind_now() or "").lower() == "interior"
 
         def _pick():
@@ -2630,6 +2632,11 @@ def _travel_to_people_command():
                     best, count = space, seen
             return best, count
 
+        if not _DISTRICTS:
+            payload, error = _skill_read("VITALS", "navigation-options")
+            if error is None and isinstance(payload, dict):
+                _note_space_kind(payload)
+                _note_districts(payload)
         best, count = _pick()
         if best is None:
             # STALE counts as missing. This only refreshed when the dict was
@@ -4826,6 +4833,29 @@ def enter_building(arg=None):
     return _mutate("ENTER-BUILDING", build)
 
 
+def _note_districts(payload):
+    """Harvest travelDistricts from any navigation-options read.
+
+    _DISTRICTS was filled only by the mcity-navigation SKILL, so when the agent
+    did not call it the table stayed empty - and an empty table means
+    _is_a_district says no to everything, the route falls through to matching
+    areas anchored in the target space, finds none from a different district, and
+    returns nothing at all. The agent sat in north for 276 samples with 27 free
+    agents in central and no route offered.
+
+    Third mechanism gated on a read nobody makes: space_kind from the retired
+    context skill, the area-kind table from the retired areas skill, and this."""
+    try:
+        for item in (payload.get("travelDistricts") or []):
+            if not isinstance(item, dict):
+                continue
+            district = _text(_get(item, "id", "districtId", "spaceId"))
+            if district:
+                _DISTRICTS[district] = _now_ms()
+    except Exception:      # noqa: BLE001
+        return
+
+
 def _note_space_kind(payload):
     """Learn whether we are indoors from a read we already perform.
 
@@ -4877,6 +4907,7 @@ def _teleport_exit():
         if error is not None or not isinstance(payload, dict):
             return None
         _note_space_kind(payload)
+        _note_districts(payload)
         exit_block = payload.get("exitBuilding")
         if not isinstance(exit_block, dict):
             return None

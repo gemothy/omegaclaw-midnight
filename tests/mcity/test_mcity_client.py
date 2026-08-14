@@ -4610,3 +4610,24 @@ def test_a_stale_roster_still_offers_a_way_out():
     mc._ROUTE.update({"text": "GO-TO-CENTRAL", "at_ms": now, "from": "north"})
     line = mc._vitals_line() or ""
     assert "GO-TO-CENTRAL" in line, line
+
+
+def test_the_route_learns_the_districts_it_needs():
+    """_DISTRICTS was filled only by the mcity-navigation SKILL, so when the agent
+    did not call it the table stayed empty - and an empty table means
+    _is_a_district says no to everything, the route falls through to matching
+    areas anchored in the target space, finds none from a different district, and
+    returns nothing. The agent sat in north for 276 samples with 27 free agents in
+    central and no route offered."""
+    mc.reset_runtime_state()
+    mc._note_districts({"travelDistricts": [{"id": "central"}, {"id": "west"}]})
+    assert mc._is_a_district("central") is True
+    assert mc._is_a_district("north") is False        # where we are is not listed
+
+
+def test_the_route_fetches_the_district_list_when_it_is_empty():
+    source = pathlib.Path(mc.__file__).read_text()
+    window = source[source.index("def _travel_to_people_command"):]
+    window = window[:window.index("\ndef ")]
+    assert "if not _DISTRICTS:" in window, (
+        "an empty district table must be filled, not silently answered no")
