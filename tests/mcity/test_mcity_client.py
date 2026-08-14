@@ -4424,3 +4424,21 @@ def test_a_first_refusal_keeps_the_plain_ttl():
     mc.reset_runtime_state()
     mc._remember_refusal("dnd", "user-agent-once")
     assert mc._refusal_ttl("dnd", "user-agent-once") == mc._REFUSAL_TTL_MS["dnd"]
+
+
+def test_a_refusal_after_the_memory_expired_still_counts():
+    """The first version only counted a repeat that arrived while the previous
+    refusal was still remembered. Chronic refusers come back at about 29 minute
+    intervals against a five minute memory, so they always looked like a first
+    refusal and the backoff never engaged - DND held flat at 4.5 a minute across
+    the deploy. The streak is a history of this person, not a counter inside one
+    memory."""
+    mc.reset_runtime_state()
+    who = "user-agent-slow-repeat"
+    mc._remember_refusal("dnd", who)
+    base = mc._refusal_ttl("dnd", who)
+    # the memory lapses entirely, then they refuse again
+    mc._REFUSED.pop(("dnd", who), None)
+    mc._remember_refusal("dnd", who)
+    assert mc._refusal_ttl("dnd", who) == base * 2, (
+        "a lapsed memory must not reset what we know about this person")

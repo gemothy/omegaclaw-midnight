@@ -474,12 +474,17 @@ def _remember_refusal(kind, key, first_only=False):
     if first_only and (kind, key) in _REFUSED:
         return
     now = _now_ms()
-    # A refusal that arrives while we still remembered the last one is a repeat.
-    if _REFUSED.get((kind, key)) is not None:
-        _REFUSAL_STREAK[(kind, key)] = min(
-            _REFUSAL_STREAK.get((kind, key), 1) + 1, _REFUSAL_STREAK_CAP)
-    else:
-        _REFUSAL_STREAK.setdefault((kind, key), 1)
+    # EVERY refusal counts, not only one that arrives while we still remember the
+    # last. The first version required the repeat inside the live memory, and
+    # chronic refusers come back at about 29 minute intervals against a five
+    # minute memory - so they always looked like a first refusal and the backoff
+    # never engaged. DND held flat at 4.5 a minute across the deploy.
+    #
+    # That is the same mistake this backoff was written to fix, made inside the
+    # fix: a horizon shorter than the behaviour being modelled. The streak is a
+    # history of this person, not a counter within one memory.
+    _REFUSAL_STREAK[(kind, key)] = min(
+        _REFUSAL_STREAK.get((kind, key), 0) + 1, _REFUSAL_STREAK_CAP)
     _REFUSED[(kind, key)] = now
     ttl = _refusal_ttl(kind, key)
     for entry, at in list(_REFUSED.items()):
