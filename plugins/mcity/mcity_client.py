@@ -1127,6 +1127,19 @@ def _norm_arg(value):
     text = text.replace("_apostrophe_", "'")
     text = text.replace("_quote_", '"')
     text = text.replace("_newline_", "\n")
+    # And the FRAGMENTS. The agent sometimes emits half the escape token - the
+    # world was asked for "area not found: quote_hacker-house-interior" - because
+    # the recalled history is full of _quote_ and it copies it imperfectly. A
+    # leading or trailing piece of that token is never part of a real id, so
+    # undoing it turns a certain refusal into the action that was meant.
+    text = re.sub(r"^quote_+", "", text)          # never had a leading underscore
+    text = re.sub(r"_+quote$", "", text)           # nor a trailing one
+    # An UNMATCHED quote left by the token replacement above. A matched pair is
+    # left alone: it is what a correctly quoted argument turns into.
+    if text.startswith('"') and not text.endswith('"'):
+        text = text[1:]
+    elif text.endswith('"') and not text.startswith('"'):
+        text = text[:-1]
     text = _CONTROL_RE.sub(" ", text)
     text = _WS_RE.sub(" ", text).strip()
     if len(text) > MAX_ARG_CHARS:

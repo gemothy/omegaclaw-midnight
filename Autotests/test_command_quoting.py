@@ -131,3 +131,21 @@ def test_the_rules_explain_the_history_escaping_the_model_can_see():
     rules = metta[metta.index("MIDNIGHT_CITY_RULES"):]
     assert "HISTORY above stores" in rules, (
         "the rules must explain the _quote_ token the model reads constantly")
+
+
+def test_a_half_copied_escape_token_does_not_cost_a_turn():
+    """The agent copies _quote_ imperfectly out of the recalled history, which is
+    full of it: the world was asked for "area not found: quote_hacker-house-
+    interior". A leading or trailing piece of that token is never part of a real
+    id, so undoing it turns a certain refusal into the action that was meant."""
+    import sys as _s
+    _s.path.insert(0, "plugins/mcity")
+    import mcity_client as _mc
+    assert _mc._norm_arg("quote_hacker-house-interior") == "hacker-house-interior"
+    assert _mc._norm_arg("_quote_central") == "central"
+    assert _mc._norm_arg("central_quote") == "central"
+    # a correctly quoted argument still becomes a matched pair, untouched
+    assert _mc._norm_arg("_quote_hello there_quote_") == '"hello there"' 
+    # and a legitimate argument is untouched
+    assert _mc._norm_arg("central-plaza") == "central-plaza"
+    assert _mc._norm_arg("user-agent-abc hello there") == "user-agent-abc hello there"
