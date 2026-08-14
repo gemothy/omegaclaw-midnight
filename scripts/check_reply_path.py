@@ -85,7 +85,21 @@ def main():
     print(f"  _thread_counterpart -> {counterpart}")
     print(f"  _thread_mine        -> {mine}     ('no' means they are owed a reply)")
 
-    ok = (not closed) and counterpart == who and mine == "no"
+    # And the guard that stops the agent re-reading instead of answering. It has
+    # never fired in production - the conditions are rare - and an untriggered
+    # mechanism has twice turned out to be dead in this harness while passing its
+    # unit tests.
+    now_ms = int(time.time() * 1000)
+    mc._WAITING.update({"at_ms": now_ms, "ids": [who],
+                        "said": {who: row.get("latestMessagePreview") or "hello"},
+                        "at": {who: now_ms - 30000}})
+    mc._THREADS_READ_FOR["who"] = who          # as if already served once
+    guard = (mc.threads() or "")
+    guarded = guard.startswith("MCITY-THREADS-SKIPPED reason=already_have_it")
+    print(f"  second thread read  -> {'refused' if guarded else 'ALLOWED'}"
+          f"   (the read that has nothing to add)")
+
+    ok = (not closed) and counterpart == who and mine == "no" and guarded
     if ok:
         print("\nthe harness would notice this person and offer to answer them")
         return 0
