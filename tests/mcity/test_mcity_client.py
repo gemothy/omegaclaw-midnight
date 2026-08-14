@@ -4872,3 +4872,41 @@ def test_the_escape_door_still_sees_the_empty_room(control):
                         "at": {who: now - 10000}})
     _check(mc.agents())
     assert mc._REACHABLE["n"] == 0, "the roster's own count is not rewritten"
+
+
+def test_the_waiting_list_is_rebuilt_more_often_than_vitals(control):
+    """It used to be nested inside the vitals refresh, which returns early for
+    30 seconds, so _WAITING_REFRESH_MS = 3000 could never bind - a rate limit
+    that never applied, advertising a cadence the code could not deliver.
+
+    Threads close at exactly 60.0s from creation, so a 30s rebuild can miss
+    somebody outright and otherwise spends half their thread before noticing."""
+    mc.reset_runtime_state()
+    calls = []
+    real = mc._refresh_waiting_if_stale
+    mc._refresh_waiting_if_stale = lambda: calls.append(1)
+    try:
+        # Vitals fresh, so _refresh_vitals_if_stale returns early every time.
+        mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central"})
+        for _ in range(3):
+            mc._out("MCITY-TEST-OK")
+    finally:
+        mc._refresh_waiting_if_stale = real
+    assert len(calls) == 3, (
+        f"asked {len(calls)} times in 3 results; the waiting list has to be "
+        "reachable independently of the 30s vitals gate")
+
+
+def test_the_waiting_refresh_keeps_its_own_rate_limit(control):
+    """Cheap, but not unbounded: its own 3s limit is what keeps this to one GET
+    every few seconds against a 900/min read budget."""
+    mc.reset_runtime_state()
+    reads = []
+    real = mc._own_threads
+    mc._own_threads = lambda verb: (reads.append(verb), ({"threads": []}, None))[1]
+    try:
+        for _ in range(5):
+            mc._refresh_waiting_if_stale()
+    finally:
+        mc._own_threads = real
+    assert len(reads) == 1, f"{len(reads)} reads for 5 calls inside the window"

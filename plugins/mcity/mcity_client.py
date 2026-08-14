@@ -769,7 +769,9 @@ def _refresh_vitals_if_stale():
         eaten = _now_ms() - (_VITALS.get("items_at_ms") or 0)
         if not _VITALS.get("items") or eaten >= _ITEMS_TTL_MS:
             _skill_read("VITALS", "inventory")
-        _refresh_waiting_if_stale()
+        # (the waiting refresh used to live here - see _out, which now calls it
+        # on every result instead. Nested inside this function it inherited the
+        # 30s vitals gate, so _WAITING_REFRESH_MS could never bind.)
         # ONLY on a cold start. reachable= and talk-to= are what step five turns
         # on, and they appeared only once the agent called mcity-agents of its
         # own accord - so after every restart the tokens were missing, the step
@@ -1018,6 +1020,25 @@ def _out(text):
     try:
         body = _redact(text)
         _refresh_vitals_if_stale()
+        # Who is waiting is asked on EVERY result, not once per vitals refresh.
+        #
+        # This call used to sit inside _refresh_vitals_if_stale, which returns
+        # early while vitals are younger than VITALS_REFRESH_MS - 30 seconds. So
+        # the waiting list could only ever be rebuilt every 30s, and
+        # _WAITING_REFRESH_MS = 3000 was dead: a rate limit that never bound,
+        # advertising a cadence the code could not deliver. The two constants had
+        # drifted apart in exactly the way this file warns about elsewhere.
+        #
+        # The world closes every inbound thread at exactly 60.0s from creation
+        # and publishes it within about 2s, so a 30s rebuild can miss a person
+        # entirely, and when it does catch them it has already spent half their
+        # thread. reply_funnel's largest bucket is "wrote to us, never surfaced
+        # as waiting" - 5 of 8 in the last window.
+        #
+        # It is cheap: its own 3s rate limit and reentrancy guard still apply, so
+        # this is at most one GET every three seconds against a read budget of
+        # 900 a minute.
+        _refresh_waiting_if_stale()
         vitals = _vitals_line()
         if not vitals or "\nvitals " in body:
             return _cap(body)
