@@ -99,3 +99,21 @@ def test_bare_multi_command_line_is_split():
 def test_a_lone_group_is_not_disturbed():
     assert helper.balance_parentheses('(send "one")') == '((send "one"))'
     assert helper.balance_parentheses('(mcity-eat)') == '((mcity-eat))'
+
+
+def test_the_rules_only_use_escape_tokens_the_harness_translates():
+    """_quote_, _apostrophe_ and _newline_ are translated on the way out; anything
+    else reaches the model literally. A rule about quoting that itself contained an
+    untranslated _backslash_ would teach the token instead of the lesson - which is
+    what the first draft of that rule did.
+
+    Checks a denylist rather than every _word_ shape: the SKILLS descriptions are
+    full of snake_case parameter names like agent_id_in_quotes, and those are not
+    escapes."""
+    import pathlib as _p
+    metta = (_p.Path(__file__).resolve().parent.parent
+             / "plugins/mcity/mcity.metta").read_text()
+    never = ("_backslash_", "_tab_", "_space_token_", "_slash_", "_dquote_",
+             "_squote_", "_lparen_", "_rparen_", "_bracket_")
+    found = [token for token in never if token in metta]
+    assert not found, f"untranslated escape tokens in the prompt: {found}"
