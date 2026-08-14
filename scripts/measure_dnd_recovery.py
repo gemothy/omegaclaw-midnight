@@ -57,7 +57,14 @@ def main():
             for who in ids:
                 refused[who].append(when)
         if "MCITY-SPEAK-OK" in line:
-            for who in ids:
+            # Prefer the to= field the success line now carries. Falling back to
+            # "any id on the line" is what made this undercount: until to=
+            # existed, a delivery named a thread and a message and nobody, so
+            # this saw 4 people delivered to against 43 refused. Where to= is
+            # absent the line is from before that change, and the fallback keeps
+            # older windows readable rather than silently reading zero.
+            named = re.search(r"\bto=(user-agent-[\w-]+)", line)
+            for who in ([named.group(1)] if named else ids):
                 delivered[who].append(when)
 
     gaps = []

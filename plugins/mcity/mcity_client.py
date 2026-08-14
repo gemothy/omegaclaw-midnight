@@ -4514,7 +4514,20 @@ def _success_fields(event, action):
         if (event_kind == "agent_spoke"
                 and payload.get("targetAgentId") == action.get("targetAgentId")
                 and payload.get("text") == action.get("text")):
+            # to= names WHO received it.
+            #
+            # Both success lines carried thread=, msg= and seq= and no agent id
+            # at all, so nothing downstream could say who we had actually
+            # reached. measure_dnd_recovery pairs refusals against successes per
+            # person and could see only 4 people delivered to against 43
+            # refused - a ratio I nearly reported as a success rate before
+            # noticing the id was simply absent from the line it was reading.
+            # reply_funnel has the same blind spot.
+            #
+            # It is also worth a few tokens to the agent: the one thing a
+            # delivery confirmation should say is who got the message.
             return [("outcome", "delivered"),
+                    ("to", _plain(payload.get("targetAgentId"))),
                     ("thread", _plain(payload.get("threadId"))),
                     ("msg", _plain(payload.get("messageId"))),
                     ("seq", _plain(payload.get("sequenceNo")))]
@@ -5765,7 +5778,11 @@ def speak(arg=None):
             time.sleep(_THREAD_CONFIRM_RETRY_S)
             landed = _thread_shows_our_message(sent["agent_id"], submitted_at)
         if landed:
+            # to=, for the same reason as the event-confirmed path above. This
+            # is the branch that fires most: nearly every speak comes back
+            # PENDING and is settled by the next thread read.
             result = _line("SPEAK", "OK", (("outcome", "delivered"),
+                                           ("to", _plain(sent["agent_id"])),
                                            ("confirmed-by", "thread")))
         else:
             # Not refused - just not finished. The next thread read settles it.

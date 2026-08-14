@@ -4955,3 +4955,28 @@ def test_the_longer_backoff_does_not_silence_someone_who_writes_back(control):
     mc._remember_refusal("dnd", who)
     mc._REFUSED[("dnd", who)] = mc._now_ms() - 60000      # refused a minute ago
     assert mc._still_worth_answering(who, mc._now_ms() - 10000) is True
+
+
+_SOURCE = open(mc.__file__, encoding='utf-8').read()
+
+
+def test_a_delivery_says_who_received_it(control):
+    """Both success lines carried thread=, msg= and seq= and no agent id, so no
+    measurement could say who we had actually reached. measure_dnd_recovery saw
+    4 people delivered to against 43 refused - a ratio that looks like a dismal
+    success rate and is really a field missing from the line it reads."""
+    sent = {}
+    control.on_action = lambda action: sent.update(action) or [
+        event("e-speak", "agent_spoke", targetAgentId=action["targetAgentId"],
+              text=action["text"], threadId="t1", messageId="m9", sequenceNo=4)]
+    result = _check(mc.speak("agent-2 hello neighbour"))
+    assert result.startswith("MCITY-SPEAK-OK"), result
+    assert "to=agent-2" in result, result
+
+
+def test_the_thread_confirmed_delivery_also_says_who(control):
+    """The branch that fires most: nearly every speak comes back PENDING and is
+    settled by the next thread read."""
+    assert 'if landed:' in _SOURCE
+    assert _SOURCE.count('("to", _plain(sent["agent_id"]))') == 1, (
+        "the thread-confirmed success line must name the recipient too")
