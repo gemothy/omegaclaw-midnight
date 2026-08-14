@@ -104,6 +104,21 @@ def main():
         else:
             verdicts["absent from the log entirely"] += 1
 
+    # The world's own count first, because it cannot be truncated. Every verdict
+    # below is inferred from log lines, and read_window drops the oldest when the
+    # tail fills - so "absent from the log entirely" can mean the line was
+    # dropped rather than never written. This number does not depend on that.
+    allin = [t for t in rows if t.get("initiatorAgentId") != AGENT]
+    for label, mins in (("this window", minutes), ("last 2h", 120), ("all held", 10 ** 6)):
+        cut = int(time.time() * 1000) - mins * 60000
+        sel = [t for t in allin if (t.get("threadCreatedAtMs") or 0) >= cut]
+        if not sel:
+            continue
+        ans = sum(1 for t in sel if (t.get("recipientMessageCount") or 0) > 0)
+        print(f"  world says: {ans}/{len(sel)} inbound answered "
+              f"({int(100 * ans / len(sel))}%)  [{label}]")
+    print()
+
     total = sum(verdicts.values())
     print(f"{total} people wrote to us in the last {window}\n")
     for name, n in verdicts.most_common():
