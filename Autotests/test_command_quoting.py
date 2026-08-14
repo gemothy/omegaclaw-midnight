@@ -117,3 +117,17 @@ def test_the_rules_only_use_escape_tokens_the_harness_translates():
              "_squote_", "_lparen_", "_rparen_", "_bracket_")
     found = [token for token in never if token in metta]
     assert not found, f"untranslated escape tokens in the prompt: {found}"
+
+
+def test_the_rules_explain_the_history_escaping_the_model_can_see():
+    """The recalled history stores a quote character as the token _quote_ - about
+    22,000 occurrences in one prompt - while the rules tell the agent to write
+    real double quotes. It produced hybrids: (mcity-move-area "\\"central-quote_)")
+    failed to parse, 4 times in 190 turns. The rules have to name the difference,
+    because the exemplar it sees most often is the one it must not copy."""
+    import pathlib as _p
+    metta = (_p.Path(__file__).resolve().parent.parent
+             / "plugins/mcity/mcity.metta").read_text()
+    rules = metta[metta.index("MIDNIGHT_CITY_RULES"):]
+    assert "HISTORY above stores" in rules, (
+        "the rules must explain the _quote_ token the model reads constantly")
