@@ -82,18 +82,45 @@ def main():
         if (row.get("recipientMessageCount") or 0) > 0:
             verdicts["answered"] += 1
             continue
-        # Everything the log has to say about this specific person.
-        mentions = re.findall(re.escape(who) + r"[^\n]{0,120}", log)
+        # Everything the log has to say about this specific person - the WHOLE
+        # line, not the 120 characters after the id.
+        #
+        # The first version captured only what followed the id, so a failure
+        # reported before it was invisible. It filed a reply that the world had
+        # refused with do-not-disturb under "surfaced, never attempted", which
+        # pointed the next pass at the model and the prompt when the send had in
+        # fact gone out and been turned away. An instrument that mis-attributes
+        # is worse than no instrument: this one decides which half of the system
+        # gets worked on.
+        mentions = [ln for ln in log.splitlines() if who in ln]
         blob = "\n".join(mentions)
         surfaced = bool(re.search(r"waiting=\d+ \(answer " + re.escape(who), log))
         failed = re.search(r"SPEAK-FAILED reason=(\w+)[^\n]{0,60}", blob)
         skipped = re.search(r"SPEAK-SKIPPED reason=(\w+)", blob)
+        # The agent narrates its own results back into the log in prose - "`mcity
+        # -speak` to <id> FAILED because target is in do-not-disturb mode" - and
+        # that is sometimes the only trace, because the tagged line and the id do
+        # not always share a line. Prose is weaker evidence than a tag, so it is
+        # only consulted when no tag was found.
+        if not failed and not skipped:
+            prose = re.search(r"FAILED[^\n]{0,40}?(do.not.disturb|not found|"
+                              r"recently closed)", blob, re.I)
+            if prose:
+                failed = prose
 
         if failed:
             verdicts["the world refused our reply"] += 1
-            reason = failed.group(1)
-            world = re.search(r"MC_UNTRUSTED ([^<]{0,50})", blob)
-            detail[f"{reason}: {(world.group(1) if world else '').strip()}"] += 1
+            reason = failed.group(1) if failed.re.groups else "action_failed"
+            # From the FAILING line only. Taken from the whole blob it picked up
+            # the <<MC_UNTRUSTED ...>> preview of what the person had said to us
+            # and printed that as the reason the reply failed, which reads as an
+            # explanation and is just their message.
+            line = next((ln for ln in mentions
+                         if "FAILED" in ln or "failed" in ln), "")
+            world = re.search(r"detail=<<MC_UNTRUSTED ([^<]{0,48})", line) \
+                or re.search(r"(do.not.disturb|not found|recently closed)",
+                             line, re.I)
+            detail[f"{reason}: {(world.group(1) if world else '?').strip()}"] += 1
         elif skipped:
             verdicts["the harness skipped the reply"] += 1
             detail[f"skip {skipped.group(1)}"] += 1
