@@ -2406,6 +2406,10 @@ def test_vitals_says_how_long_the_agent_has_been_silent(control):
     action needed" 133 times in twenty minutes while four people stood there able
     to hear it. Silence is a fact about the agent, and stating it is what makes
     speaking something due rather than optional."""
+    # never-spoken means the delivery clock is unset, so say so rather than
+    # depending on no earlier test having delivered anything. This failed once
+    # purely on test order, which this project has been bitten by before.
+    mc._last_delivered_ms = 0
     mc._CAN_SPEAK["user-agent-free"] = (True, mc._now_ms())
     mc._REACHABLE.update({"n": 1, "at_ms": mc._now_ms()})
     mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(9)"})
@@ -4520,3 +4524,35 @@ def test_a_refusal_after_their_message_still_drops_them():
     now = mc._now_ms()
     mc._REFUSED[("dnd", "user-agent-said-no")] = now
     assert mc._still_worth_answering("user-agent-said-no", now - 60000) is False
+
+
+def test_a_reply_is_not_refused_over_a_refusal_older_than_their_message(control):
+    """The waiting list admits somebody whose message is newer than an old
+    refusal; the speak path then blocked them on any live refusal at all. 14 of
+    65 owed turns were spent being told to answer somebody the very next check
+    would not let us answer."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    control.on_action = lambda action: []
+    mc._REFUSED[("dnd", "user-agent-wrote-later")] = now - 120000
+    mc._CAN_SPEAK["user-agent-wrote-later"] = (False, now)
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-wrote-later"],
+                        "said": {"user-agent-wrote-later": "still there?"},
+                        "at": {"user-agent-wrote-later": now - 20000}})
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-wrote-later yes, still here"))
+    assert not result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable"), result
+    assert len(control.actions) > before
+
+
+def test_a_reply_is_still_refused_when_the_refusal_came_after(control):
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._REFUSED[("dnd", "user-agent-refused-later")] = now
+    mc._CAN_SPEAK["user-agent-refused-later"] = (False, now)
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-refused-later"],
+                        "said": {}, "at": {"user-agent-refused-later": now - 90000}})
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-refused-later hello"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable"), result
+    assert len(control.actions) == before

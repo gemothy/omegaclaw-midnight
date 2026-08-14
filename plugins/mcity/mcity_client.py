@@ -5446,9 +5446,17 @@ def speak(arg=None):
                         f"down to one a minute; the next may go in {paused}s. "
                         "Answering somebody who wrote to you is never paused"),
                 _another_read_than("SPEAK") or _next_action_command())
+        # For somebody waiting, ask the SAME question the waiting list asked:
+        # is our refusal newer than their message? _world_has_refused ignored that
+        # comparison, so the list admitted them - their message being newer - and
+        # this then refused the send. 14 of 65 owed turns were spent being told to
+        # answer somebody the very next check would not let us answer.
+        #
+        # Ninth rule in this file to have been asked two ways in two places.
+        waiting_since = (_WAITING.get("at") or {}).get(parts[0])
         if _can_be_reached(parts[0]) is False \
                 and (parts[0] not in _someone_is_waiting()
-                     or _world_has_refused(parts[0])):
+                     or not _still_worth_answering(parts[0], waiting_since)):
             others = [i for i in _someone_is_waiting()
                       if i != parts[0] and _can_be_reached(i) is not False]
             # The row already said asleep=yes and the agent spoke to them anyway:
