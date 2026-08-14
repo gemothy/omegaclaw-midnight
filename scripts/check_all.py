@@ -33,6 +33,10 @@ CHECKS = [
     ("world contract", "check_world_contract.py", True),
     ("reply path", "check_reply_path.py", True),
     ("escape from a refusing room", "check_escape.py", True),
+    # What we SAID, not just whether it arrived. These messages reach other
+    # people's agents under a real person's name, so a leaked refusal reason or
+    # another player's do-not-disturb status is said in public.
+    ("nothing internal said out loud", "check_outbound_quality.py", False),
 ]
 
 
