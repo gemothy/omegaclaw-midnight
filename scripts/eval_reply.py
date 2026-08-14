@@ -17,15 +17,30 @@ the vitals line, and asks the model N times whether it writes back to THAT id.
 Scores three things, in the order they matter:
   answered      a speak aimed at the id the line said was waiting
 
-BASELINE at a sample size that means something: 40 samples, 2026-08-13, with the
-harness carrying who= and they-said= for the waiting person:
+BASELINE, 40 samples, 2026-08-14, nvidia/Qwen3.6-35B-A3B-NVFP4:
 
+    answered 23 (57%)   wrong-target 0   no-speak 17
+
+Compare future models against THAT number, not against the 85% below it. The 85%
+was measured through a capture that read `docker logs --since 20m` on a daemon
+four hours behind, took the FIRST prompt it found rather than the live one, and
+then rewrote the mission text instead of the vitals line. Three defects, all in
+the instrument, all fixed here. Same model, same day, measured through each
+successive fix: 0%, then 12%, then 57%. Nothing about the model changed.
+
+So 85% is not a number this eval can reproduce or compare to - it was taken on a
+prompt nobody can now identify. It is left in the history below as a warning
+rather than deleted, because deleting it would make the record look tidier than
+it is.
+
+The superseded figure, kept for that reason: 40 samples, 2026-08-13,
     answered 34 (85%)   wrong-target 0   no-speak 6
 
-and the replies use the name from who= rather than the one inside the quoted
-message: "Holly, how is the crystal shipment holding up?". That is the number to
-compare a future model or prompt against. Anything materially below it is a
-regression; anything above needs 40 samples of its own to believe.
+What has held across every version of this eval, and is the part worth keeping,
+is that the replies use the name from who= rather than the one inside the quoted
+message: "Holly, how is the crystal shipment holding up?". Against the 57%
+baseline, anything materially below is a regression and anything above needs 40
+samples of its own to believe.
 
 The earlier small-sample history, kept because it shows why 40: the current
 model answers roughly half to two thirds of the time, and the run-to-run spread is
@@ -50,6 +65,11 @@ Results so far, same prompt, same harness, 2026-08-13:
 
 So the local alternative is not better, and the MoE stays.
 
+Both of those were measured through the broken capture described above, so read
+them as "not yet retested" rather than as settled. The dense model's wrong-target
+result is the one worth re-checking first, since aiming at the wrong person is
+the only failure mode here that is worse than saying nothing.
+
 CAVEAT, added after the fact: this samples ONE turn, and the agent works across
 turns. The MoE answering with (mcity-threads) is not necessarily a failure - it
 may be reading the thread and replying next turn, which live logs have measured
@@ -62,7 +82,6 @@ Treat this eval as a comparison between models, not as a verdict on either
 """
 import json
 import re
-import subprocess
 import sys
 import urllib.request
 
@@ -72,11 +91,27 @@ SAID = "Gem, did the crystal shipment clear customs tonight?"
 
 
 def capture():
-    out = subprocess.run(["docker", "logs", "--since", "20m", "omegaclaw"],
-                         capture_output=True, text=True, timeout=180)
-    text = (out.stdout or "") + (out.stderr or "")
-    match = re.search(r"\(CHARS_SENT: \d+ PROMPT: (.*?)(?=\n2026-)", text, re.S)
-    return match.group(1) if match else None
+    """The LATEST prompt in a correctly-clocked window.
+
+    Both halves of this were wrong and together they scored the live model 0/40.
+
+    `docker logs --since 20m` is the trap README.md lists first: the daemon on
+    this host runs about four hours behind it, so the window is not twenty
+    minutes and what came back was a prompt from container boot - before any
+    skill had returned a result, therefore carrying no vitals line at all.
+    read_window filters on each line's own timestamp instead.
+
+    re.search then took the FIRST prompt in whatever came back. The live prompt
+    is the LAST one; the earlier ones are history.
+    """
+    sys.path.insert(0, "scripts")
+    from dockerlogs import read_window                  # noqa: PLC0415
+    text, error = read_window("omegaclaw", "30m", include_prompt=True)
+    if error:
+        return None
+    found = re.findall(r"\(CHARS_SENT: \d+ PROMPT: (.*?)(?=\n2026-)",
+                       text or "", re.S)
+    return found[-1] if found else None
 
 
 def with_waiting(prompt):
@@ -93,27 +128,48 @@ def with_waiting(prompt):
     # reply to itself.
     injected = (f"waiting=1 (answer {WAITING_ID}) who=Holly,hacker "
                 f"they-said=<<MC_UNTRUSTED {SAID} MC_UNTRUSTED>>")
-    # The LAST waiting=0, not the first. The prompt carries dozens of old vitals
-    # lines inside HISTORY, so patching the first one left the live line - the
-    # only one the agent acts on - still reading waiting=0. The model then
-    # correctly declined to answer nobody and scored 0 of 16, which I read as a
-    # model failure twice before checking what the prompt actually said.
+    # Patch the VITALS LINE, not the last textual waiting=0 anywhere in the
+    # prompt. rfind("waiting=0") found the copy inside the mission text, which
+    # quotes the token to explain the rule, and rewrote the rule itself into
     #
-    # Third time this eval has measured its own injection. It is a reminder that
-    # a harness for measuring a model needs the same scepticism as the model.
-    idx = prompt.rfind("waiting=0")
-    if idx < 0:
+    #   "if vitals says waiting=1 (answer <id>) who=Holly ... then nobody who
+    #    can hear you is owed a reply, so do NOT call mcity-threads"
+    #
+    # The model read that, correctly answered nobody, and scored 0 of 40 - on the
+    # model that had just scored 85%. Fourth time this eval has measured its own
+    # injection; the previous three are above. The line the agent acts on is the
+    # LAST segment beginning "vitals " (mcity_client._out appends it to every
+    # result), so that is the only thing that gets rewritten.
+    segments = prompt.split("_newline_")
+    live = [n for n, seg in enumerate(segments)
+            if seg.strip().startswith("vitals ") and "waiting=" in seg]
+    if not live:
         return None
-    out = prompt[:idx] + injected + prompt[idx + len("waiting=0"):]
+    n = live[-1]
+    seg = re.sub(r"waiting=\d+(?: \(answer \S+\))?", injected,
+                 segments[n], count=1)
     # And take the competing target off the line. The harness suppresses talk-to=
     # whenever somebody is owed a reply - one person named per turn - so leaving
     # it in builds a vitals line the agent is never shown. The first run of this
     # eval did exactly that and scored the model 0 of 20, which measured my
     # injection rather than the model.
     # Only the COMPETING target goes. who= now belongs to the waiting person.
-    out = re.sub(r"\s(?:talk-to|met-before|last)=\S+", "", out)
-    out = re.sub(r"\swho=(?!Holly)\S+", "", out)
-    return out
+    # Scoped to the vitals line: applied to the whole prompt it also edited the
+    # mission text.
+    seg = re.sub(r"\s(?:talk-to|met-before|last)=\S+", "", seg)
+    seg = re.sub(r"\swho=(?!Holly)\S+", "", seg)
+    # reachable has to agree with waiting, for the same reason waiting has to
+    # agree with answer=. _someone_is_waiting() counts only people who can
+    # actually hear a reply, so waiting=1 alongside reachable=0 is a state the
+    # harness cannot produce: it tells the model in one breath that Holly is
+    # owed an answer and that nobody can hear it. Scored 12% while the capture
+    # happened to carry reachable=0, and whether it does is pure luck of when
+    # the prompt was taken - which made the number uncomparable to any other
+    # run rather than merely low.
+    if re.search(r"reachable=0\b", seg):
+        seg = re.sub(r"reachable=0\b", "reachable=1", seg, count=1)
+    segments[n] = seg
+    return "_newline_".join(segments)
 
 
 def ask(prompt, model):
@@ -137,7 +193,12 @@ def main():
         return 1
     prompt = with_waiting(prompt)
     if not prompt:
-        print("captured prompt had no waiting=0 to replace; try again shortly")
+        # Refuse to score rather than score a prompt the agent never sees. A
+        # capture with no vitals line is a boot-time prompt, and patching one
+        # anyway is how this eval produced a 0/40 on a model that scores 85%.
+        print("captured prompt carries no live vitals line - nothing the agent "
+              "acts on to inject into. Refusing to score; try again once the "
+              "agent has run a few turns.")
         return 1
 
     answered = wrong = silent = 0
