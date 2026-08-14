@@ -4556,3 +4556,41 @@ def test_a_reply_is_still_refused_when_the_refusal_came_after(control):
     result = _check(mc.speak("user-agent-refused-later hello"))
     assert result.startswith("MCITY-SPEAK-SKIPPED reason=unreachable"), result
     assert len(control.actions) == before
+
+
+def test_a_reply_across_spaces_is_not_attempted(control):
+    """"target is in another space" was 15 of the 16 refused replies in one
+    window: somebody writes, walks off, and the reply lands where they no longer
+    are. The waiting bypass skips reachability by design - canSpeak answers the
+    wrong question mid-thread - but space is not canSpeak, and the world enforces
+    it absolutely."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"space": "central", "at_ms": now})
+    mc._WHERE["user-agent-moved"] = ("hacker-house-interior", now)
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-moved"],
+                        "said": {}, "at": {"user-agent-moved": now}})
+    before = len(control.actions)
+    result = _check(mc.speak("user-agent-moved still there?"))
+    assert result.startswith("MCITY-SPEAK-SKIPPED reason=another_space"), result
+    assert len(control.actions) == before
+
+
+def test_a_reply_in_our_own_space_still_goes(control):
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    control.on_action = lambda action: []
+    mc._VITALS.update({"space": "central", "at_ms": now})
+    mc._WHERE["user-agent-here5"] = ("central", now)
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-here5"],
+                        "said": {}, "at": {"user-agent-here5": now}})
+    before = len(control.actions)
+    _check(mc.speak("user-agent-here5 yes still here"))
+    assert len(control.actions) > before
+
+
+def test_a_stale_position_does_not_block_a_reply():
+    mc.reset_runtime_state()
+    mc._VITALS.update({"space": "central"})
+    mc._WHERE["user-agent-old-pos"] = ("north", mc._now_ms() - (mc._CAN_SPEAK_TTL_MS + 1000))
+    assert mc._somewhere_else("user-agent-old-pos") is False

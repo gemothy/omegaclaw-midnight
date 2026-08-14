@@ -605,7 +605,7 @@ def reset_runtime_state():
     for cache in (_CAN_SPEAK, _REFUSED, _REFUSAL_STREAK, _LAST_READ, _SAID,
                   _AWAKE_PLACES, _WHO,
                   _AREA_KIND,
-                  _MET, _AIMED, _DISTRICTS, _WROTE_TO_US, _SLEEPING,
+                  _MET, _AIMED, _DISTRICTS, _WROTE_TO_US, _SLEEPING, _WHERE,
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
@@ -1017,6 +1017,7 @@ _SKIP_REASONS = frozenset((
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
     "no_link_exit", "busy", "just_read",
     "known_bad_destination", "no_food", "lease_lost", "lease_expired",
+    "another_space",
     "already_have_it",
     "leaves_the_people",
     "cold_opens_paused",
@@ -1950,6 +1951,29 @@ def _met_before(agent_id):
     return f"met-before={count}x last={int(ago / 60000)}m-ago"
 
 
+# id -> (the space the roster last put them in, when).
+#
+# "target is in another space" was 15 of the 16 refused replies in one window:
+# somebody writes to us, walks off, and the reply lands where they no longer are.
+# The waiting-person bypass skips the reachability check by design - canSpeak
+# answers the wrong question mid-thread - but space is not canSpeak. The world
+# enforces it absolutely, and it publishes everyone's position on every roster
+# row.
+_WHERE = {}
+
+
+def _somewhere_else(agent_id):
+    """True when the roster recently put them in a different space from us."""
+    seen = _WHERE.get(agent_id)
+    here = _VITALS.get("space")
+    if not seen or not here:
+        return False
+    where, at = seen
+    if (_now_ms() - at) > _CAN_SPEAK_TTL_MS:
+        return False
+    return str(where) != str(here)
+
+
 # id -> when the roster last showed them asleep.
 _SLEEPING = {}
 
@@ -1990,6 +2014,9 @@ def _note_can_speak(entry, at_ms=None):
         # whether a reply is worth trying. See _still_worth_answering.
         # The world says this two ways: an activeAction of kind sleep, and a
         # plain status of "sleeping". Rows carry one or the other.
+        where = _text(entry.get("space"))
+        if where:
+            _WHERE[agent_id] = (where, _now_ms())
         if (_action_blocks_talk(entry.get("action"), ("sleep",))
                 or "sleep" in _text(entry.get("status")).lower()):
             _SLEEPING[agent_id] = _now_ms()
@@ -5453,6 +5480,14 @@ def speak(arg=None):
         # answer somebody the very next check would not let us answer.
         #
         # Ninth rule in this file to have been asked two ways in two places.
+        if _somewhere_else(parts[0]):
+            return None, _promote_command(
+                _failed("SPEAK", "another_space",
+                        f"the roster puts {parts[0]} in "
+                        f"{_WHERE[parts[0]][0]} and you are in "
+                        f"{_VITALS.get('space')}; the world refuses a message "
+                        "across spaces and refused 15 in one window"),
+                _next_action_command())
         waiting_since = (_WAITING.get("at") or {}).get(parts[0])
         if _can_be_reached(parts[0]) is False \
                 and (parts[0] not in _someone_is_waiting()
