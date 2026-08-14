@@ -15,6 +15,7 @@ Run `check_all.py` first. The rest are for when it says something is off.
 | `check_world_contract.py` | does the world still send the fields we read? | `canStartConversation` was TRUE one day and absent two days later; the harness fell back to a worse rule and nothing failed |
 | `check_reply_path.py` | would a real inbound message be noticed? | the waiting list was filtered on `threadStatus`, which excluded every thread this world returns, and `waiting=` read 0 in 885 consecutive samples |
 | `check_escape.py` | would a room that refuses us offer a way out? | the agent sat in one building for over an hour; the escape chain had three separate broken links and each fix was masked by a deploy restart |
+| `reply_funnel.py` | of the people who wrote to us and got no answer, WHERE did the reply die? | "we answer 31%" was read three ways in one session - a reply-path defect, the do-not-disturb ceiling, or the model declining - and they imply different work. It walks each inbound thread and asks the log what happened to that specific id. First run: 11 of 13 died on OUR side, not the world's |
 | `check_mechanisms.py` | which parts of the harness have left a trace lately? | two mechanisms were dead in production for days while passing their unit tests, because the tests populate the state by hand |
 
 ## The measurements

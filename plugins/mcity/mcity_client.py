@@ -560,6 +560,7 @@ _can_speak_refreshing = False
 
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
 _THREADS_READ_FOR = {"who": None}   # the waiting person we last read threads for
+_AGENTS_READ_FOR = {"who": None}    # the waiting person we last read the roster for
 # A read repeated within seconds cannot tell the agent anything new, whichever
 # read it is. Retiring the fixated skill has worked four times - areas, context,
 # work, and the idle sends - but the fixation simply moves: it was mcity-agents,
@@ -611,6 +612,7 @@ def reset_runtime_state():
     del _PENDING_SPEAKS[:]
     _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
     _THREADS_READ_FOR["who"] = None
+    _AGENTS_READ_FOR["who"] = None
     _NAMED_NOW.update({"id": None, "at_ms": 0})
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
@@ -3604,6 +3606,33 @@ def agents():
     # last scan said nobody was reachable. The generic read cooldown in _guard
     # covers it and runs before the request rather than after, and two
     # mechanisms guarding one call is how they drift apart.
+    # The same waste the threads re-read guard already refuses, on the other
+    # read. Measured on a person who WAS answered, so this is the cost of a
+    # success: 37.4 seconds passed between the vitals line naming them and the
+    # reply going out, and the turns in between were two roster reads. The world
+    # closes every inbound thread at exactly 60.0s from creation - twelve
+    # measured, every one of them 60.0s and closeReason=stale_timeout - and the
+    # publication delay has already spent part of that before the agent sees
+    # anything. Turns are the scarce resource here, not requests.
+    #
+    # The roster cannot help answer a named person: their id, their name and
+    # their words are all on the line already, and the waiting list is
+    # deliberately NOT filtered on reachability, so what the roster says about
+    # them changes nothing about whether to reply.
+    #
+    # Same shape as the threads guard: the FIRST read goes through, because the
+    # agent may legitimately want to see who else is around, and the second one
+    # while the same person is still waiting is the one with nothing to add.
+    waiting = _someone_is_waiting()
+    if (len(waiting) == 1 and (_WAITING.get("said") or {}).get(waiting[0])
+            and _AGENTS_READ_FOR.get("who") == waiting[0]):
+        return _out(_failed(
+            "AGENTS", "already_have_it",
+            f"{waiting[0]} is waiting and their words are already on the vitals "
+            f"line. The roster cannot tell you anything that changes the reply - "
+            f"answer them with mcity-speak {waiting[0]} <your sentence>"))
+    if len(waiting) == 1:
+        _AGENTS_READ_FOR["who"] = waiting[0]
     payload, error = _skill_read("AGENTS", "agents")
     if error is not None:
         return error

@@ -4742,3 +4742,72 @@ def test_a_mismatched_name_still_fails_with_the_format_lesson(control):
     result = mc.speak("Romis, how is the timber running tonight?") or ""
     assert "reason=bad_args" in result, result
     assert "first word is the agent id" in result, result
+
+
+def _read_again(monkeyless=None):
+    """Clear the generic 5s read cooldown so the NEXT read is judged on its own
+    merits. Without this every second read comes back reason=just_read and the
+    guard under test never runs - which is what the first version of these tests
+    actually measured."""
+    mc._read_at["AGENTS"] = mc._now_ms() - 60000
+
+
+def test_a_second_roster_read_is_refused_while_the_same_person_waits(control):
+    """37.4 seconds passed between the vitals line naming somebody and the reply
+    going out, and the turns in between were roster reads. Threads close at 60.0s
+    from creation - twelve measured, every one stale_timeout - so those turns are
+    most of the budget."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    now = mc._now_ms()
+    mc._WAITING.update({"at_ms": now, "ids": [who], "said": {who: "you about?"},
+                        "at": {who: now - 20000}})
+    first = _check(mc.agents())
+    assert "reason=already_have_it" not in first, "the first read goes through"
+    _read_again()
+    # _out refreshes the waiting list against the fixture's (empty) thread list,
+    # so without this the second call sees nobody waiting and the guard under
+    # test never runs. Live, the same refresh finds them again.
+    mc._WAITING.update({"at_ms": mc._now_ms(), "ids": [who],
+                        "said": {who: "you about?"},
+                        "at": {who: mc._now_ms() - 20000}})
+    mc._waiting_refresh_at_ms = mc._now_ms()
+    second = mc.agents() or ""
+    assert "reason=already_have_it" in second, second
+    assert who in second, "the refusal names who to answer"
+    assert "mcity-speak" in second, "and the command that answers them"
+
+
+def test_the_roster_stays_open_when_nobody_is_waiting(control):
+    """The guard is about a reply that is owed, not about roster reads."""
+    mc.reset_runtime_state()
+    _check(mc.agents())
+    _read_again()
+    assert "reason=already_have_it" not in (mc.agents() or "")
+
+
+def test_the_roster_stays_open_when_several_people_wait(control):
+    """With more than one person the list is genuinely worth reading, the same
+    exception the threads guard makes."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    a = "user-agent-11111111-2222-3333-4444-555555555555"
+    b = "user-agent-66666666-7777-8888-9999-000000000000"
+    mc._WAITING.update({"at_ms": now, "ids": [a, b],
+                        "said": {a: "hi", b: "hello"},
+                        "at": {a: now - 20000, b: now - 20000}})
+    _check(mc.agents())
+    _read_again()
+    assert "reason=already_have_it" not in (mc.agents() or "")
+
+
+def test_the_roster_guard_needs_their_words(control):
+    """Without a preview there is nothing on the line to answer FROM, so the
+    read is not redundant."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    now = mc._now_ms()
+    mc._WAITING.update({"at_ms": now, "ids": [who], "said": {}, "at": {who: now}})
+    _check(mc.agents())
+    _read_again()
+    assert "reason=already_have_it" not in (mc.agents() or "")
