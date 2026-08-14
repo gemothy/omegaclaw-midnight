@@ -17,6 +17,23 @@ the vitals line, and asks the model N times whether it writes back to THAT id.
 Scores three things, in the order they matter:
   answered      a speak aimed at the id the line said was waiting
 
+RE-BASELINED 2026-08-14 after the harness changes below, on a FRESH capture -
+the vitals line materially changed (reachable= now agrees with waiting=), so the
+older cached prompt no longer represents what the agent is shown:
+
+    huginnfork/Qwen3.8-27B-NVFP4A16   40/40 answered  wrong-target 0  no-speak 0
+    negative control (waiting=0)      spoke 1 in 20
+
+So the model is NOT the bottleneck and there is no reason to change it. That
+matters because the checkpoint is a community quant with single-digit downloads
+and an official Qwen/Qwen3.8-27B-FP8 has since appeared: the official one is the
+safer provenance, but this one is measured perfect on the metric that decides,
+and swapping a 40/40 for an unmeasured checkpoint trades evidence for a feeling.
+Swap only if something starts looking wrong, and re-run this first.
+
+Everything that has moved the reply rate this session was the harness telling the
+model who was waiting - never the model itself.
+
 MODEL COMPARISON, 2026-08-14, 40 samples each, both scored against the SAME
 cached prompt (third argument) so the question was identical:
 
