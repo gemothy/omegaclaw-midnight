@@ -2204,6 +2204,19 @@ _COLD_OPEN_PAUSE_MS = 60000
 # the world will not reopen it - but the person is still there, and they are the
 # best cold-open target available anywhere in the roster.
 _WROTE_TO_US = {}
+# An hour, and CHECKED rather than assumed - scripts/measure_opener_targeting.py,
+# 2026-08-14, 54 openers across 11.7h of held threads:
+#
+#     stranger                  7/45   15% answered
+#     wrote to us within 1h     3/ 7   42%
+#     wrote to us over 1h ago   0/ 2    0%
+#
+# The tier is worth about 2.8x, so it earns its place in _best_person_to_talk_to.
+# Extending this TTL looked obviously right - 43 people have written to us and
+# only 7 openers went to that tier - until the tier was split by age: the
+# evidence past the hour is the WORST of the three groups, not the second best.
+# Two openers decide nothing, but there is no evidence for the longer memory and
+# the burden is on the change. Re-run that script before moving it.
 _WROTE_TO_US_TTL_MS = 3600000
 _WROTE_TO_US_CAP = 200
 

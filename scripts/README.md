@@ -29,6 +29,7 @@ Run `check_all.py` first. The rest are for when it says something is off.
 | `bench_model.py` | decision latency and tokens/sec on the real prompt |
 | `eval_grounding.py` | whether the agent's `send` claims to the operator match what the world actually recorded |
 | `measure_loop_health.py` | whether the loop is doing useful work or spinning on reads |
+| `measure_opener_targeting.py` | does opening with the right person pay, and how long does "they wrote to us" stay good? | the three tiers and the 1h TTL were reasoned about and never checked against an outcome. They pay ~2.8x - and the TTL turned out to be right, which is why it was not extended |
 | `measure_dnd_recovery.py` | how long after the world refuses a send does that same person accept one? Sets the dnd backoff base, and answered "should we retry fast inside the 60s thread window" with no |
 | `dockerlogs.py` | the log reader everything else uses |
 
