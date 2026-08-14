@@ -909,7 +909,33 @@ def _vitals_line():
         if route:
             parts.append(route)
     if fresh_scan:
-        parts.append(f"reachable={_REACHABLE['n']}")
+        # Never fewer than the people already waiting on a reply.
+        #
+        # These two numbers come from different places and contradicted each
+        # other on 21 of 46 live lines where somebody was waiting:
+        #
+        #   vitals ... waiting=3 (answer <id>) who=Alitwo,miner they-said=<<...>>
+        #              reachable=0
+        #
+        # reachable= counts roster rows; the waiting list comes from the thread
+        # list and is deliberately NOT filtered on reachability, because somebody
+        # who just wrote to us is available to us whatever the roster last said.
+        # Both halves are right on their own, and together they tell the agent to
+        # answer three people that nobody can hear.
+        #
+        # It is not a cosmetic contradiction. The reply eval measured exactly this
+        # line, by accident, and the same model scored 12% with reachable=0 against
+        # 57% once the line agreed with itself - the single largest prompt effect
+        # measured in this project. Live, it is the "surfaced, never attempted"
+        # bucket in reply_funnel: the agent is told who is waiting and does not
+        # write, which is the correct reading of a line that says nobody can hear
+        # it.
+        #
+        # Only the RENDERED token is raised. _REACHABLE itself still holds the
+        # roster's own count, because the escape door is gated on it - a room that
+        # cannot be spoken to must still open, and teaching the door that a waiting
+        # person makes the room fine would trade one trap for another.
+        parts.append(f"reachable={max(_REACHABLE['n'], len(waiting))}")
         # Nobody here, but somebody somewhere: carry the route on the line the
         # agent reads every single turn. Measured: with reachable=0 it stopped
         # calling mcity-agents entirely - as instructed - so the only code path

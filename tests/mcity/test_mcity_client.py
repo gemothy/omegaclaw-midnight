@@ -4811,3 +4811,64 @@ def test_the_roster_guard_needs_their_words(control):
     _check(mc.agents())
     _read_again()
     assert "reason=already_have_it" not in (mc.agents() or "")
+
+
+def test_reachable_never_contradicts_the_people_waiting(control):
+    """Measured on 21 of 46 live lines: "waiting=3 (answer <id>) ... reachable=0"
+    - answer three people that nobody can hear. reachable= counts roster rows and
+    the waiting list comes from the thread list, which is deliberately not
+    filtered on reachability, so both halves are right alone and wrong together.
+
+    The reply eval measured this by accident and it is the largest prompt effect
+    in this project: the same model scored 12% with reachable=0 on the line and
+    57% once it agreed with itself."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    a = "user-agent-11111111-2222-3333-4444-555555555555"
+    b = "user-agent-66666666-7777-8888-9999-000000000000"
+    mc._VITALS.update({"at_ms": now, "space": "central", "space_kind": "district"})
+    mc._REACHABLE.update({"n": 0, "at_ms": now})
+    mc._WAITING.update({"at_ms": now, "ids": [a, b],
+                        "said": {a: "hello?", b: "you there?"},
+                        "at": {a: now - 20000, b: now - 20000}})
+    line = mc._vitals_line() or ""
+    assert "reachable=0" not in line, line
+    assert "reachable=2" in line, line
+
+
+def test_reachable_still_reports_the_roster_when_nobody_waits(control):
+    """The raise is about a contradiction, not about inflating the number."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "central", "space_kind": "district"})
+    mc._REACHABLE.update({"n": 0, "at_ms": now})
+    assert "reachable=0" in (mc._vitals_line() or "")
+
+
+def test_a_bigger_roster_count_is_not_lowered_by_the_waiting_list(control):
+    """max, not replace - two people waiting in a room of eighty is still a room
+    of eighty."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._VITALS.update({"at_ms": now, "space": "central", "space_kind": "district"})
+    mc._REACHABLE.update({"n": 80, "at_ms": now})
+    mc._WAITING.update({"at_ms": now, "ids": [who], "said": {who: "hi"},
+                        "at": {who: now - 10000}})
+    assert "reachable=80" in (mc._vitals_line() or "")
+
+
+def test_the_escape_door_still_sees_the_empty_room(control):
+    """_REACHABLE itself is untouched, because the door is gated on it. Teaching
+    the door that a waiting person makes the room fine would trade one trap for
+    another - and the agent has sat in a building for over an hour before."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._VITALS.update({"at_ms": now, "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    mc._REACHABLE.update({"n": 0, "at_ms": now})
+    mc._WAITING.update({"at_ms": now, "ids": [who], "said": {who: "hi"},
+                        "at": {who: now - 10000}})
+    _check(mc.agents())
+    assert mc._REACHABLE["n"] == 0, "the roster's own count is not rewritten"
