@@ -611,6 +611,7 @@ def reset_runtime_state():
     del _PENDING_SPEAKS[:]
     _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
     _THREADS_READ_FOR["who"] = None
+    _NAMED_NOW.update({"id": None, "at_ms": 0})
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
     _WAITING.update({"at_ms": 0, "ids": [], "said": {}, "at": {}})
@@ -842,6 +843,7 @@ def _vitals_line():
         # message. Measured on the reply eval: "Gem, yes, the crystal shipment
         # cleared customs", addressed to itself, and one reply in three a verbatim
         # echo of the incoming line.
+        _NAMED_NOW.update({"id": waiting[0], "at_ms": _now_ms()})
         if _WHO.get(waiting[0]):
             parts.append(f"who={_WHO[waiting[0]]}")
         said = (_WAITING.get("said") or {}).get(waiting[0])
@@ -957,6 +959,7 @@ def _vitals_line():
             if who and _can_be_reached(who) is False:
                 who = None
             if who and not food_route:
+                _NAMED_NOW.update({"id": who, "at_ms": _now_ms()})
                 parts.append(f"talk-to={who}")
                 if _WHO.get(who):
                     parts.append(f"who={_WHO[who]}")
@@ -1865,6 +1868,14 @@ def _entry_elsewhere(entry):
 # wrong tool - refusing near-duplicate messages has silenced this agent twice.
 _WHO = {}
 _WHO_CAP = 400
+# The ONE person the vitals line named this turn, and when.
+#
+# The line names exactly one person per turn - waiting= or talk-to=, never both;
+# that rule is enforced above and is the whole reason this is unambiguous. Held
+# here so a speak that arrives without an agent id can be matched against it
+# rather than guessed at.
+_NAMED_NOW = {"id": None, "at_ms": 0}
+_NAMED_NOW_TTL_MS = 120000
 
 
 # id -> (times we have spoken to them, when we last did).
@@ -5419,6 +5430,50 @@ def harvest(arg=None):
     return _mutate("HARVEST", build)
 
 
+def _speak_to_the_person_named(arg):
+    """Recover the target of a speak whose first word is a NAME, not an id.
+
+    Measured on the live model at roughly ten an hour:
+
+        (mcity-speak "Daniel, seven quiet minutes out here - how's the code
+         running tonight, anything interesting breaking through the noise?")
+
+    refused with bad_args, the turn spent, and the thread free to close while the
+    agent tries again. The model is not being careless. The mission tells it to
+    address people by the name on who=, and the call wants an opaque id in the
+    same position, so writing the sentence a human would write puts the name
+    exactly where the id belongs.
+
+    This is a repair, not a guess, and only because of the rule the vitals line
+    already keeps: ONE person is named per turn, waiting= or talk-to=, never
+    both. So there is a single candidate, and the opening word has to match that
+    candidate's own first name before anything is sent. Anything else - two
+    words, no match, a stale naming, no name on record - refuses exactly as
+    before.
+
+    Sending to the wrong person is the one outcome this file treats as worse than
+    silence, which is why the name has to agree rather than merely be present.
+
+    Returns [agent_id, text] or None.
+    """
+    text = _norm_arg(arg)
+    if not text:
+        return None
+    named = _NAMED_NOW.get("id")
+    if not named:
+        return None
+    if (_now_ms() - (_NAMED_NOW.get("at_ms") or 0)) > _NAMED_NOW_TTL_MS:
+        return None
+    # "Name,profession" - the first name is what a person would open with.
+    name = (_WHO.get(named) or "").split(",")[0].strip().lower()
+    if not name:
+        return None
+    lead = re.split(r"[,:;!?]|--|\s-\s", text, maxsplit=1)[0].strip().lower()
+    if lead != name:
+        return None
+    return [named, text]
+
+
 @_guard("SPEAK")
 def speak(arg=None):
     global _dnd_streak
@@ -5426,6 +5481,11 @@ def speak(arg=None):
 
     def build():
         parts = _split(arg, 2)
+        if parts is None or not ID_RE.match(parts[0]):
+            # The name the model wrote can identify the target on its own, but
+            # only when it matches the one person this turn named. See
+            # _speak_to_the_person_named.
+            parts = _speak_to_the_person_named(arg)
         if parts is None or not ID_RE.match(parts[0]):
             return None, _failed("SPEAK", "bad_args",
                                  "first word is the agent id, then your sentence")

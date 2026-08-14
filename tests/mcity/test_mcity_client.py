@@ -4654,3 +4654,91 @@ def test_the_route_fetches_the_district_list_when_it_is_empty():
     window = window[:window.index("\ndef ")]
     assert "if not _DISTRICTS:" in window, (
         "an empty district table must be filled, not silently answered no")
+
+
+def test_a_speak_that_opens_with_a_name_reaches_that_person(control):
+    """The live model writes the sentence a person would write - "Daniel, seven
+    quiet minutes out here..." - and the id belongs in exactly that position, so
+    the name lands where the id should be. Measured at roughly ten refusals an
+    hour, each one a spent turn while the thread is free to close."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._WHO[who] = "Daniel,coder"
+    mc._NAMED_NOW.update({"id": who, "at_ms": mc._now_ms()})
+    fixed = mc._speak_to_the_person_named(
+        "Daniel, seven quiet minutes out here - how's the code running tonight?")
+    assert fixed is not None and fixed[0] == who
+    assert fixed[1].startswith("Daniel,"), "the message keeps the name it opened with"
+
+
+def test_a_name_that_does_not_match_the_person_named_is_refused(control):
+    """Sending to the wrong person is the one outcome this file ranks below
+    silence, so the opening word has to AGREE with the candidate, not merely
+    exist. Without this the repair would deliver anything to whoever the turn
+    happened to name."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._WHO[who] = "Daniel,coder"
+    mc._NAMED_NOW.update({"id": who, "at_ms": mc._now_ms()})
+    assert mc._speak_to_the_person_named("Romis, how is the timber tonight?") is None
+    assert mc._speak_to_the_person_named("hello there, anybody about?") is None
+
+
+def test_a_name_is_not_enough_once_the_turn_that_named_them_is_old(control):
+    """The naming is what makes one candidate unambiguous, and it is only true of
+    the turn it was written on."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._WHO[who] = "Daniel,coder"
+    mc._NAMED_NOW.update({"id": who,
+                          "at_ms": mc._now_ms() - mc._NAMED_NOW_TTL_MS - 1})
+    assert mc._speak_to_the_person_named("Daniel, are you still up?") is None
+
+
+def test_nobody_named_this_turn_means_no_repair(control):
+    """No candidate, no repair - the refusal that teaches the format stands."""
+    mc.reset_runtime_state()
+    assert mc._speak_to_the_person_named("Daniel, are you about?") is None
+
+
+def test_the_vitals_line_records_the_person_it_names(control):
+    """The repair rests on 'one person named per turn', so the recording has to
+    happen where the naming does, not be maintained alongside it."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._WHO[who] = "Daniel,coder"
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "central", "space_kind": "district"})
+    mc._WAITING.update({"at_ms": now, "ids": [who],
+                        "said": {who: "are you there?"}, "at": {who: now - 30000}})
+    line = mc._vitals_line() or ""
+    assert f"waiting=1 (answer {who})" in line, line
+    assert mc._NAMED_NOW["id"] == who
+
+
+def test_the_name_repair_actually_delivers_through_speak(control):
+    """End to end, not just the helper: the refusal it replaces was costing a
+    real turn, so what matters is that the write reaches the world addressed to
+    the right agent."""
+    mc.reset_runtime_state()
+    sent = {}
+    control.on_action = lambda action: sent.update(action) or [
+        event("e-speak", "agent_spoke", targetAgentId=action["targetAgentId"],
+              text=action["text"], threadId="t1", messageId="m9", sequenceNo=4)]
+    mc._WHO["agent-2"] = "Daniel,coder"
+    mc._NAMED_NOW.update({"id": "agent-2", "at_ms": mc._now_ms()})
+    result = _check(mc.speak("Daniel, how is the code running tonight?"))
+    assert result.startswith("MCITY-SPEAK-OK"), result
+    assert sent.get("targetAgentId") == "agent-2"
+    assert sent.get("text", "").startswith("Daniel,")
+
+
+def test_a_mismatched_name_still_fails_with_the_format_lesson(control):
+    """The refusal has to survive, and has to keep teaching the format - it is
+    the only thing that tells the model what the call actually wants."""
+    mc.reset_runtime_state()
+    mc._WHO["agent-2"] = "Daniel,coder"
+    mc._NAMED_NOW.update({"id": "agent-2", "at_ms": mc._now_ms()})
+    result = mc.speak("Romis, how is the timber running tonight?") or ""
+    assert "reason=bad_args" in result, result
+    assert "first word is the agent id" in result, result
