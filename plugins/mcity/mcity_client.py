@@ -890,8 +890,21 @@ def _vitals_line():
             parts.append(food_route)
     # reachable= removes the reason to poll the roster, exactly as waiting=
     # removed the reason to poll the thread list.
-    if (_REACHABLE["n"] is not None
-            and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS):
+    # A STALE roster verdict is not a reason to withhold the way out.
+    #
+    # The route was only ever offered inside this block, which requires a fresh
+    # scan - and the agent sat in north for 276 samples with reachable=0, the
+    # route offered ZERO times and not even a decline logged, because the token
+    # appeared in only 71 of those samples. When nobody is nearby the scan goes
+    # stale, and that is precisely when a route matters: an empty district stops
+    # refreshing the very fact that would get the agent out of it.
+    fresh_scan = (_REACHABLE["n"] is not None
+                  and (_now_ms() - _REACHABLE["at_ms"]) <= _CAN_SPEAK_TTL_MS)
+    if not fresh_scan and not food_route:
+        route = _cached_route()
+        if route:
+            parts.append(route)
+    if fresh_scan:
         parts.append(f"reachable={_REACHABLE['n']}")
         # Nobody here, but somebody somewhere: carry the route on the line the
         # agent reads every single turn. Measured: with reachable=0 it stopped

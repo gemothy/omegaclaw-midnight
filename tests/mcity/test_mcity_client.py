@@ -4594,3 +4594,19 @@ def test_a_stale_position_does_not_block_a_reply():
     mc._VITALS.update({"space": "central"})
     mc._WHERE["user-agent-old-pos"] = ("north", mc._now_ms() - (mc._CAN_SPEAK_TTL_MS + 1000))
     assert mc._somewhere_else("user-agent-old-pos") is False
+
+
+def test_a_stale_roster_still_offers_a_way_out():
+    """The route was only ever offered inside the reachable= block, which needs a
+    fresh scan. The agent sat in north for 276 samples with the route offered
+    ZERO times and no decline even logged, because the token appeared in only 71
+    of them: an empty district stops refreshing the very fact that would get the
+    agent out of it."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "hunger": "normal(20)", "items": "crystal=5",
+                       "space": "north"})
+    mc._REACHABLE.update({"n": 0, "at_ms": now - (mc._CAN_SPEAK_TTL_MS + 60000)})
+    mc._ROUTE.update({"text": "GO-TO-CENTRAL", "at_ms": now, "from": "north"})
+    line = mc._vitals_line() or ""
+    assert "GO-TO-CENTRAL" in line, line
