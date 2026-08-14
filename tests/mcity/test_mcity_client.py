@@ -4394,3 +4394,33 @@ def test_a_matching_space_kind_is_still_used():
     mc._note_space_kind({"currentSpace": {"id": "central", "kind": "district"}})
     mc._VITALS["space"] = "central"
     assert mc._space_kind_now() == "district"
+
+
+def test_a_repeat_refusal_is_believed_for_longer():
+    """Capturing the do-not-disturb refusers in one window and comparing 29
+    minutes later: 30 of 50 had refused us in BOTH windows - 60%. Within a single
+    window they never repeat, which is why this took two passes to see: the
+    five-minute memory works, its horizon was just far shorter than the
+    behaviour."""
+    mc.reset_runtime_state()
+    who = "user-agent-chronic"
+    mc._remember_refusal("dnd", who)
+    first = mc._refusal_ttl("dnd", who)
+    mc._remember_refusal("dnd", who)          # refused again while remembered
+    assert mc._refusal_ttl("dnd", who) == first * 2
+    mc._remember_refusal("dnd", who)
+    assert mc._refusal_ttl("dnd", who) == first * 4
+
+
+def test_the_backoff_stops_somewhere():
+    mc.reset_runtime_state()
+    who = "user-agent-verychronic"
+    for _ in range(20):
+        mc._remember_refusal("dnd", who)
+    assert mc._refusal_ttl("dnd", who) <= 3600000
+
+
+def test_a_first_refusal_keeps_the_plain_ttl():
+    mc.reset_runtime_state()
+    mc._remember_refusal("dnd", "user-agent-once")
+    assert mc._refusal_ttl("dnd", "user-agent-once") == mc._REFUSAL_TTL_MS["dnd"]

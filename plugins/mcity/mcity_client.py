@@ -448,6 +448,25 @@ _REFUSAL_TTL_MS = {
 _REFUSED = {}
 
 
+# How many times in a row the world has refused this exact person for this exact
+# reason. Somebody who says no twice is more likely to say no a third time.
+#
+# Measured by capturing the do-not-disturb refusers in one window and comparing 29
+# minutes later: 30 of 50 had refused us in BOTH windows - 60%. The flat five
+# minute memory expires, hands them back, and buys another refused write. Within a
+# single window they never repeat, which is why this took two passes to see: the
+# memory works, its horizon was just far shorter than the behaviour.
+_REFUSAL_STREAK = {}
+_REFUSAL_STREAK_CAP = 8         # 5 min doubled eight times is over a day
+
+
+def _refusal_ttl(kind, key):
+    """The TTL for this refusal, doubled once per repeat, capped at an hour."""
+    base = _REFUSAL_TTL_MS[kind]
+    streak = _REFUSAL_STREAK.get((kind, key), 1)
+    return min(base * (2 ** (streak - 1)), 3600000)
+
+
 def _remember_refusal(kind, key, first_only=False):
     """Record that the world refused this. first_only keeps the earliest stamp,
     for the thread list, where a closed thread is evidence of when it closed
@@ -455,8 +474,14 @@ def _remember_refusal(kind, key, first_only=False):
     if first_only and (kind, key) in _REFUSED:
         return
     now = _now_ms()
+    # A refusal that arrives while we still remembered the last one is a repeat.
+    if _REFUSED.get((kind, key)) is not None:
+        _REFUSAL_STREAK[(kind, key)] = min(
+            _REFUSAL_STREAK.get((kind, key), 1) + 1, _REFUSAL_STREAK_CAP)
+    else:
+        _REFUSAL_STREAK.setdefault((kind, key), 1)
     _REFUSED[(kind, key)] = now
-    ttl = _REFUSAL_TTL_MS[kind]
+    ttl = _refusal_ttl(kind, key)
     for entry, at in list(_REFUSED.items()):
         if entry[0] == kind and (now - at) > ttl:
             _REFUSED.pop(entry, None)
@@ -469,7 +494,7 @@ def _refused_ago_ms(kind, key):
     if at is None:
         return None
     ago = _now_ms() - at
-    return ago if ago <= _REFUSAL_TTL_MS[kind] else None
+    return ago if ago <= _refusal_ttl(kind, key) else None
 
 
 def _refused_keys(kind):
@@ -571,7 +596,8 @@ def reset_runtime_state():
 
     Deliberately NOT reset: the lease, the config and the store handles, which
     the fixtures own and which have their own lifecycles."""
-    for cache in (_CAN_SPEAK, _REFUSED, _LAST_READ, _SAID, _AWAKE_PLACES, _WHO,
+    for cache in (_CAN_SPEAK, _REFUSED, _REFUSAL_STREAK, _LAST_READ, _SAID,
+                  _AWAKE_PLACES, _WHO,
                   _AREA_KIND,
                   _MET, _AIMED, _DISTRICTS, _WROTE_TO_US,
                   _inbound, _my_texts, _read_at):
