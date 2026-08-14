@@ -37,6 +37,8 @@ CHECKS = [
     # people's agents under a real person's name, so a leaked refusal reason or
     # another player's do-not-disturb status is said in public.
     ("nothing internal said out loud", "check_outbound_quality.py", False),
+    # The channel that reaches a real person's phone.
+    ("operator channel", "check_operator_channel.py", False),
 ]
 
 
