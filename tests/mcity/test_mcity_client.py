@@ -21,6 +21,7 @@ Run:
 import itertools
 import json
 import os
+import re
 import sys
 
 import inspect
@@ -5017,3 +5018,47 @@ def test_there_is_exactly_one_import_proof(control):
     assert 'return "MCITY-PING-OK"' not in source
     assert not [ln for ln in source.splitlines()
                 if "MCITY-PING-OK" in ln and not ln.strip().startswith("#")]
+
+
+_METTA_PATH = os.path.join(os.path.dirname(mc.__file__), 'mcity.metta')
+
+
+def _rules_text(metta):
+    """Just the MIDNIGHT_CITY rules string, not the rest of the file.
+
+    Slicing to end-of-file swept in the py-call bindings underneath, which name
+    every skill including retired ones, so the first version of this test
+    reported nine skills the rules do not actually mention."""
+    start = metta.index("MIDNIGHT_CITY:")
+    return metta[start:metta.index('"', start)]
+
+
+def test_no_skill_is_registered_that_the_rules_forbid():
+    """The prompt listed mcity-needs and mcity-inventory as available and the
+    rules in the same prompt said NEVER to call them - a contradiction paid for
+    on every single turn, since the skill list rides in every prompt.
+
+    They are deregistered. The py-call bindings stay, so a call replayed out of
+    HISTORY still resolves instead of costing a turn to a parse error, but
+    nothing advertises them."""
+    metta = open(_METTA_PATH, encoding="utf-8").read()
+    listed = set(re.findall(r"\(add-skill (mcity-[a-z-]+)", metta))
+    assert "mcity-needs" not in listed
+    assert "mcity-inventory" not in listed
+    # And the rule text must not name a skill that is no longer offered: naming
+    # one invites the model to try it, and an unregistered call is a parse error
+    # that costs the whole turn.
+    rules = _rules_text(metta)
+    for gone in ("mcity-needs", "mcity-inventory"):
+        assert gone not in rules, f"the rules still name {gone}, which is gone"
+
+
+def test_every_skill_the_rules_name_is_actually_registered():
+    """The other direction, which is the one that costs a turn: the rules tell
+    the agent to run a command, and the command does not exist."""
+    metta = open(_METTA_PATH, encoding="utf-8").read()
+    listed = set(re.findall(r"\(add-skill (mcity-[a-z-]+)", metta))
+    rules = _rules_text(metta)
+    named = set(re.findall(r"\b(mcity-[a-z-]+)", rules))
+    missing = {n for n in named if n not in listed}
+    assert not missing, f"the rules name unregistered skills: {sorted(missing)}"
