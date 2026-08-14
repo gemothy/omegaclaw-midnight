@@ -11,6 +11,7 @@ Run `check_all.py` first. The rest are for when it says something is off.
 | script | the question it answers | why it exists |
 |---|---|---|
 | `check_all.py` | all of the below, in a safe order | four checks kept as separate scripts meant running them from memory, and forgetting one is how three defects survived |
+| `check_deployed.py` | is the code in the container the code in this tree? | three passes of fixes were committed, "deployed" and verified against production while the launcher ran a three-hour-old image - it only ever did `docker run`, never a build. A stale deploy looks exactly like a fix that did not help |
 | `can_it_act.py` | is the agent able to act at all, and when did anybody last write to it? | a whole pass was spent A/B testing prompts against a harness whose lease had been taken 50 minutes earlier. Silence from a dead agent looks exactly like silence from a quiet city |
 | `check_world_contract.py` | does the world still send the fields we read? | `canStartConversation` was TRUE one day and absent two days later; the harness fell back to a worse rule and nothing failed |
 | `check_reply_path.py` | would a real inbound message be noticed? | the waiting list was filtered on `threadStatus`, which excluded every thread this world returns, and `waiting=` read 0 in 885 consecutive samples |

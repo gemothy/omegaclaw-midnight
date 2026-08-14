@@ -25,6 +25,10 @@ import subprocess
 import sys
 
 CHECKS = [
+    # FIRST, and gating. Three passes of fixes were measured against a container
+    # running a three-hour-old image, because the launcher never built. Nothing
+    # below this can be interpreted while the wrong code is running.
+    ("running this working tree", "check_deployed.py", True),
     ("can it act", "can_it_act.py", True),
     ("world contract", "check_world_contract.py", True),
     ("reply path", "check_reply_path.py", True),
@@ -57,9 +61,12 @@ def main():
             failed.append(name)
             for line in last[-3:]:
                 print(f"          {line.strip()[:100]}")
-        if gating and code != 0 and script == "can_it_act.py":
-            print("\nStopping: nothing below this can be interpreted while the "
-                  "agent cannot act.")
+        if gating and code != 0 and script in ("can_it_act.py",
+                                                "check_deployed.py"):
+            why = ("the agent cannot act" if script == "can_it_act.py"
+                   else "the container is running different code")
+            print(f"\nStopping: nothing below this can be interpreted while "
+                  f"{why}.")
             return 1
 
     print("\n-- mechanisms (silence is a question, not a verdict) --")
