@@ -12,12 +12,30 @@ windows have none at all, which is how a whole pass once got spent measuring a
 lease outage. This takes the real captured prompt, injects a waiting person into
 the vitals line, and asks the model N times whether it writes back to THAT id.
 
-    python3 scripts/eval_reply.py [samples] [model]
+    python3 scripts/eval_reply.py [samples] [model] [prompt-cache-file]
 
 Scores three things, in the order they matter:
   answered      a speak aimed at the id the line said was waiting
 
-BASELINE, 40 samples, 2026-08-14, nvidia/Qwen3.6-35B-A3B-NVFP4:
+MODEL COMPARISON, 2026-08-14, 40 samples each, both scored against the SAME
+cached prompt (third argument) so the question was identical:
+
+    nvidia/Qwen3.6-35B-A3B-NVFP4  (MoE)    18/40  45%   wrong-target 0
+    huginnfork/Qwen3.8-27B-NVFP4A16 (dense) 40/40 100%  wrong-target 0
+
+and the negative control that makes 100% mean something rather than "this model
+always speaks": the same prompt with waiting=0 put back, Qwen3.8-27B spoke 1 time
+in 20. It answers the person waiting; it does not emit a message regardless.
+
+Qwen3.8-27B is now the served model. It costs ~4.3 tok/s against ~62 for the MoE -
+decode on a dense 27B is bandwidth-bound - which is affordable only because this
+agent writes one short command per turn.
+
+Use the prompt cache for any comparison. Scored on two separate captures the SAME
+model gave 57% and 45%, so a candidate measured against a differently-captured
+baseline is being compared partly on prompt luck.
+
+BASELINE, 40 samples, 2026-08-14, nvidia/Qwen3.6-35B-A3B-NVFP4, fresh capture:
 
     answered 23 (57%)   wrong-target 0   no-speak 17
 
@@ -81,6 +99,7 @@ Treat this eval as a comparison between models, not as a verdict on either
   no-speak      no message at all
 """
 import json
+import os
 import re
 import sys
 import urllib.request
@@ -187,11 +206,31 @@ def ask(prompt, model):
 def main():
     samples = int(sys.argv[1]) if len(sys.argv) > 1 else 20
     model = sys.argv[2] if len(sys.argv) > 2 else "mcity-agent"
-    prompt = capture()
-    if not prompt:
-        print("no prompt captured from the last 20m of logs")
-        return 1
-    prompt = with_waiting(prompt)
+    # Optional third argument: a file to hold the injected prompt.
+    #
+    # Comparing two models means serving them one at a time, and a fresh capture
+    # between the two runs is a fresh prompt - different history, different
+    # hunger, different reachable - so the comparison silently includes a change
+    # of question. Written on first use and reused after, which also means the
+    # candidate can be scored while its own container is the one running and the
+    # window no longer holds a prompt from the model being replaced.
+    cache = sys.argv[3] if len(sys.argv) > 3 else None
+    prompt = None
+    if cache and os.path.exists(cache):
+        with open(cache, encoding="utf-8") as fh:
+            prompt = fh.read()
+        print(f"reusing the prompt in {cache} - identical question for "
+              f"every model scored against it")
+    if prompt is None:
+        prompt = capture()
+        if not prompt:
+            print("no prompt captured from the last 30m of logs")
+            return 1
+        prompt = with_waiting(prompt)
+        if prompt and cache:
+            with open(cache, "w", encoding="utf-8") as fh:
+                fh.write(prompt)
+            print(f"captured and saved the injected prompt to {cache}")
     if not prompt:
         # Refuse to score rather than score a prompt the agent never sees. A
         # capture with no vitals line is a boot-time prompt, and patching one
