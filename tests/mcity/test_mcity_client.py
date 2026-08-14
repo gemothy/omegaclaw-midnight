@@ -1519,25 +1519,48 @@ def test_being_indoors_is_told_to_use_the_door_not_the_map(control):
 
 
 def test_a_different_space_needs_an_anchored_area_to_be_offered(control):
-    """This asserted a travel-district fallback that has been removed. A space is
-    usually not a district - the world answered 'district gateway not found:
-    bison-valley' for a park - so only a move-area verified against the world's
-    own areas list is offered now."""
-    roster = {"agents": [
-        {"agentId": "user-agent-away", "name": "Away", "distance": None,
-         "canSpeak": False, "isOpenToTalk": True, "status": "idle",
-         "activeAction": None, "position": {"spaceId": "harbour"}},
-    ]}
-    control.force("/api/skill/agents/agent-1/agents", 200, json.dumps(roster).encode())
-    _check(mc.agents())
+    """Which of the two moves gets offered turns on whether the world itself
+    calls the destination a district.
+
+    This used to assert that travel-district is NEVER offered, because the world
+    answered 'district gateway not found: bison-valley' for a park. That rule was
+    right only while the district list was permanently empty - there was no way
+    to tell a district from a park, so the safe move was the only move. Now
+    travelDistricts is harvested from every navigation-options read, so a name
+    the world lists IS verified and travel-district is the correct instruction;
+    the agent sat in north for hours because nothing would offer it.
+
+    The bison-valley lesson survives as the second half: a space the world does
+    NOT list still gets the anchored move-area, never a guessed gateway."""
+    def _seen_at(space):
+        roster = {"agents": [
+            {"agentId": "user-agent-away", "name": "Away", "distance": None,
+             "canSpeak": False, "isOpenToTalk": True, "status": "idle",
+             "activeAction": None, "position": {"spaceId": space}},
+        ]}
+        control.force("/api/skill/agents/agent-1/agents", 200,
+                      json.dumps(roster).encode())
+        _check(mc.agents())
+        mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central",
+                           "space_kind": "district"})
+        return mc._travel_to_people_command() or ""
+
+    # harbour is in the fixture's travelDistricts, so the gateway is real.
     control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(
         {"areas": [{"id": "harbour-docks", "kind": "park",
                     "moveAreaAvailable": True,
                     "anchor": {"spaceId": "harbour"}}]}).encode())
-    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "central",
-                       "space_kind": "district"})
-    hint = mc._travel_to_people_command() or ""
-    assert "harbour-docks" in hint and "travel-district" not in hint
+    hint = _seen_at("harbour")
+    assert "travel-district" in hint and "harbour" in hint, hint
+
+    # bison-valley is not, so the anchored area is the only thing offered.
+    mc._AWAKE_PLACES.clear()
+    control.force("/api/skill/agents/agent-1/areas", 200, json.dumps(
+        {"areas": [{"id": "bison-valley-meadow", "kind": "park",
+                    "moveAreaAvailable": True,
+                    "anchor": {"spaceId": "bison-valley"}}]}).encode())
+    hint = _seen_at("bison-valley")
+    assert "bison-valley-meadow" in hint and "travel-district" not in hint, hint
 
 def test_the_space_kind_is_harvested_from_the_world(control):
     """kind is the useful field: inside a building currentSpace.id is just the

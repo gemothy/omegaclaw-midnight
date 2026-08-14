@@ -2619,8 +2619,7 @@ def _travel_to_people_command():
             if error is None and isinstance(payload, dict):
                 _note_space_kind(payload)
                 _note_districts(payload)
-        _note_districts(payload)
-        indoors = (_space_kind_now() or "").lower() == "interior"
+        indoors =(_space_kind_now() or "").lower() == "interior"
 
         def _pick():
             now = _now_ms()
@@ -2633,10 +2632,20 @@ def _travel_to_people_command():
             return best, count
 
         if not _DISTRICTS:
-            payload, error = _skill_read("VITALS", "navigation-options")
-            if error is None and isinstance(payload, dict):
-                _note_space_kind(payload)
-                _note_districts(payload)
+            # In its own guard: a failed read must not take the route with it.
+            # The first version let this raise inside the function's try/except,
+            # which returned None and swallowed the exit door - 13 tests caught
+            # it, after I had already committed and deployed.
+            try:
+                payload, error = _skill_read("VITALS", "navigation-options")
+                if error is None and isinstance(payload, dict):
+                    # Districts ONLY. Calling _note_space_kind here overwrote the
+                    # kind the caller had already established - turning interior
+                    # into something else and disabling the indoors branch, so the
+                    # exit door vanished. 13 tests caught it.
+                    _note_districts(payload)
+            except Exception:      # noqa: BLE001
+                pass
         best, count = _pick()
         if best is None:
             # STALE counts as missing. This only refreshed when the dict was
