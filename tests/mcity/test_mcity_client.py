@@ -4910,3 +4910,48 @@ def test_the_waiting_refresh_keeps_its_own_rate_limit(control):
     finally:
         mc._own_threads = real
     assert len(reads) == 1, f"{len(reads)} reads for 5 calls inside the window"
+
+
+def test_the_dnd_backoff_starts_past_the_fastest_observed_recovery(control):
+    """Measured, not chosen: every do-not-disturb refusal in a three-hour log
+    paired against the next successful delivery to that same person gave 10
+    pairs, minimum 561s, median 1553s, none under 60s.
+
+    A five-minute first retry therefore fired before anybody had ever been seen
+    to recover - one wasted write and turn per refused person, 34 of them in
+    those three hours."""
+    assert mc._REFUSAL_TTL_MS["dnd"] >= 561000, (
+        "the first retry must not fire before the fastest recovery ever measured")
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._remember_refusal("dnd", who)
+    # First refusal: one base interval, not five minutes.
+    assert mc._refusal_ttl("dnd", who) == mc._REFUSAL_TTL_MS["dnd"]
+    mc._remember_refusal("dnd", who)
+    assert mc._refusal_ttl("dnd", who) == 2 * mc._REFUSAL_TTL_MS["dnd"], (
+        "and it still doubles across the range the recoveries occupy")
+
+
+def test_a_fresh_message_still_outranks_an_old_refusal(control):
+    """The longer backoff must not silence somebody who writes to us AFTER being
+    refused - their message is newer evidence than our refusal, which is the rule
+    the waiting list is built on."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._remember_refusal("dnd", who)
+    # Strictly newer. Same-millisecond is genuinely ambiguous and the refusal
+    # wins there, which is the safe way round; what must not happen is a refusal
+    # from a minute ago silencing a message from ten seconds ago.
+    assert mc._still_worth_answering(who, mc._now_ms() + 1000) is True
+
+
+def test_the_longer_backoff_does_not_silence_someone_who_writes_back(control):
+    """The risk of doubling the do-not-disturb memory: a person refused ten
+    minutes ago writes to us now, and the longer memory swallows them. It must
+    not - their message is newer evidence than our refusal, which is the rule the
+    whole waiting list rests on."""
+    mc.reset_runtime_state()
+    who = "user-agent-11111111-2222-3333-4444-555555555555"
+    mc._remember_refusal("dnd", who)
+    mc._REFUSED[("dnd", who)] = mc._now_ms() - 60000      # refused a minute ago
+    assert mc._still_worth_answering(who, mc._now_ms() - 10000) is True

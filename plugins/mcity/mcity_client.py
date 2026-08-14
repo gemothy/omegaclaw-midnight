@@ -443,7 +443,20 @@ _REFUSAL_TTL_MS = {
     "destination": 900000,
     "arguments": 900000,       # a command whose ARGUMENTS the world threw out
     "not_friends": 3600000,    # social, not temporal - it does not pass with time
-    "dnd": 300000,             # the world refused THIS send; canSpeak does not see it
+    # 600000, not 300000, and the number comes from the world rather than from a
+    # guess. Every do-not-disturb refusal in a three-hour log was paired with the
+    # next successful delivery to that SAME person: 10 pairs, minimum 561s,
+    # median 1553s, and not one under 60s. So the old five-minute retry fired
+    # before anybody had ever been observed to recover - one guaranteed-wasted
+    # write and turn per refused person, and 34 people were refused in those
+    # three hours.
+    #
+    # Ten minutes sits just above the fastest recovery ever seen here, and the
+    # doubling then walks 10 -> 20 -> 40 across the range the recoveries actually
+    # occupy. The same measurement is why there is NO fast retry inside the 60s
+    # thread window: nothing recovers that quickly, so a retry there would cost a
+    # write and land nothing.
+    "dnd": 600000,             # the world refused THIS send; canSpeak does not see it
 }
 _REFUSED = {}
 
