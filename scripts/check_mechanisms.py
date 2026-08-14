@@ -27,6 +27,22 @@ The counts now agree exactly with an independent reader over the same window
 was reading a window of unknown size and reporting cold_opens_paused 16 times
 where the true count was 0. Whether a mechanism fired at all is still the question
 it answers best, and it is the question that found both dead ones.
+
+Silence is a question, not a verdict - and answering it means asking whether the
+mechanism COULD have fired, not just whether it did. Two worked examples:
+
+  the exit door      silent across every window, treated as an unexplained gap
+                     for several passes. It requires being indoors, and at= read
+                     `central` in 73 of 73 samples over two hours. Silent for the
+                     right reason.
+  ping()             the opposite result. Its test passed, its docstring called
+                     it the acceptance criterion for a silent import failure, and
+                     MCITY-PING-OK had appeared zero times ever, because nothing
+                     called it and no .metta file bound it. Deleted.
+
+So when something here reads SILENT, check reachability before behaviour: find
+the call site, and check the enclosing function is wired. Every skip reason was
+audited that way on 2026-08-14 and all of them are reachable.
 """
 import pathlib
 import re

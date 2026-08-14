@@ -2777,10 +2777,20 @@ def _travel_to_people_command():
                     "(mcity-exit-building)")
 
         if not best or not ID_RE.match(best):
-            # Why no route, in the log rather than the prompt. The exit door has
-            # never fired in production while working perfectly when driven by
-            # hand against the same live payloads, and two passes of reasoning
-            # from the outside have not closed that gap.
+            # Why no route, in the log rather than the prompt.
+            #
+            # RESOLVED 2026-08-14, after several passes treated "the exit door
+            # has never fired in production while working perfectly when driven
+            # by hand" as an unexplained gap. It is not a gap. The door requires
+            # indoors, and the agent is not indoors: at= read `central` in 73 of
+            # 73 samples over two hours. A mechanism that cannot meet its
+            # precondition is silent for the right reason.
+            #
+            # This log line is still worth keeping - it is what would show the
+            # door being withheld while the agent WAS inside, which is the case
+            # that cost over an hour once. check_mechanisms will keep reporting
+            # the door SILENT; that is expected while the agent stays outdoors,
+            # and only interesting if at= starts naming a building.
             logger.info(
                 "mcity route: none (space=%s kind=%s indoors=%s reachable=%s "
                 "places=%d nolink=%s)",
