@@ -912,6 +912,10 @@ def test_a_sleeping_target_is_remembered_and_not_retried(control):
 def test_a_sleeping_counterpart_is_flagged_and_never_counted_as_waiting(control):
     """A sleeping person is still waiting but cannot hear us, so they must not
     be what work refuses on - otherwise the agent can neither speak nor act."""
+    # This exercises the RENDER, so clear any waiting state first:
+    # mcity-threads is skipped outright when the vitals line already
+    # carries the one waiting person and their words.
+    mc._WAITING.update({"at_ms": 0, "ids": [], "said": {}, "at": {}})
     other = "agent-2"
     waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", other],
                             "pendingRecipientAgentId": "agent-1",
@@ -1062,6 +1066,10 @@ def test_the_header_counts_only_people_who_can_hear_a_reply(control):
     """56 agents were reachable and the agent answered nobody: every row it was
     told to answer was someone in do-not-disturb, and the rule had no way to
     fall through. waiting-reachable is the number the procedure turns on."""
+    # This exercises the RENDER, so clear any waiting state first:
+    # mcity-threads is skipped outright when the vitals line already
+    # carries the one waiting person and their words.
+    mc._WAITING.update({"at_ms": 0, "ids": [], "said": {}, "at": {}})
     waiting = {"threads": [{"threadId": "t1", "participants": ["agent-1", "agent-2"],
                             "pendingRecipientAgentId": "agent-1",
                             "preview": "are you around tonight"}]}
@@ -4442,3 +4450,44 @@ def test_a_refusal_after_the_memory_expired_still_counts():
     mc._remember_refusal("dnd", who)
     assert mc._refusal_ttl("dnd", who) == base * 2, (
         "a lapsed memory must not reset what we know about this person")
+
+
+def test_the_thread_read_is_refused_when_the_line_already_answers_it(control):
+    """they-said= exists to make this read unnecessary, and the agent does it
+    anyway: of 14 turns where somebody was owed a reply and no reply came, 9 were
+    spent on exactly this call - with the id, the name and their words all on the
+    vitals line in front of it. The FIRST read is allowed; a second while the same
+    person is still waiting is the one with nothing to add."""
+    now = mc._now_ms()
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-asked7"],
+                        "said": {"user-agent-asked7": "is the deal still on?"},
+                        "at": {"user-agent-asked7": now}})
+    mc._THREADS_READ_FOR["who"] = "user-agent-asked7"   # already served once
+    result = _check(mc.threads())
+    assert result.startswith("MCITY-THREADS-SKIPPED reason=already_have_it"), result
+    assert "user-agent-asked7" in result
+
+
+def test_the_first_thread_read_for_that_person_is_allowed(control):
+    """Blocking it outright broke two render tests - the agent may legitimately
+    want to see who else is there."""
+    now = mc._now_ms()
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-asked6"],
+                        "said": {"user-agent-asked6": "still on?"},
+                        "at": {"user-agent-asked6": now}})
+    mc._THREADS_READ_FOR["who"] = None
+    assert not _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED reason=already_have_it")
+
+
+def test_the_thread_read_still_works_when_two_people_wait(control):
+    """With more than one waiting, the list is genuinely worth reading."""
+    now = mc._now_ms()
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-a7", "user-agent-b7"],
+                        "said": {"user-agent-a7": "hello"}, "at": {}})
+    assert not _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED")
+
+
+def test_the_thread_read_still_works_with_no_preview(control):
+    now = mc._now_ms()
+    mc._WAITING.update({"at_ms": now, "ids": ["user-agent-c7"], "said": {}, "at": {}})
+    assert not _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED")

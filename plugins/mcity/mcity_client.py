@@ -559,6 +559,7 @@ _can_speak_at_ms = 0
 _can_speak_refreshing = False
 
 _LAST_READ = {}                # verb -> {"body", "at" (ms of last CHANGE), "n"}
+_THREADS_READ_FOR = {"who": None}   # the waiting person we last read threads for
 # A read repeated within seconds cannot tell the agent anything new, whichever
 # read it is. Retiring the fixated skill has worked four times - areas, context,
 # work, and the idle sends - but the fixation simply moves: it was mcity-agents,
@@ -609,6 +610,7 @@ def reset_runtime_state():
         cache.clear()
     del _PENDING_SPEAKS[:]
     _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
+    _THREADS_READ_FOR["who"] = None
     _REACHABLE.update({"n": None, "at_ms": 0})
     _ROUTE.update({"text": None, "at_ms": 0, "from": None})
     _WAITING.update({"at_ms": 0, "ids": [], "said": {}, "at": {}})
@@ -1015,6 +1017,7 @@ _SKIP_REASONS = frozenset((
     "someone_waiting", "self_engaged", "already_said", "eat_first", "already_here",
     "no_link_exit", "busy", "just_read",
     "known_bad_destination", "no_food", "lease_lost", "lease_expired",
+    "already_have_it",
     "leaves_the_people",
     "cold_opens_paused",
 ))
@@ -3993,6 +3996,29 @@ def _own_threads(verb):
 
 @_guard("THREADS")
 def threads(_ignored=None):
+    # Reading the thread list adds nothing when the line already carries the
+    # answer. they-said= exists to make this read unnecessary, and the agent does
+    # it anyway: of 14 turns where somebody was owed a reply and no reply came, 9
+    # were spent on exactly this call, with the id, the name and their words all
+    # on the vitals line in front of it.
+    #
+    # Only when there is precisely ONE person waiting and we hold their message -
+    # with more than one, or with no preview, the list is genuinely worth reading.
+    waiting = _someone_is_waiting()
+    if (len(waiting) == 1 and (_WAITING.get("said") or {}).get(waiting[0])
+            and _THREADS_READ_FOR.get("who") == waiting[0]):
+        return _out(_failed(
+            "THREADS", "already_have_it",
+            f"the vitals line already carries who is waiting, their name and "
+            f"their words. Answer {waiting[0]} with mcity-speak instead - this "
+            "read cannot tell you anything you are not already looking at"))
+    if len(waiting) == 1:
+        # Served once for this person; a second read while they are still waiting
+        # is the one that has nothing to add. Letting the first through keeps the
+        # rendered list available - the agent may want to see who else is there,
+        # and blocking it outright broke two render tests, which is the collateral
+        # damage showing up before it reached the world.
+        _THREADS_READ_FOR["who"] = waiting[0]
     payload, error = _own_threads("THREADS")
     if error is not None:
         return error
