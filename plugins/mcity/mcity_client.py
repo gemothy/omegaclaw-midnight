@@ -588,8 +588,10 @@ _AGENTS_READ_FOR = {"who": None}    # the waiting person we last read the roster
 # 48 of 104 decisions. Five seconds still stops the same read twice in a row.
 _READ_COOLDOWN_MS = 5000
 _read_at = {}
-_REPEAT_WINDOW_MS = 120000     # beyond this, a re-read is legitimately fresh
-_REPEAT_REFUSE_AT = 4          # identical reads before the read is refused outright
+# _REPEAT_WINDOW_MS and _REPEAT_REFUSE_AT lived here until fdf5fac replaced that
+# mechanism with the cooldown above. The constants and their comment outlived the
+# code, so the file went on describing a guard that refused "identical reads
+# before the read is refused outright" and no longer existed.
 
 _VITALS = {"at_ms": 0, "hunger": None, "space": None, "items": None,
            "items_at_ms": 0,
@@ -3287,12 +3289,6 @@ def _ensure_lease():
 # lifecycle (not LLM-reachable)
 # --------------------------------------------------------------------------
 
-def ping():
-    """Import proof for the plugin loader; a failed MeTTa import is silent, so
-    the acceptance criterion is this positive line in the log."""
-    return "MCITY-PING-OK " + PLUGIN_VERSION
-
-
 def is_control_mode():
     return bool(_c("mode", "read") == "control" and _c("agent_id", ""))
 
@@ -3470,6 +3466,7 @@ def startup(gateway_url=None, agent_id=None, mode=None):
             logger.info("Midnight City plugin is idle: mcityAgentId is not set, "
                         "no skill is registered and no request is made")
             return _out(_line("STARTUP", "OK", (
+                ("version", PLUGIN_VERSION),
                 ("mode", _cfg["mode"]), ("agent", "none"),
                 ("gateway", "off"), ("lease", "off"), ("skills", "none"))))
 
@@ -3497,6 +3494,22 @@ def startup(gateway_url=None, agent_id=None, mode=None):
             lease = dict(_lease) if _lease else None
 
         pairs = [
+            # The version belongs on the line that actually fires.
+            #
+            # ping() existed to prove the import - "a failed MeTTa import is
+            # silent, so the acceptance criterion is this positive line in the
+            # log" - and nothing ever called it: MCITY-PING-OK appears zero times
+            # since container start and ping is bound in no .metta file. The
+            # acceptance criterion documented in the source did not exist, which
+            # is the exact failure this file has hit repeatedly with mechanisms
+            # that pass their tests and are dead in production.
+            #
+            # STARTUP is the real proof - it is bound in mcity.metta, it fires on
+            # every boot, and it already reports mode, gateway, lease and skills.
+            # It was missing the one thing ping carried, so the version moves here
+            # and ping is deleted rather than wired up: two import proofs is how
+            # they drift apart.
+            ("version", PLUGIN_VERSION),
             ("mode", _c("mode", "read")),
             ("agent", _c("agent_id", "") or "none"),
             ("gateway", _gateway_state),

@@ -616,8 +616,18 @@ def test_status_reports_a_dead_heartbeat_thread(control):
 # helpers
 # --------------------------------------------------------------------------
 
-def test_ping_is_a_positive_import_proof():
-    assert mc.ping().startswith("MCITY-PING-OK")
+def test_the_import_proof_is_the_line_that_actually_fires(control):
+    """This test used to assert mc.ping() returned MCITY-PING-OK, and it passed
+    for as long as that function existed - while MCITY-PING-OK appeared ZERO
+    times in production since container start, because nothing called ping and
+    it was bound in no .metta file.
+
+    A green test proving a mechanism exists, next to a mechanism that never runs,
+    is the failure this project keeps meeting. So the assertion moved to STARTUP,
+    which mcity.metta does bind and which fires on every boot."""
+    line = mc.startup("http://localhost:8080", "", "read") or ""
+    assert "MCITY-STARTUP-OK" in line, line
+    assert f"version={mc.PLUGIN_VERSION}" in line, line
 
 
 def test_norm_arg_undoes_the_metta_mangling():
@@ -4980,3 +4990,30 @@ def test_the_thread_confirmed_delivery_also_says_who(control):
     assert 'if landed:' in _SOURCE
     assert _SOURCE.count('("to", _plain(sent["agent_id"]))') == 1, (
         "the thread-confirmed success line must name the recipient too")
+
+
+def test_startup_reports_the_plugin_version(control):
+    """The version used to ride on ping(), which nothing called - MCITY-PING-OK
+    appeared zero times since container start and ping was bound in no .metta
+    file, so the "acceptance criterion" the source described did not exist.
+
+    STARTUP is the proof that actually fires, so the version belongs on it. It
+    also gives a second, independent read on which build is live, next to
+    check_deployed.py's file hashes."""
+    line = mc.startup("http://localhost:8080", "", "read") or ""
+    assert "MCITY-STARTUP-OK" in line, line
+    assert f"version={mc.PLUGIN_VERSION}" in line, line
+
+
+def test_there_is_exactly_one_import_proof(control):
+    """Two of them is how they drift apart - the reason ping was deleted rather
+    than wired up."""
+    source = open(mc.__file__, encoding="utf-8").read()
+    assert "def ping(" not in source
+    # The token itself survives in a comment explaining why ping went, which is
+    # worth keeping - so this asserts nothing EMITS it, not that nobody mentions
+    # it. The first version of this test failed on that comment, which is the
+    # right kind of strict in the wrong place.
+    assert 'return "MCITY-PING-OK"' not in source
+    assert not [ln for ln in source.splitlines()
+                if "MCITY-PING-OK" in ln and not ln.strip().startswith("#")]
