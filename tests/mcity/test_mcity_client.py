@@ -4197,10 +4197,17 @@ def test_a_refusal_after_their_message_still_stands():
     assert mc._still_worth_answering("user-agent-refused-after", now - 60000) is False
 
 
-def test_the_rosters_current_no_is_not_overridden_by_an_old_message():
+def test_a_sleeper_is_not_worth_answering():
+    """Rewritten. canSpeak false alone no longer drops a waiting person - during
+    the city's quiet stretches it is false for everybody, and 15 people wrote to
+    us while 2 got an answer. Being ASLEEP is the different fact that still
+    blocks: 24 of 30 speak attempts in one window went to the world to be told
+    exactly that."""
     now = mc._now_ms()
-    mc._CAN_SPEAK["user-agent-shut-now"] = (False, now)
-    assert mc._still_worth_answering("user-agent-shut-now", now - 1000) is False
+    mc._SLEEPING["user-agent-napping"] = now
+    assert mc._still_worth_answering("user-agent-napping", now - 1000) is False
+    mc._CAN_SPEAK["user-agent-quiet"] = (False, now)
+    assert mc._still_worth_answering("user-agent-quiet", now - 1000) is True
 
 
 def test_being_indoors_is_learned_without_the_retired_context_skill():
@@ -4491,3 +4498,25 @@ def test_the_thread_read_still_works_with_no_preview(control):
     now = mc._now_ms()
     mc._WAITING.update({"at_ms": now, "ids": ["user-agent-c7"], "said": {}, "at": {}})
     assert not _check(mc.threads()).startswith("MCITY-THREADS-SKIPPED")
+
+
+def test_somebody_who_wrote_to_us_is_kept_even_when_the_roster_says_no():
+    """canSpeak answers "can this agent be approached", and the speak path already
+    ignores it for somebody mid-thread. This list was still applying it, so the
+    person was dropped before the speak path saw them - and during the city's
+    low-availability stretches canSpeak is false for everybody, which is exactly
+    when 15 people wrote to us, 2 got an answer, and waiting= read 0 in 300
+    consecutive samples."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._CAN_SPEAK["user-agent-quiet-hour"] = (False, now)
+    assert mc._still_worth_answering("user-agent-quiet-hour", now - 30000) is True
+
+
+def test_a_refusal_after_their_message_still_drops_them():
+    """The evidence that actually predicts a refused reply is the world refusing
+    this person, not a roster column about approaching them."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._REFUSED[("dnd", "user-agent-said-no")] = now
+    assert mc._still_worth_answering("user-agent-said-no", now - 60000) is False

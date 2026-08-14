@@ -605,7 +605,7 @@ def reset_runtime_state():
     for cache in (_CAN_SPEAK, _REFUSED, _REFUSAL_STREAK, _LAST_READ, _SAID,
                   _AWAKE_PLACES, _WHO,
                   _AREA_KIND,
-                  _MET, _AIMED, _DISTRICTS, _WROTE_TO_US,
+                  _MET, _AIMED, _DISTRICTS, _WROTE_TO_US, _SLEEPING,
                   _inbound, _my_texts, _read_at):
         cache.clear()
     del _PENDING_SPEAKS[:]
@@ -1950,6 +1950,15 @@ def _met_before(agent_id):
     return f"met-before={count}x last={int(ago / 60000)}m-ago"
 
 
+# id -> when the roster last showed them asleep.
+_SLEEPING = {}
+
+
+def _is_asleep(agent_id):
+    at = _SLEEPING.get(agent_id)
+    return bool(at) and (_now_ms() - at) <= _CAN_SPEAK_TTL_MS
+
+
 def _note_who(agent_id, entry):
     """Keep name and profession for an agent we have seen on the roster."""
     try:
@@ -1977,6 +1986,15 @@ def _note_can_speak(entry, at_ms=None):
         if not agent_id or not isinstance(can, bool):
             return
         _note_who(agent_id, entry)
+        # Sleeping is not the same as unavailable, and the difference decides
+        # whether a reply is worth trying. See _still_worth_answering.
+        # The world says this two ways: an activeAction of kind sleep, and a
+        # plain status of "sleeping". Rows carry one or the other.
+        if (_action_blocks_talk(entry.get("action"), ("sleep",))
+                or "sleep" in _text(entry.get("status")).lower()):
+            _SLEEPING[agent_id] = _now_ms()
+        else:
+            _SLEEPING.pop(agent_id, None)
         # canSpeak alone is NOT enough. Three targets that refused with "target
         # is in do not disturb mode" all carried canSpeak true while running an
         # activeAction of kind engage, phase active. That is the same state the
@@ -4982,12 +5000,25 @@ def _still_worth_answering(agent_id, message_ms):
     The difference is which evidence is newer. A refusal from before their message
     has been superseded by the message; one from after it has not."""
     try:
-        # The roster's CURRENT verdict still stands on its own: a row saying
-        # canSpeak false describes them now, not before they wrote.
-        known = _CAN_SPEAK.get(agent_id)
-        if known and known[0] is False \
-                and (_now_ms() - known[1]) <= _CAN_SPEAK_TTL_MS:
+        # The roster's verdict is deliberately NOT consulted here.
+        #
+        # canSpeak answers "can this agent be approached", and the speak path
+        # already ignores it for somebody mid-thread for that reason. This list
+        # was still applying it, so the person was dropped before the speak path
+        # ever saw them - and during the city's low-availability stretches
+        # canSpeak is false for everybody, which is exactly when 15 people wrote
+        # to us, 2 got an answer, and waiting= read 0 in 300 consecutive samples.
+        #
+        # ASLEEP is the exception, and it is a different fact from canSpeak. A
+        # sleeper genuinely cannot hear a reply - of 30 speak attempts in one
+        # window, 24 went to the world to be told the target was asleep - whereas
+        # canSpeak false during a quiet hour only means they cannot be approached
+        # cold. The first is worth blocking, the second is not.
+        if _is_asleep(agent_id):
             return False
+        # What remains is the refusal the world gave us for THIS person, which is
+        # the evidence that predicts a refused reply, and which now backs off
+        # exponentially so a chronic refuser costs one write rather than many.
         for kind in _REFUSAL_TTL_MS:
             ago = _refused_ago_ms(kind, agent_id)
             if ago is None:

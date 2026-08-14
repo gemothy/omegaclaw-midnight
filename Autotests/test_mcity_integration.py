@@ -888,10 +888,14 @@ def _busy_city_routes():
         # trade_crypto had it true 4 times in 55, while harvesters at mine_ore and
         # chop_wood had it true 72 times in 76. The activity is the world's call,
         # not ours; engage alone never meant unreachable.
+        # Asleep, not merely busy. canSpeak false alone no longer drops somebody
+        # who wrote to us: during the city's quiet stretches it is false for
+        # everybody, and 15 people wrote while 2 got an answer. Sleeping is the
+        # state that genuinely cannot hear a reply - 24 of 30 speak attempts in
+        # one window went to the world to be told exactly that.
         {"agentId": "user-agent-engaged", "name": "Engaged", "distance": 2,
-         "isOpenToTalk": True, "canSpeak": False, "status": "busy",
-         "activeAction": {"kind": "engage", "phase": "active",
-                          "activity": "trade_crypto"},
+         "isOpenToTalk": True, "canSpeak": False, "status": "sleeping",
+         "activeAction": {"kind": "sleep", "phase": "active"},
          "position": {"spaceId": "central"}},
         # asleep, off-map
         {"agentId": "user-agent-sleeper", "name": "Sleeper", "distance": None,
