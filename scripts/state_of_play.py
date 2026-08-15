@@ -16,6 +16,7 @@ the next made every trend unreadable, which is most of why this exists.
 
 Never fails. It is a report, not a check.
 """
+import calendar
 import collections
 import subprocess
 import sys
@@ -86,13 +87,34 @@ def main():
         tried = sum(speak.values()) or 1
         print(f"  speaks that reached the world: {pct(sent, tried)}")
 
-    print("\nUPTIME")
+    # Uptime sits next to the outcome numbers on purpose. Every deploy restarts
+    # the agent, and a restart discards who has written to us, who we have met
+    # and who we last wrote to - _warm_from_store recovers the durable facts and
+    # not those. This file's own earlier measurement: the hour with no deploy in
+    # it answered 9 of 11 threads, the two hours carrying five deploys managed 1
+    # of 9 and 0 of 17.
+    #
+    # So a short uptime is context for a bad number, and printing them apart
+    # invites reading the number as the city's fault.
+    print("\nUPTIME  (a short one is context for the numbers above)")
     for name in ("omegaclaw", "vllm-mcity"):
         out = subprocess.run(
             ["docker", "inspect", name, "--format",
-             "{{.State.StartedAt}} restarts={{.RestartCount}}"],
+             "{{.State.StartedAt}}|{{.RestartCount}}"],
             capture_output=True, text=True, timeout=30)
-        print(f"  {name:12} {(out.stdout or '?').strip()[:48]}")
+        started, _, count = (out.stdout or "|").strip().partition("|")
+        hours = ""
+        try:
+            # timegm, not mktime. StartedAt is UTC and mktime reads a struct as
+            # LOCAL time, which printed "up -7.5h" on the first run - the same
+            # class of mistake as the four-hour daemon clock this repo already
+            # documents, and just as easy to read straight past.
+            when = calendar.timegm(time.strptime(started[:19],
+                                                 "%Y-%m-%dT%H:%M:%S"))
+            hours = f"  up {(time.time() - when) / 3600:.1f}h"
+        except (ValueError, OverflowError):
+            pass
+        print(f"  {name:12} restarts={count}{hours}")
     return 0
 
 
