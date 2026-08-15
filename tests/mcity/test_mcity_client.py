@@ -5341,3 +5341,42 @@ def test_a_stale_roster_says_nothing_about_a_room(control):
         mc._WHERE[who] = ("hacker-house-interior", old)
         mc._CAN_SPEAK[who] = (False, old)
     assert not mc._space_looks_unspeakable("hacker-house-interior")
+
+
+def test_a_bed_inside_a_dead_room_is_still_the_dead_room(control):
+    """The world lists 120 areas, most of them furniture inside a handful of
+    rooms. A move names the AREA - charging-house-bed-01 - while everything we
+    know about who is in a room is keyed by the SPACE.
+
+    Measured: 21 moves to that bed in half an hour, into a room where 0 of 10
+    people can be spoken to, with the guard finding nobody standing in an area by
+    that name and saying nothing."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "central"})
+    mc._AREA_SPACE["charging-house-bed-01"] = "charging-house-interior"
+    for n in range(12):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("charging-house-interior", now)
+        mc._CAN_SPEAK[who] = (False, now)
+    assert mc._space_looks_unspeakable("charging-house-bed-01"), (
+        "the bed is in the room, and the room is dead")
+    assert "reason=leaves_the_people" in (mc.move_area("charging-house-bed-01") or "")
+
+
+def test_the_anchor_is_harvested_from_the_areas_list(control):
+    """Free - the route already reads that list for the area kinds."""
+    mc.reset_runtime_state()
+    mc._note_area_kinds({"areas": [
+        {"id": "charging-house-bed-01", "kind": "building",
+         "anchor": {"spaceId": "charging-house-interior"}},
+        {"id": "central-plaza", "kind": "park",
+         "anchor": {"spaceId": "central"}}]})
+    assert mc._space_of("charging-house-bed-01") == "charging-house-interior"
+    assert mc._space_of("central-plaza") == "central"
+
+
+def test_an_unknown_area_resolves_to_itself(control):
+    """A space name passed straight in must still work - most callers pass one."""
+    mc.reset_runtime_state()
+    assert mc._space_of("central") == "central"

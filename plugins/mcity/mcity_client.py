@@ -627,6 +627,7 @@ def reset_runtime_state():
     del _PENDING_SPEAKS[:]
     _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
     _THREADS_READ_FOR["who"] = None
+    _AREA_SPACE.clear()
     _SPACE_REACH.clear()
     _AGENTS_READ_FOR["who"] = None
     _NAMED_NOW.update({"id": None, "at_ms": 0})
@@ -2280,6 +2281,8 @@ _SPACE_REACH = {}
 _SPACE_REACH_TTL_MS = 3600000
 _SPACE_REACH_MIN = 10          # below this, silence is just a small sample
 _SPACE_REACH_FLOOR = 0.15      # accept rate under this and the room is not worth it
+# area id -> the space it sits in. 120 areas, a handful of rooms.
+_AREA_SPACE = {}
 _SPACE_SPEAKABLE_MIN = 8       # fewer than this in a room and it says nothing
 _SPACE_SPEAKABLE_FLOOR = 0.10  # under this share speakable and it is a dead room
 
@@ -2295,6 +2298,16 @@ def _note_space_reach(reached):
                               lost + (0 if reached else 1), _now_ms())
     except Exception:      # noqa: BLE001 - bookkeeping must never break a send
         return
+
+
+def _space_of(area_or_space):
+    """The SPACE an area sits in, or the argument unchanged.
+
+    A move names an area; occupancy is known per space. Resolving one to the
+    other is the whole difference between a guard that fires and one that finds
+    nobody standing in a bed and shrugs.
+    """
+    return _AREA_SPACE.get(str(area_or_space), str(area_or_space))
 
 
 def _space_looks_unspeakable(space):
@@ -2320,7 +2333,7 @@ def _space_looks_unspeakable(space):
     Computed from caches the roster scan already fills, so it costs no request.
     """
     try:
-        target, now, seen, free = str(space), _now_ms(), 0, 0
+        target, now, seen, free = _space_of(space), _now_ms(), 0, 0
         for agent_id, (where, at) in _WHERE.items():
             if str(where) != target or (now - at) > _CAN_SPEAK_TTL_MS:
                 continue
@@ -5003,6 +5016,20 @@ def _note_area_kinds(payload):
             area_id, kind = _text(_get(item, "id")), _text(_get(item, "kind"))
             if area_id and kind:
                 _AREA_KIND[area_id] = kind
+            # And which SPACE the area sits in. The world lists 120 areas, most
+            # of them furniture inside a handful of rooms - beds, terminals - and
+            # a move names the AREA while everything we know about who is in a
+            # room is keyed by the SPACE.
+            #
+            # Without this, _space_looks_unspeakable was asked about
+            # "charging-house-bed-01", found nobody standing in an area by that
+            # name, and said nothing. The agent walked to that bed 21 times in
+            # half an hour, into a room where 0 of 10 people can be spoken to.
+            anchor = _get(item, "anchor")
+            if area_id and isinstance(anchor, dict):
+                where = _text(_get(anchor, "spaceId"))
+                if where:
+                    _AREA_SPACE[area_id] = where
         _AREA_KIND_AT["ms"] = _now_ms()
     except Exception:      # noqa: BLE001
         return
