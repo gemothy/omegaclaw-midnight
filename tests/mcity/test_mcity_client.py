@@ -5132,3 +5132,53 @@ def test_the_space_check_is_the_same_one_the_speak_guard_uses(control):
     body = body[:body.index("\ndef ", 10)]
     assert "_somewhere_else(" in body, (
         "target selection must ask the same question the speak guard asks")
+
+
+# The target-state questions: "is this specific person speakable right now".
+# NOT the message-state ones (already_said, echo) or our own state (busy,
+# lease) - those depend on what is being said or on us, and the selector has no
+# business asking them.
+_TARGET_PREDICATES = ("_can_be_reached", "_somewhere_else", "_is_asleep",
+                      "_world_has_refused")
+
+
+def _body_of(name):
+    source = open(mc.__file__, encoding="utf-8").read()
+    start = source.index(f"def {name}(")
+    return source[start:source.index("\ndef ", start + 10)]
+
+
+def test_the_selector_asks_every_target_question_the_speak_path_enforces():
+    """Five times in this file a rule has been decided in one place and enforced
+    in another, and each cost turns silently:
+
+        space_kind, the area-kind table, _DISTRICTS   gated on a read nobody made
+        _can_be_reached                               duplicated into a caller
+        _somewhere_else                               10 of 11 another_space
+                                                      skips were the person
+                                                      talk-to= had just named
+
+    Each was found by noticing wasted turns in production, months of passes
+    apart. This asserts the invariant instead: any target-state question the
+    speak path asks, the selector asks too - otherwise the vitals line can name
+    somebody the very next guard refuses.
+    """
+    selector = _body_of("_best_person_to_talk_to")
+    speak = _body_of("speak")
+    missing = [p for p in _TARGET_PREDICATES
+               if f"{p}(" in speak and f"{p}(" not in selector]
+    assert not missing, (
+        f"speak() refuses on {missing} and _best_person_to_talk_to never asks, "
+        "so talk-to= can name somebody the speak guard will refuse")
+
+
+def test_the_waiting_list_is_deliberately_exempt_from_this():
+    """The one place the two are allowed to disagree, and it must stay
+    deliberate rather than become an oversight.
+
+    _refresh_waiting_if_stale does NOT filter on reachability: somebody who has
+    just written to us is available to us whatever the roster last said. Filtered
+    on it, waiting= read 0 in 963 of 963 samples while five people opened threads.
+    """
+    body = _body_of("_refresh_waiting_if_stale")
+    assert "_can_be_reached" not in body.replace("NOT filtered on _can_be_reached", "")
