@@ -5062,3 +5062,42 @@ def test_every_skill_the_rules_name_is_actually_registered():
     named = set(re.findall(r"\b(mcity-[a-z-]+)", rules))
     missing = {n for n in named if n not in listed}
     assert not missing, f"the rules name unregistered skills: {sorted(missing)}"
+
+
+def test_shopping_is_refused_when_there_is_nothing_to_buy(control):
+    """Six merchant reads in three hours while hunger read normal in all 442
+    samples and holding= carried meat and to_go_food throughout. Food is the only
+    thing money buys in this world, so those turns could not change anything."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(49)",
+                       "items": "crystal=284320 meat=5 to_go_food=17",
+                       "items_at_ms": mc._now_ms(), "space": "central"})
+    result = mc.merchants() or ""
+    assert "MCITY-MERCHANTS-SKIPPED" in result, result
+    assert "reason=not_hungry" in result, result
+
+
+def test_shopping_opens_again_the_moment_hunger_rises(control):
+    """The guard reads both halves from vitals rather than assuming them, so it
+    yields as soon as either stops being true."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "hungry(62)",
+                       "items": "crystal=284320 meat=5",
+                       "items_at_ms": mc._now_ms(), "space": "central"})
+    assert "reason=not_hungry" not in (_check(mc.merchants()) or "")
+
+
+def test_shopping_opens_again_when_the_food_runs_out(control):
+    """The other half: not hungry yet, but carrying nothing edible, is exactly
+    when to go and buy some."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "hunger": "normal(49)",
+                       "items": "crystal=284320", "items_at_ms": mc._now_ms(),
+                       "space": "central"})
+    assert "reason=not_hungry" not in (_check(mc.merchants()) or "")
+
+
+def test_a_refusal_to_shop_is_skipped_not_failed(control):
+    """FAILED is read by the core prompt as 'fix the format and re-invoke', which
+    is how a refusal becomes a loop - the reason _SKIP_REASONS exists."""
+    assert "not_hungry" in mc._SKIP_REASONS

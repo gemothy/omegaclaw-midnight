@@ -1101,6 +1101,12 @@ _SKIP_REASONS = frozenset((
     "already_have_it",
     "leaves_the_people",
     "cold_opens_paused",
+    # Nothing is broken when you are not hungry - the call simply cannot do
+    # anything. It was returning FAILED, which the core prompt tells the agent to
+    # fix and re-invoke, and this list exists precisely because that turns a
+    # refusal into a loop. eat() has refused on this reason from vitals for some
+    # time; merchants now does too.
+    "not_hungry",
 ))
 
 
@@ -3901,6 +3907,28 @@ def _way_to_food():
 
 @_guard("MERCHANTS")
 def merchants():
+    # The only reason to buy anything in this world is food, and the only reason
+    # to want food is hunger. Read 6 times in three hours while hunger read
+    # normal in all 442 samples and holding= carried meat and to_go_food the
+    # whole time - six turns spent shopping with nothing to buy and no reason to
+    # buy it.
+    #
+    # Same shape as the roster and thread re-read guards: refuse the read that
+    # cannot change what happens next, and name the thing that can. It yields
+    # the moment either half stops being true - hunger rising, or the food
+    # running out - because both are read from our own vitals, not assumed.
+    hunger = _VITALS.get("hunger") or ""
+    fresh = (_VITALS.get("at_ms")
+             and (_now_ms() - _VITALS["at_ms"]) <= _VITALS_STALE_MS)
+    if (fresh and hunger.startswith(("normal", "full", "fed"))
+            and _VITALS.get("items") is not None
+            and not _holding_only_inedible()):
+        return _out(_promote_command(
+            _failed("MERCHANTS", "not_hungry",
+                    f"vitals says hunger={hunger} and holding= already carries "
+                    "food, so there is nothing here to buy. Food is the only "
+                    "thing money is for in this world"),
+            _next_action_command()))
     resp = _http("GET", "/api/skill/merchants")
     if not resp["ok"]:
         return _fail_http("MERCHANTS", resp)
