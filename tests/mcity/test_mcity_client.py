@@ -5304,6 +5304,12 @@ def test_a_room_where_nobody_can_be_spoken_to_is_refused_immediately(control):
         who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
         mc._WHERE[who] = ("hacker-house-interior", now)
         mc._CAN_SPEAK[who] = (False, now)
+    # The city must be awake for a room to be dead BY COMPARISON - during a
+    # lull no room is worse than any other, and that is deliberate.
+    for n in range(20):
+        other = f"user-agent-9{n:07d}-0000-0000-0000-000000000000"
+        mc._WHERE[other] = ("central", now)
+        mc._CAN_SPEAK[other] = (True, now)
     assert mc._space_looks_unspeakable("hacker-house-interior")
     result = mc.move_area("hacker-house-interior") or ""
     assert "reason=leaves_the_people" in result, result
@@ -5359,6 +5365,12 @@ def test_a_bed_inside_a_dead_room_is_still_the_dead_room(control):
         who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
         mc._WHERE[who] = ("charging-house-interior", now)
         mc._CAN_SPEAK[who] = (False, now)
+    # The city must be awake for a room to be dead BY COMPARISON - during a
+    # lull no room is worse than any other, and that is deliberate.
+    for n in range(20):
+        other = f"user-agent-9{n:07d}-0000-0000-0000-000000000000"
+        mc._WHERE[other] = ("central", now)
+        mc._CAN_SPEAK[other] = (True, now)
     assert mc._space_looks_unspeakable("charging-house-bed-01"), (
         "the bed is in the room, and the room is dead")
     assert "reason=leaves_the_people" in (mc.move_area("charging-house-bed-01") or "")
@@ -5403,6 +5415,12 @@ def test_standing_in_a_dead_room_puts_the_way_out_on_the_line(control):
         who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
         mc._WHERE[who] = ("hacker-house-interior", now)
         mc._CAN_SPEAK[who] = (False, now)
+    # The city must be awake for a room to be dead BY COMPARISON - during a
+    # lull no room is worse than any other, and that is deliberate.
+    for n in range(20):
+        other = f"user-agent-9{n:07d}-0000-0000-0000-000000000000"
+        mc._WHERE[other] = ("central", now)
+        mc._CAN_SPEAK[other] = (True, now)
     assert mc._space_looks_unspeakable("hacker-house-interior")
     line = mc._vitals_line() or ""
     assert "mcity-travel-district" in line, line
@@ -5421,3 +5439,37 @@ def test_a_room_that_talks_back_gets_no_route(control):
         mc._WHERE[who] = ("central", now)
         mc._CAN_SPEAK[who] = (n > 1, now)
     assert "mcity-travel-district" not in (mc._vitals_line() or "")
+
+
+def test_a_city_wide_lull_does_not_condemn_every_room(control):
+    """Measured an hour apart: central read canSpeak 96 of 107, then 1 of 113.
+
+    Against a fixed floor the second reading calls central dead - and every other
+    space with it, including the one the agent is standing in and the one it
+    would move to. It would be refused everywhere and pinned where it happened to
+    be, which is precisely the trap this predicate exists to prevent."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    for n in range(30):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("central" if n < 20 else "hacker-house-interior", now)
+        mc._CAN_SPEAK[who] = (False, now)      # nobody anywhere can talk
+    assert not mc._space_looks_unspeakable("hacker-house-interior"), (
+        "during a lull no room is worse than any other")
+    assert not mc._space_looks_unspeakable("central")
+
+
+def test_a_dead_room_is_still_dead_while_the_city_is_awake(control):
+    """The comparison must not soften the case it was built for."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    for n in range(20):
+        who = f"user-agent-1{n:07d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("central", now)
+        mc._CAN_SPEAK[who] = (True, now)       # the street is busy
+    for n in range(12):
+        who = f"user-agent-2{n:07d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("hacker-house-interior", now)
+        mc._CAN_SPEAK[who] = (False, now)
+    assert mc._space_looks_unspeakable("hacker-house-interior")
+    assert not mc._space_looks_unspeakable("central")

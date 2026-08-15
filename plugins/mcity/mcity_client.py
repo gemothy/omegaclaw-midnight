@@ -2360,7 +2360,28 @@ def _space_looks_unspeakable(space):
             free += 1 if can[0] else 0
         if seen < _SPACE_SPEAKABLE_MIN:
             return False
-        return (free / seen) < _SPACE_SPEAKABLE_FLOOR
+        if (free / seen) >= _SPACE_SPEAKABLE_FLOOR:
+            return False
+        # A room is only bad COMPARED TO SOMEWHERE. The city runs in availability
+        # cycles - central measured 96 of 107 speakable one hour and 1 of 113 the
+        # next - and against a fixed floor that lull condemns every space at
+        # once, including the one the agent is standing in and the one it would
+        # move to. It would be refused everywhere and pinned wherever it happened
+        # to be, which is the trap this predicate exists to prevent.
+        #
+        # So: only call a room dead while somewhere else is alive.
+        alive, total = 0, 0
+        for agent_id, (_where, at) in _WHERE.items():
+            if (now - at) > _CAN_SPEAK_TTL_MS:
+                continue
+            can = _CAN_SPEAK.get(agent_id)
+            if not can or (now - can[1]) > _CAN_SPEAK_TTL_MS:
+                continue
+            total += 1
+            alive += 1 if can[0] else 0
+        if total < _SPACE_SPEAKABLE_MIN:
+            return False
+        return (alive / total) >= _SPACE_SPEAKABLE_FLOOR
     except Exception:      # noqa: BLE001 - a hint must never break a move
         return False
 
