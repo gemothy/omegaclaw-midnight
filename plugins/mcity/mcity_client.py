@@ -2280,6 +2280,8 @@ _SPACE_REACH = {}
 _SPACE_REACH_TTL_MS = 3600000
 _SPACE_REACH_MIN = 10          # below this, silence is just a small sample
 _SPACE_REACH_FLOOR = 0.15      # accept rate under this and the room is not worth it
+_SPACE_SPEAKABLE_MIN = 8       # fewer than this in a room and it says nothing
+_SPACE_SPEAKABLE_FLOOR = 0.10  # under this share speakable and it is a dead room
 
 
 def _note_space_reach(reached):
@@ -2293,6 +2295,45 @@ def _note_space_reach(reached):
                               lost + (0 if reached else 1), _now_ms())
     except Exception:      # noqa: BLE001 - bookkeeping must never break a send
         return
+
+
+def _space_looks_unspeakable(space):
+    """True when the roster says nobody in that room can be spoken to.
+
+    This is the signal _SPACE_REACH should have been. That one learns by walking
+    into the bad room and being refused there, so it is empty after every restart
+    and the lesson has to be paid for again - measured directly: four moves into
+    the 5% room got through in the half hour after a deploy, while the table
+    refilled.
+
+    The roster knows already, and knows it from anywhere:
+
+        central                  96 of 107 canSpeak   89%
+        hacker-house-interior     0 of  55             0%
+        charging-house-interior   0 of  10             0%
+
+    Note this is an aggregate about a PLACE, which is a different question from
+    the one this file warns about elsewhere - canSpeak predicts little about
+    whether a given PERSON will accept, since do-not-disturb is invisible in it.
+    Nobody speakable at all is not a prediction, it is a description.
+
+    Computed from caches the roster scan already fills, so it costs no request.
+    """
+    try:
+        target, now, seen, free = str(space), _now_ms(), 0, 0
+        for agent_id, (where, at) in _WHERE.items():
+            if str(where) != target or (now - at) > _CAN_SPEAK_TTL_MS:
+                continue
+            can = _CAN_SPEAK.get(agent_id)
+            if not can or (now - can[1]) > _CAN_SPEAK_TTL_MS:
+                continue
+            seen += 1
+            free += 1 if can[0] else 0
+        if seen < _SPACE_SPEAKABLE_MIN:
+            return False
+        return (free / seen) < _SPACE_SPEAKABLE_FLOOR
+    except Exception:      # noqa: BLE001 - a hint must never break a move
+        return False
 
 
 def _space_rarely_accepts(space):
@@ -5019,6 +5060,13 @@ def _destination_action(verb, arg, key, usage, kind=None):
         # perfectly reasonable from here and the world answers "agent is already
         # in district central" - six times in twelve minutes. The world is the
         # only thing that knows, so remember what it said.
+        if verb == "MOVE-AREA" and _space_looks_unspeakable(value):
+            return None, _promote_command(
+                _failed(verb, "leaves_the_people",
+                        f"the roster puts people in {value} and not one of them "
+                        "can be spoken to. It is not empty, it is a room full of "
+                        "people who are all busy"),
+                _next_action_command())
         if verb == "MOVE-AREA" and _space_rarely_accepts(value):
             got, lost, _at = _SPACE_REACH.get(str(value), (0, 0, 0))
             return None, _promote_command(

@@ -5286,3 +5286,58 @@ def test_the_reach_memory_records_where_we_were_standing(control):
     mc._note_space_reach(False)
     mc._note_space_reach(True)
     assert mc._SPACE_REACH["hacker-house-interior"][:2] == (1, 1)
+
+
+def test_a_room_where_nobody_can_be_spoken_to_is_refused_immediately(control):
+    """The roster knows from anywhere, with no history:
+
+        central                  96 of 107 canSpeak   89%
+        hacker-house-interior     0 of  55             0%
+
+    _SPACE_REACH had to learn this by being refused inside the room, so it was
+    empty after every restart - four moves into the 5% room got through in the
+    half hour after a deploy while it refilled."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "central"})
+    for n in range(12):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("hacker-house-interior", now)
+        mc._CAN_SPEAK[who] = (False, now)
+    assert mc._space_looks_unspeakable("hacker-house-interior")
+    result = mc.move_area("hacker-house-interior") or ""
+    assert "reason=leaves_the_people" in result, result
+    assert "all busy" in result, result
+
+
+def test_a_room_with_people_free_in_it_stays_open(control):
+    """central at 89% must never trip this."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    for n in range(12):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("central", now)
+        mc._CAN_SPEAK[who] = (n > 1, now)     # 10 of 12 free
+    assert not mc._space_looks_unspeakable("central")
+
+
+def test_a_nearly_empty_room_says_nothing_either_way(control):
+    """Three people all busy is a small sample, not a dead room."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    for n in range(3):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("quiet-room", now)
+        mc._CAN_SPEAK[who] = (False, now)
+    assert not mc._space_looks_unspeakable("quiet-room")
+
+
+def test_a_stale_roster_says_nothing_about_a_room(control):
+    """Everyone in there may have finished what they were doing an hour ago."""
+    mc.reset_runtime_state()
+    old = mc._now_ms() - mc._CAN_SPEAK_TTL_MS - 1
+    for n in range(12):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("hacker-house-interior", old)
+        mc._CAN_SPEAK[who] = (False, old)
+    assert not mc._space_looks_unspeakable("hacker-house-interior")
