@@ -18,6 +18,7 @@ loudly on the former.
 """
 
 import datetime as _dt
+import collections
 import re
 import subprocess
 
@@ -152,3 +153,30 @@ def read_window(container, window, timeout=30.0, tail=4000, strip_ts=True,
             f"entries are missing. Counts from this text are LOW. Ask for a "
             f"shorter window.")
     return body, None
+
+
+def count_results(text, verb=None):
+    """Count REAL skill results, not mentions of them.
+
+    Four wrong findings this session came from grepping the log for a command
+    name and counting the hits. The log carries each command many more times than
+    it ran it: the model narrates its own last result back in prose, the harness
+    prints do-THIS= hints, and HISTORY replays old turns. "34 moves to a bed" was
+    30 move results of which 8 confirmed; "26 prose lines" was 41; "29% of turns
+    with no command" was 0%.
+
+    A result is the only thing that means the call happened. Returns
+    {(verb, tag): n} - MCITY-<VERB>-<TAG> at the start of a token, nothing else.
+
+        count_results(text, "MOVE-AREA")   -> {("MOVE-AREA", "OK"): 8, ...}
+
+    For anything the world itself records - who answered, what was delivered -
+    prefer asking the world. This is for the harness's own decisions, which only
+    the log knows.
+    """
+    pattern = r"\bMCITY-([A-Z][A-Z-]*)-(OK|PENDING|FAILED|SKIPPED)\b"
+    found = collections.Counter()
+    for name, tag in re.findall(pattern, text or ""):
+        if verb is None or name == verb:
+            found[(name, tag)] += 1
+    return dict(found)

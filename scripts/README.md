@@ -39,14 +39,19 @@ Run `check_all.py` first. The rest are for when it says something is off.
 
 Worth knowing before trusting a number out of them:
 
-0. **Inferring behaviour from log patterns.** Three separate wrong conclusions
-   this way: replies the world had refused filed as "never attempted" (the
+0. **Inferring behaviour from log patterns.** Use `dockerlogs.count_results`,
+   which counts only real `MCITY-<VERB>-<TAG>` result lines - grepping for a
+   command name counts the model narrating its last result, `do-THIS=` hints and
+   HISTORY replays alongside the one time it ran. Three separate wrong conclusions
+   Four wrong findings this way: replies the world had refused filed as "never attempted" (the
    pattern read 120 characters after the id, missing anything before it); "26
    prose lines" that was really 41, because it matched one arbitrary opener; and
    "29% of turns produce no command", which required a quoted argument and so
    missed every call to `mcity-threads`, `mcity-agents` and `mcity-navigation`.
-   Each looked like a finding and each was a regex. Where the world knows the
-   answer - thread lists, `recipientMessageCount` - ask the world.
+   And "34 walks into a bedroom", which was 30 move results of which 8
+   confirmed. Each looked like a finding and each was a regex. Where the world
+   knows the answer - thread lists, `recipientMessageCount` - ask the world;
+   where only the harness knows, count results, not mentions.
 1. **Counting the prompt.** The mission text names most of the tokens worth
    counting, and is echoed into the log every turn. `they-said=` once read 658
    where the truth was 0. `dockerlogs.read_window` now strips the prompt by
