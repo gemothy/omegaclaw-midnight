@@ -28,10 +28,19 @@ Run `check_all.py` first. The rest are for when it says something is off.
 what decides whether a pass was worth running. Quoting a 45m window one pass and
 90m the next made every trend unreadable, which is why the windows are fixed.
 
-First run, 2026-08-15: answering 42% over the last hour and 38% over three,
-against 29% across all 100 held threads - the recent windows are better than the
-session average. 26 two-way threads, 32 of 32 messages distinct. The headline
-inefficiency is that only 9 of 87 speak attempts reach the world at all.
+Five runs, 2026-08-15, answering over 1h / 3h / all held:
+
+    42% / 38% / 29%      -> 44 / 50 / 34 -> 70 / 52 / 37 -> 83 / 56 / 39
+    -> 50 / 56 / 38
+
+and speak reach 10% -> 11% -> 14% -> 16% -> 31%. The jump came with the agent
+standing in central rather than a room where speaking almost never worked.
+
+WHERE the agent stands turned out to matter more than anything else measured:
+one window had central reaching 12 of 26 speaks and hacker-house-interior 4 of
+54. That line is printed every run now and left to accumulate, because one window
+is not a property of a room and this project has drawn confident wrong
+conclusions from single samples before.
 
 ## The measurements
 

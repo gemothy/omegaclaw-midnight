@@ -18,6 +18,7 @@ Never fails. It is a report, not a check.
 """
 import calendar
 import collections
+import re
 import subprocess
 import sys
 import time
@@ -86,6 +87,31 @@ def main():
                    if tag in ("OK", "PENDING"))
         tried = sum(speak.values()) or 1
         print(f"  speaks that reached the world: {pct(sent, tried)}")
+
+        # WHERE, because it turned out to matter more than anything else
+        # measured: in one 45-minute window central reached 12 of 26 speaks and
+        # hacker-house-interior 4 of 54 - 46% against 7% - while 113 of 288
+        # vitals lines put the agent in the bad room.
+        #
+        # One window is not a property of a room, and this project has drawn
+        # confident wrong conclusions from single samples more than once. So it
+        # is printed every run and left to accumulate rather than acted on.
+        here, by_place = None, collections.Counter()
+        for line in text.splitlines():
+            at = re.search(r"vitals [^\n]*? at=([\w-]+)", line)
+            if at:
+                here = at.group(1)
+            outcome = re.search(r"MCITY-SPEAK-(OK|PENDING|FAILED|SKIPPED)", line)
+            if outcome and here:
+                by_place[(here, outcome.group(1))] += 1
+        places = sorted({k[0] for k in by_place})
+        if len(places) > 1 or (places and sum(by_place.values()) > 4):
+            print("  by where we were standing:")
+            for place in places:
+                total = sum(v for k, v in by_place.items() if k[0] == place)
+                got = sum(v for k, v in by_place.items()
+                          if k[0] == place and k[1] in ("OK", "PENDING"))
+                print(f"    {place[:26]:28} {pct(got, total)}")
 
     # Uptime sits next to the outcome numbers on purpose. Every deploy restarts
     # the agent, and a restart discards who has written to us, who we have met
