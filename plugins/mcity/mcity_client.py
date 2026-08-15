@@ -2627,6 +2627,20 @@ def _best_person_to_talk_to():
                 continue
             if not _looks_speakable(agent_id):
                 continue
+            # Ask the guard that will judge the speak, not a different question.
+            #
+            # Measured: 10 of 11 another_space skips in an hour were for the very
+            # person talk-to= had just named. The vitals line said "talk to this
+            # id", the agent obeyed as instructed, and the speak guard refused it
+            # because the roster puts them in another space - the harness naming
+            # a target it was about to refuse, which is the same shape as the
+            # reachable=0 alongside waiting=1 contradiction.
+            #
+            # Fifth time a rule has been asked in one place and enforced in
+            # another; the file already carries that lesson for _can_be_reached,
+            # two lines up. One path.
+            if _somewhere_else(agent_id):
+                continue
             # Three tiers, then least-recently-written-to inside each.
             #
             # About three quarters of openers are refused by the world with "target

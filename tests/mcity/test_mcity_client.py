@@ -5101,3 +5101,34 @@ def test_a_refusal_to_shop_is_skipped_not_failed(control):
     """FAILED is read by the core prompt as 'fix the format and re-invoke', which
     is how a refusal becomes a loop - the reason _SKIP_REASONS exists."""
     assert "not_hungry" in mc._SKIP_REASONS
+
+
+def test_talk_to_never_names_somebody_in_another_room(control):
+    """10 of 11 another_space skips in one hour were for the person talk-to= had
+    just named. The line said talk to this id, the agent did as it was told, and
+    the speak guard refused it - the harness naming a target it was about to
+    refuse, exactly like reachable=0 beside waiting=1."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    here = "user-agent-11111111-2222-3333-4444-555555555555"
+    away = "user-agent-66666666-7777-8888-9999-000000000000"
+    mc._VITALS.update({"at_ms": now, "space": "central", "space_kind": "district"})
+    for who in (here, away):
+        mc._CAN_SPEAK[who] = (True, now)
+        mc._WHO[who] = "Someone,hacker"
+    mc._REACHABLE.update({"n": 2, "at_ms": now})
+    mc._WHERE[here] = ("central", now)
+    mc._WHERE[away] = ("hacker-house-interior", now)
+    picked = mc._best_person_to_talk_to()
+    assert picked != away, "named somebody the speak guard would refuse"
+    assert picked == here
+
+
+def test_the_space_check_is_the_same_one_the_speak_guard_uses(control):
+    """Asked in one place and enforced in another is how these drift - the file
+    already carries that lesson for _can_be_reached."""
+    source = open(mc.__file__, encoding="utf-8").read()
+    body = source[source.index("def _best_person_to_talk_to"):]
+    body = body[:body.index("\ndef ", 10)]
+    assert "_somewhere_else(" in body, (
+        "target selection must ask the same question the speak guard asks")
