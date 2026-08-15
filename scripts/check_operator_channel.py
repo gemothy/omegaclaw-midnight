@@ -22,8 +22,17 @@ That third one is why this exists. Measured over 180 minutes, the agent emitted:
 
 It was writing prose - "send is forbidden on this turn" - and a line is run as
 whatever its first word names, so the sentence became a real send. It reached
-nobody only because no chat id was configured. Eight further lines parsed as
-bogus commands the same way.
+nobody only because no chat id was configured.
+
+The number to watch is that one, not the volume of prose. Prose whose first word
+names nothing - The, No, pat_pat, whatever the sentence starts with - costs a
+turn and no more. Prose that starts with `send` or an mcity- name IS that command
+running. Measured after the mission rule that names this trap: 88 turns, 26 prose
+lines, 0 of them a command. The rule is NOT yet shown to work - prose ran at 3.75
+an hour against a 2.7 baseline, which is noise either way - so treat the risk as
+live until a longer window says otherwise. (2 was the first figure reported here
+and it was wrong: it counted only lines opening `No`, and prose opens with
+whatever word the sentence starts with.)
 
     python3 scripts/check_operator_channel.py [window]
 
@@ -36,6 +45,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, "scripts")
 from dockerlogs import read_window                        # noqa: E402
@@ -43,12 +53,25 @@ from dockerlogs import read_window                        # noqa: E402
 ENV_FILE = os.path.expanduser("~/.config/omegaclaw/mcity.env")
 
 
-def bot_reachable():
-    out = subprocess.run(
-        ["docker", "exec", "omegaclaw", "sh", "-c",
-         "curl -s -m 20 'http://localhost:8080/telegram/getMe'"],
-        capture_output=True, text=True, timeout=60)
-    text = out.stdout or ""
+def bot_reachable(attempts=2):
+    """Twice before calling it unreachable.
+
+    One timed-out `docker exec` failed this whole check inside check_all while
+    the bot was fine - the probe crossing a container boundary and the network
+    is exactly the kind of thing that blips. A check that cries wolf gets
+    ignored, which is worse than not having it.
+    """
+    text = ""
+    for attempt in range(attempts):
+        out = subprocess.run(
+            ["docker", "exec", "omegaclaw", "sh", "-c",
+             "curl -s -m 20 'http://localhost:8080/telegram/getMe'"],
+            capture_output=True, text=True, timeout=60)
+        text = out.stdout or ""
+        if '"ok":true' in text.replace(" ", "").lower():
+            break
+        if attempt + 1 < attempts:
+            time.sleep(2)
     name = re.search(r'"username"\s*:\s*"([^"]+)"', text)
     return ('"ok":true' in text.replace(" ", "").lower(),
             name.group(1) if name else None)
@@ -70,7 +93,8 @@ def main():
 
     ok, name = bot_reachable()
     print(f"  {'ok  ' if ok else 'FAIL'}  bot reachable"
-          f"{f' ({name})' if name else ''}")
+          f"{f' ({name})' if name else ''}"
+          f"{'' if ok else ' - probed twice'}")
 
     deliverable = can_deliver()
     if deliverable is None:
@@ -87,11 +111,26 @@ def main():
     log = text or ""
 
     sends = re.findall(r'\(\(send "([^"]{0,120})', log)
-    prose = re.findall(r'\(\(No "([^"]{0,80})', log)
+    # Count prose by what it is, not by one arbitrary opener. The first version
+    # matched only `((No "` and therefore undercounted: live lines also parse as
+    # The, pat_pat and whatever else the sentence happens to start with.
+    #
+    # The distinction that matters is not how much prose there is. Prose whose
+    # first word names nothing is a wasted turn; prose whose first word names a
+    # REAL command is that command executed. Only the second kind can put text
+    # on somebody's phone.
+    parsed = re.findall(r'\(\((\w[\w-]*) "', log)
+    harmless = [w for w in parsed
+                if w != "send" and not w.startswith("mcity-")]
     print(f"\n  {len(sends)} send command(s) emitted in {window}")
     for s in sends[:5]:
         print(f"      {s[:96]}")
-    print(f"  {len(prose)} line(s) of prose parsed as a bogus command")
+    # NOT called a wasted turn. A single turn has been seen carrying both a
+    # prose line and a real mcity-speak, so the command still ran; separating
+    # the two needs turn boundaries this does not parse. Reported as a count,
+    # with no claim about cost.
+    print(f"  {len(harmless)} line(s) of prose that named no command "
+          f"(cost unknown - a turn can carry prose AND a real command)")
 
     # A send whose text starts mid-sentence is prose that got executed. A real
     # one answers the operator or reports an outcome; it does not begin "is".
