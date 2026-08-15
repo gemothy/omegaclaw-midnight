@@ -5380,3 +5380,44 @@ def test_an_unknown_area_resolves_to_itself(control):
     """A space name passed straight in must still work - most callers pass one."""
     mc.reset_runtime_state()
     assert mc._space_of("central") == "central"
+
+
+def test_standing_in_a_dead_room_puts_the_way_out_on_the_line(control):
+    """Three passes fixed the ENTRANCE and the agent kept ending up inside
+    anyway. This time it was already in there when the window opened: 36 vitals
+    lines in hacker-house-interior, 24 speaks, none reaching the world, and a
+    route offered zero times.
+
+    None of the three existing conditions can fire indoors - reachable= counts
+    the roster rather than this room and read above zero on all 36 lines, and
+    both throttle conditions rest on a counter that zeroes at ten."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    mc._REACHABLE.update({"n": 96, "at_ms": now})     # the roster, not this room
+    mc._AWAKE_PLACES["central"] = (40, now)
+    mc._ROUTE.update({"text": "(mcity-travel-district _quote_central_quote_)",
+                      "at_ms": now, "from": "hacker-house-interior"})
+    for n in range(12):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("hacker-house-interior", now)
+        mc._CAN_SPEAK[who] = (False, now)
+    assert mc._space_looks_unspeakable("hacker-house-interior")
+    line = mc._vitals_line() or ""
+    assert "mcity-travel-district" in line, line
+
+
+def test_a_room_that_talks_back_gets_no_route(control):
+    """The agent must not be pushed out of somewhere that works."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "central", "space_kind": "district"})
+    mc._REACHABLE.update({"n": 96, "at_ms": now})
+    mc._ROUTE.update({"text": "(mcity-travel-district _quote_west_quote_)",
+                      "at_ms": now, "from": "central"})
+    for n in range(12):
+        who = f"user-agent-{n:08d}-0000-0000-0000-000000000000"
+        mc._WHERE[who] = ("central", now)
+        mc._CAN_SPEAK[who] = (n > 1, now)
+    assert "mcity-travel-district" not in (mc._vitals_line() or "")

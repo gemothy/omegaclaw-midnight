@@ -985,7 +985,23 @@ def _vitals_line():
         # comment above records, and each fix so far has widened what counts as
         # "the room will not talk to us" without making it a thing the room can
         # actually be.
-        if ((_REACHABLE["n"] == 0 or _cold_opens_paused() or _room_is_refusing())
+        # The same predicate that refuses walking INTO a dead room now also asks
+        # whether we are standing in one. Three passes fixed the entrance and the
+        # agent kept ending up inside anyway - this pass it was already in there
+        # when the window opened, spoke 24 times, reached nobody, and was offered
+        # a way out zero times.
+        #
+        # Why the other three conditions never fired indoors:
+        #   reachable==0        it counts the roster, not this room. It read
+        #                       above zero on all 36 lines while 0 of 24 speaks
+        #                       from that room got through.
+        #   _cold_opens_paused  a 60s window after every tenth refusal
+        #   _room_is_refusing   the same counter, which zeroes at ten
+        #
+        # _space_looks_unspeakable describes the room from the roster, needs no
+        # streak to build up, and survives a restart.
+        if ((_REACHABLE["n"] == 0 or _cold_opens_paused() or _room_is_refusing()
+                or _space_looks_unspeakable(_VITALS.get("space")))
                 and not food_route):
             # Not while a food command is already on this line. The agent is told
             # a parenthesised command is the next move, so offering two makes the
@@ -2925,7 +2941,8 @@ def _travel_to_people_command():
         # The throttle already measures the thing that matters - ten refused
         # openers in a row - and nothing was using it.
         if (best is None and indoors
-                and (_REACHABLE.get("n") == 0 or _cold_opens_paused())
+                and (_REACHABLE.get("n") == 0 or _cold_opens_paused()
+                     or _space_looks_unspeakable(here))
                 and _now_ms() >= _no_link_exit_until_ms):
             return ("nobody in this building can be reached. Get outside where "
                     "you can see the districts and the people in them, exactly: "
