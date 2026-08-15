@@ -970,7 +970,21 @@ def _vitals_line():
         # Fixing a condition inside a function that nobody calls is the same
         # mistake as gating a mechanism on a read that never happens, which this
         # file has now done three times.
-        if (_REACHABLE["n"] == 0 or _cold_opens_paused()) and not food_route:
+        # _room_is_refusing, not only the ACTIVE pause. The pause is a 60s window
+        # that opens after ten refusals and then resets the counter, so it is true
+        # for about a minute in every several and the route was consulted almost
+        # never. Measured this pass, with the condition as it stood:
+        #
+        #   central                 12 of 26 speaks reached the world (46%)
+        #   hacker-house-interior    4 of 54                          (7%)
+        #
+        # and 113 of 288 vitals lines placed us in the 7% room with a route
+        # offered ZERO times. That is the third recurrence of the same trap the
+        # comment above records, and each fix so far has widened what counts as
+        # "the room will not talk to us" without making it a thing the room can
+        # actually be.
+        if ((_REACHABLE["n"] == 0 or _cold_opens_paused() or _room_is_refusing())
+                and not food_route):
             # Not while a food command is already on this line. The agent is told
             # a parenthesised command is the next move, so offering two makes the
             # instruction meaningless and it picks whichever it likes.
@@ -2271,6 +2285,21 @@ def _note_cold_open(refused):
         # reached the world in twelve minutes. A throttle that can only tighten
         # is a mute button with extra steps.
         _cold_opens_refused = 0
+
+
+def _room_is_refusing():
+    """True when openers from here keep coming back refused.
+
+    The distinction from _cold_opens_paused is the whole point: that one answers
+    "are we throttled right now", which is true for a minute after every tenth
+    refusal and false the rest of the time. This answers "is this room worth
+    standing in", which is what deciding to leave actually depends on.
+
+    Half the streak, and _note_cold_open zeroes the counter on any opener that
+    IS accepted - so this needs five refusals with nothing accepted in between,
+    which a room with anybody free in it will not produce.
+    """
+    return _cold_opens_refused >= max(1, _COLD_OPEN_STREAK // 2)
 
 
 def _cold_opens_paused():

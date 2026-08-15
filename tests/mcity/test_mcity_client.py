@@ -5182,3 +5182,50 @@ def test_the_waiting_list_is_deliberately_exempt_from_this():
     """
     body = _body_of("_refresh_waiting_if_stale")
     assert "_can_be_reached" not in body.replace("NOT filtered on _can_be_reached", "")
+
+
+def test_a_room_that_keeps_refusing_gets_a_route_out(control):
+    """Measured: central reached 12 of 26 speaks, hacker-house-interior 4 of 54,
+    and 113 of 288 vitals lines put us in the 7% room with a route offered zero
+    times.
+
+    The route was gated on reachable==0 - false, the room is full - or on the
+    throttle being ACTIVELY paused, which is a 60s window after every tenth
+    refusal. So the one condition that described the room was true about a minute
+    in every several."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "hacker-house-interior",
+                       "space_kind": "interior"})
+    mc._REACHABLE.update({"n": 27, "at_ms": now})       # the room is NOT empty
+    mc._AWAKE_PLACES["central"] = (40, now)
+    mc._ROUTE.update({"text": "(mcity-travel-district _quote_central_quote_)",
+                      "at_ms": now, "from": "hacker-house-interior"})
+    assert not mc._room_is_refusing(), "no refusals yet"
+    for _ in range(mc._COLD_OPEN_STREAK // 2):
+        mc._note_cold_open(refused=True)
+    assert mc._room_is_refusing(), "five refused openers is a refusing room"
+    assert "mcity-travel-district" in (mc._vitals_line() or ""), (
+        "a refusing room must carry the way out")
+
+
+def test_one_accepted_opener_clears_the_refusing_room(control):
+    """_note_cold_open zeroes the counter on an accepted opener, so a room with
+    anybody free in it never reaches the bar. Without that this would latch on
+    and push the agent out of somewhere perfectly good."""
+    mc.reset_runtime_state()
+    for _ in range(mc._COLD_OPEN_STREAK // 2):
+        mc._note_cold_open(refused=True)
+    assert mc._room_is_refusing()
+    mc._note_cold_open(refused=False)
+    assert not mc._room_is_refusing()
+
+
+def test_the_pause_and_the_refusing_room_are_different_questions(control):
+    """One asks whether we are throttled this second, the other whether the room
+    is worth standing in. Collapsing them is what kept the route unconsulted."""
+    mc.reset_runtime_state()
+    for _ in range(mc._COLD_OPEN_STREAK // 2):
+        mc._note_cold_open(refused=True)
+    assert mc._room_is_refusing()
+    assert not mc._cold_opens_paused(), "not throttled, but still a bad room"
