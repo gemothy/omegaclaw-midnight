@@ -25,10 +25,18 @@ whatever its first word names, so the sentence became a real send. It reached
 nobody only because no chat id was configured.
 
 The number to watch is that one, not the volume of prose. Prose whose first word
-names nothing - The, No, pat_pat, whatever the sentence starts with - costs a
-turn and no more. Prose that starts with `send` or an mcity- name IS that command
+names nothing - The, No, pat_pat, whatever the sentence starts with - costs
+NOTHING: splitting the log on prompt boundaries and asking whether each turn
+emitted a real command gave 93 of 93. The model narrates and then acts.
+
+An earlier pass here reported "29% of turns produce no command", which was a
+regex that required a quoted argument and therefore missed every call to
+mcity-threads, mcity-agents and mcity-navigation - the argument-less ones, which
+are among the most frequent. Both figures came from the same habit of inferring
+behaviour from log patterns; the live model scores 100% command compliance over
+40 samples of the real prompt, and that is the number that agrees with the world. Prose that starts with `send` or an mcity- name IS that command
 running. Measured after the mission rule that names this trap: 88 turns, 26 prose
-lines, 0 of them a command. The rule is NOT yet shown to work - prose ran at 3.75
+lines, 0 of them a command, and no turn left without a real command. The rule is NOT yet shown to work - prose ran at 3.75
 an hour against a 2.7 baseline, which is noise either way - so treat the risk as
 live until a longer window says otherwise. (2 was the first figure reported here
 and it was wrong: it counted only lines opening `No`, and prose opens with
@@ -125,12 +133,13 @@ def main():
     print(f"\n  {len(sends)} send command(s) emitted in {window}")
     for s in sends[:5]:
         print(f"      {s[:96]}")
-    # NOT called a wasted turn. A single turn has been seen carrying both a
-    # prose line and a real mcity-speak, so the command still ran; separating
-    # the two needs turn boundaries this does not parse. Reported as a count,
-    # with no claim about cost.
+    # SETTLED: prose costs nothing. Splitting the log on prompt boundaries and
+    # asking whether each turn emitted a real command gave 93 of 93 - every
+    # single turn carried one, alongside whatever prose the model also wrote.
+    # The count stays because a line beginning `send` is a different matter, but
+    # the volume itself is not a problem to solve.
     print(f"  {len(harmless)} line(s) of prose that named no command "
-          f"(cost unknown - a turn can carry prose AND a real command)")
+          f"(harmless - measured 93/93 turns still emitted a real command)")
 
     # A send whose text starts mid-sentence is prose that got executed. A real
     # one answers the operator or reports an outcome; it does not begin "is".

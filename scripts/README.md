@@ -35,10 +35,18 @@ Run `check_all.py` first. The rest are for when it says something is off.
 | `measure_dnd_recovery.py` | how long after the world refuses a send does that same person accept one? Sets the dnd backoff base, and answered "should we retry fast inside the 60s thread window" with no |
 | `dockerlogs.py` | the log reader everything else uses |
 
-## Three ways these tools have lied
+## Four ways these tools have lied
 
 Worth knowing before trusting a number out of them:
 
+0. **Inferring behaviour from log patterns.** Three separate wrong conclusions
+   this way: replies the world had refused filed as "never attempted" (the
+   pattern read 120 characters after the id, missing anything before it); "26
+   prose lines" that was really 41, because it matched one arbitrary opener; and
+   "29% of turns produce no command", which required a quoted argument and so
+   missed every call to `mcity-threads`, `mcity-agents` and `mcity-navigation`.
+   Each looked like a finding and each was a regex. Where the world knows the
+   answer - thread lists, `recipientMessageCount` - ask the world.
 1. **Counting the prompt.** The mission text names most of the tokens worth
    counting, and is echoed into the log every turn. `they-said=` once read 658
    where the truth was 0. `dockerlogs.read_window` now strips the prompt by
