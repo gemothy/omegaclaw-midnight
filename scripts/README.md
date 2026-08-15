@@ -21,6 +21,18 @@ Run `check_all.py` first. The rest are for when it says something is off.
 | `check_operator_channel.py` | can the operator reach the agent, and does the agent speak unbidden? | the channel that reaches a real person's phone, and nothing checked it. Found the agent emitting `(send "is forbidden on this turn...")` - prose executed because a line runs as whatever its first word names. It reached nobody only because no chat id is configured, which is an accident of setup, not a guard |
 | `check_mechanisms.py` | which parts of the harness have left a trace lately? | two mechanisms were dead in production for days while passing their unit tests, because the tests populate the state by hand |
 
+## Is it working?
+
+`state_of_play.py` - one comparable snapshot, fixed windows, world-sourced.
+`check_all` answers "is anything broken"; this answers "is it working", which is
+what decides whether a pass was worth running. Quoting a 45m window one pass and
+90m the next made every trend unreadable, which is why the windows are fixed.
+
+First run, 2026-08-15: answering 42% over the last hour and 38% over three,
+against 29% across all 100 held threads - the recent windows are better than the
+session average. 26 two-way threads, 32 of 32 messages distinct. The headline
+inefficiency is that only 9 of 87 speak attempts reach the world at all.
+
 ## The measurements
 
 | script | what it measures |
