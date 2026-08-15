@@ -627,6 +627,7 @@ def reset_runtime_state():
     del _PENDING_SPEAKS[:]
     _FOOD_SOURCE.update({"at_ms": 0, "space": None, "cmd": None, "name": None})
     _THREADS_READ_FOR["who"] = None
+    _SPACE_REACH.clear()
     _AGENTS_READ_FOR["who"] = None
     _NAMED_NOW.update({"id": None, "at_ms": 0})
     _REACHABLE.update({"n": None, "at_ms": 0})
@@ -2260,6 +2261,57 @@ def _once_wrote_to_us(agent_id):
     """True when this person opened a thread with us recently enough to matter."""
     at = _WROTE_TO_US.get(agent_id)
     return bool(at) and (_now_ms() - at) <= _WROTE_TO_US_TTL_MS
+
+
+# space -> [reached, refused, when]. How often a message sent from THIS room
+# gets as far as the world.
+#
+# Measured across two independent windows, hours apart:
+#
+#     central                 12/26 then 22/73   -> 34 of 99   34%
+#     hacker-house-interior    4/54 then  0/19   ->  4 of 73    5%
+#
+# A room full of people who never accept a message is worse than an empty
+# street, and nothing in the harness knew that. _is_an_empty_room only asks
+# whether the destination is a building while somebody is reachable HERE - so
+# when central goes quiet, which it does in cycles, walking into the 5% room was
+# permitted.
+_SPACE_REACH = {}
+_SPACE_REACH_TTL_MS = 3600000
+_SPACE_REACH_MIN = 10          # below this, silence is just a small sample
+_SPACE_REACH_FLOOR = 0.15      # accept rate under this and the room is not worth it
+
+
+def _note_space_reach(reached):
+    """Record how a message sent from where we are standing went."""
+    try:
+        here = _VITALS.get("space")
+        if not here:
+            return
+        got, lost, _at = _SPACE_REACH.get(here, (0, 0, 0))
+        _SPACE_REACH[here] = (got + (1 if reached else 0),
+                              lost + (0 if reached else 1), _now_ms())
+    except Exception:      # noqa: BLE001 - bookkeeping must never break a send
+        return
+
+
+def _space_rarely_accepts(space):
+    """True when we have enough evidence that this room does not talk back.
+
+    Deliberately NOT symmetric with _is_an_empty_room: that one asks about here
+    and now, this one about a place's measured history. It needs a real sample
+    before it will say anything - a quiet ten minutes in a good room must not
+    condemn it - and it forgets after an hour, because a room is not permanently
+    anything and the city runs in cycles.
+    """
+    record = _SPACE_REACH.get(str(space))
+    if not record:
+        return False
+    got, lost, at = record
+    if (_now_ms() - at) > _SPACE_REACH_TTL_MS:
+        return False
+    total = got + lost
+    return total >= _SPACE_REACH_MIN and (got / total) < _SPACE_REACH_FLOOR
 
 
 def _note_cold_open(refused):
@@ -4967,6 +5019,15 @@ def _destination_action(verb, arg, key, usage, kind=None):
         # perfectly reasonable from here and the world answers "agent is already
         # in district central" - six times in twelve minutes. The world is the
         # only thing that knows, so remember what it said.
+        if verb == "MOVE-AREA" and _space_rarely_accepts(value):
+            got, lost, _at = _SPACE_REACH.get(str(value), (0, 0, 0))
+            return None, _promote_command(
+                _failed(verb, "leaves_the_people",
+                        f"{value} has taken {got} of {got + lost} messages sent "
+                        "from inside it. It is not empty, it just does not talk "
+                        "back, and standing in it is how the last hour was "
+                        "spent"),
+                _next_action_command())
         if verb == "MOVE-AREA" and _is_an_empty_room(value):
             return None, _promote_command(
                 _failed(verb, "leaves_the_people",
@@ -5874,6 +5935,7 @@ def speak(arg=None):
             _note_cold_open_sent()
             if "MCITY-SPEAK-FAILED" not in (result or ""):
                 _note_cold_open(refused=False)
+                _note_space_reach(True)
     if sent.get("agent_id") and "MCITY-SPEAK-PENDING" in (result or ""):
         # Look twice. The world creates the thread a moment after it accepts the
         # message, so a single check right after the confirm window can run
@@ -5946,6 +6008,7 @@ def speak(arg=None):
         elif sent.get("agent_id") and "target is in do not disturb" in lowered:
             if sent["agent_id"] not in _someone_is_waiting():
                 _note_cold_open(refused=True)
+                _note_space_reach(False)
             # Its own kind, and NOT one a roster reading may overturn.
             #
             # This was filed under asleep, which the roster is allowed to

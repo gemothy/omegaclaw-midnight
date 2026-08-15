@@ -5229,3 +5229,60 @@ def test_the_pause_and_the_refusing_room_are_different_questions(control):
         mc._note_cold_open(refused=True)
     assert mc._room_is_refusing()
     assert not mc._cold_opens_paused(), "not throttled, but still a bad room"
+
+
+def test_a_room_that_never_talks_back_is_not_a_destination(control):
+    """Two independent windows, hours apart:
+
+        central                 12/26 then 22/73  ->  34 of 99   34%
+        hacker-house-interior    4/54 then  0/19  ->   4 of 73    5%
+
+    A room full of people who never accept a message is worse than an empty
+    street. _is_an_empty_room only asks whether the destination is a building
+    while somebody is reachable HERE, so when central went quiet - which it does
+    in cycles - walking into the 5% room was allowed."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "central", "space_kind": "district"})
+    mc._REACHABLE.update({"n": 0, "at_ms": now})     # the street IS quiet
+    mc._SPACE_REACH["hacker-house-interior"] = (1, 19, now)
+    result = mc.move_area("hacker-house-interior") or ""
+    assert "reason=leaves_the_people" in result, result
+    assert "does not talk back" in result, result
+
+
+def test_a_quiet_spell_does_not_condemn_a_room(control):
+    """It needs a real sample before it says anything. A good room with a slow
+    ten minutes must not be written off - that would be the mirror of the trap
+    it is fixing."""
+    mc.reset_runtime_state()
+    now = mc._now_ms()
+    mc._VITALS.update({"at_ms": now, "space": "central"})
+    mc._SPACE_REACH["hacker-house-interior"] = (0, 4, now)   # under the minimum
+    assert not mc._space_rarely_accepts("hacker-house-interior")
+
+
+def test_a_room_is_forgiven_after_an_hour(control):
+    """A room is not permanently anything and the city runs in availability
+    cycles, so the memory expires."""
+    mc.reset_runtime_state()
+    old = mc._now_ms() - mc._SPACE_REACH_TTL_MS - 1
+    mc._SPACE_REACH["hacker-house-interior"] = (1, 19, old)
+    assert not mc._space_rarely_accepts("hacker-house-interior")
+
+
+def test_a_room_that_does_talk_back_stays_open(control):
+    """central at 34% must never trip this, or the agent has nowhere to go."""
+    mc.reset_runtime_state()
+    mc._SPACE_REACH["central"] = (34, 65, mc._now_ms())
+    assert not mc._space_rarely_accepts("central")
+
+
+def test_the_reach_memory_records_where_we_were_standing(control):
+    """Recorded against the room the message was sent FROM, which is the thing
+    being judged - not the recipient's room."""
+    mc.reset_runtime_state()
+    mc._VITALS.update({"at_ms": mc._now_ms(), "space": "hacker-house-interior"})
+    mc._note_space_reach(False)
+    mc._note_space_reach(True)
+    assert mc._SPACE_REACH["hacker-house-interior"][:2] == (1, 1)
