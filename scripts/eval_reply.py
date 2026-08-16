@@ -34,6 +34,25 @@ Swap only if something starts looking wrong, and re-run this first.
 Everything that has moved the reply rate this session was the harness telling the
 model who was waiting - never the model itself.
 
+SPARK COMPARISON, 2026-08-15, 40 samples each, ONE cached prompt:
+
+    Qwen3.8-27B-NVFP4A16 (community)  26/40  14 wrong-target  7.4s  2.2 tok/s
+    Qwen3.6-35B-A3B      (MoE)        12/40  18 wrong-target  0.9s   35 tok/s
+    Qwen3.8-27B-FP8      (official)   27/40  13 wrong-target  3.9s  4.7 tok/s
+
+Now serving the official FP8: same quality, twice the speed of the community
+quant at the same 29GB, and a checkpoint with 123k downloads rather than single
+digits. NVFP4A16 is 4-bit weights with BF16 ACTIVATIONS - it dequantizes to
+compute, paying 4-bit memory for no tensor-core benefit; FP8 is native on
+Blackwell.
+
+READ THE WRONG-TARGET COLUMN, NOT THE ANSWERED ONE. Every model here aims at the
+wrong person about a third of the time, and the dense Qwen3.8 scored 40/40 with
+ZERO wrong-target on 2026-08-14 against this same eval. The model did not get
+worse; the prompt changed underneath it, and this is a prompt regression showing
+up in a model comparison. Fix that before reading anything else here as a
+property of a model.
+
 MODEL COMPARISON, 2026-08-14, 40 samples each, both scored against the SAME
 cached prompt (third argument) so the question was identical:
 
