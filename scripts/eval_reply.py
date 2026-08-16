@@ -34,6 +34,26 @@ Swap only if something starts looking wrong, and re-run this first.
 Everything that has moved the reply rate this session was the harness telling the
 model who was waiting - never the model itself.
 
+FIXED 2026-08-16. The wrong-target column below was a HARNESS fault, not a model
+one, and not the mission wording I suspected.
+
+Asked where the wrong targets came from instead of guessing: every one was an id
+the harness itself had put in HISTORY on an earlier turn -
+
+    "Nobody waiting can hear you. user-agent-look-9d5c... can hear you right now
+     - say something to them: (mcity-speak _quote_user-agent-look-9d5c... )"
+
+and a stale try-instead= line the same way. The mission gives a parenthesised
+command absolute authority - "never a suggestion to weigh up" - so a correct
+instruction from a past turn outranked the person waiting now. The rule is now
+scoped to THIS turn's results; anything in HISTORY is a record, never a target.
+
+    before   27/40 answered, 13 wrong-target
+    after    32/40 answered,  0 wrong-target, negative control 0 of 20
+
+Caveat: the after run is a fresh capture, so the history differs too. 13 to 0
+with the mechanism identified is worth believing; treat the 27 -> 32 as softer.
+
 SPARK COMPARISON, 2026-08-15, 40 samples each, ONE cached prompt:
 
     Qwen3.8-27B-NVFP4A16 (community)  26/40  14 wrong-target  7.4s  2.2 tok/s
