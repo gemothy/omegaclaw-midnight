@@ -1,0 +1,13 @@
+# Test-only dependencies. The runtime deps are in requirements.txt.
+#
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+#   .venv/bin/python -m pytest tests/mcity -q
+#
+# pytest was previously undeclared: the README told you to run it and nothing
+# installed it.
+pytest==9.1.1
+
+# Optional. Only the Postgres roster-store tests need it; they skip cleanly
+# when it is absent, so leave it out if you do not have a database.
+# psycopg[binary]==3.2.3
