@@ -112,11 +112,24 @@ that.
 
 ## Working on it
 
+There are two suites, and they have different requirements.
+
 ```bash
+# Hermetic. No container, no database, no network. Runs on a clean checkout.
+python3 -m pytest tests/mcity -q
+
+# Everything, including the tests that drive the live deployed agent.
 OMEGACLAW_SKIP_LIVE_CLEANUP=1 python3 -m pytest Autotests tests/mcity -q
-# pytest must be importable by the interpreter you use; this repo is developed
-# against a venv (e.g. ~/.hermes-venv/bin/python3 -m pytest ...)
 ```
+
+`tests/mcity/` is the one to run if you just want to see the logic verified.
+`Autotests/` additionally drives the real agent over `docker exec` and IRC; with
+the stack down those tests **skip** with the precondition named, rather than
+failing. Bring the stack up first (`docker compose up -d`) if you want them to
+actually execute. Expect the full run to take tens of minutes.
+
+pytest must be importable by the interpreter you use; this repo is developed
+against a venv, e.g. `~/.hermes-venv/bin/python3 -m pytest ...`.
 
 The suites share module state and are designed to run together;
 `mcity_client.reset_runtime_state()` is what keeps them independent.

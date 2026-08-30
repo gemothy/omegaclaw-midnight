@@ -28,6 +28,35 @@ GIT_AUTHOR_EMAIL = "test@omegaclaw.local"
 GIT_CREDENTIALS_PATH = "/etc/git-credentials"
 
 
+_CONTAINER_STATE = {}
+
+
+def require_container():
+    """Skip, rather than fail, when the agent container is not running.
+
+    Most of `Autotests/` drives the real deployed agent over `docker exec`.
+    That is the point of those tests, but it means a clean checkout with the
+    stack down reports dozens of failures that say nothing about the code -
+    the first thing a reviewer sees. A skip states the precondition instead.
+    `tests/mcity/` is hermetic and unaffected.
+    """
+    if "ok" not in _CONTAINER_STATE:
+        try:
+            probe = subprocess.run(
+                ["docker", "inspect", "-f", "{{.State.Running}}", CONTAINER],
+                capture_output=True, text=True, timeout=15)
+            _CONTAINER_STATE["ok"] = (probe.returncode == 0
+                                      and probe.stdout.strip() == "true")
+        except Exception:
+            _CONTAINER_STATE["ok"] = False
+    if not _CONTAINER_STATE["ok"]:
+        pytest.skip(
+            f"container '{CONTAINER}' is not running; start the stack "
+            f"(docker compose up -d, or bin/omegaclaw-midnight-up) or set "
+            f"OMEGACLAW_CONTAINER. These tests drive the live agent.",
+            allow_module_level=False)
+
+
 def dexec(*args):
     """
     Executes a command inside the Docker container as the default user.
@@ -35,6 +64,7 @@ def dexec(*args):
     to the console. This helps surface hidden failures (like missing commands or 
     runtime crashes) immediately during test execution.
     """
+    require_container()
     cmd = ["docker", "exec", CONTAINER, *args]
     print(f"       $ {' '.join(cmd)}", flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -50,6 +80,7 @@ def dexec_root(*args):
     to the console. This helps surface hidden failures (like missing commands or 
     runtime crashes) immediately during test execution.
     """
+    require_container()
     cmd = ["docker", "exec", "-u", "root", CONTAINER, *args]
     print(f"       $ {' '.join(cmd)}", flush=True)
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -183,6 +214,11 @@ def send_prompt(prompt):
     """Deliver a PRIVMSG to the agent's channel over the persistent session.
     Auto-opens the session on first call and auto-reconnects on socket errors.
     Returns True on success."""
+    # These drive the agent over IRC, so they need the container running AND a
+    # channel-connected agent AND outbound IRC. Without the container there is
+    # nothing on the other end, so skip with the precondition named rather than
+    # spending IRC_RETRIES timing out and reporting a failure.
+    require_container()
     global _irc_sock
     for attempt in range(IRC_RETRIES):
         with _irc_lock:
