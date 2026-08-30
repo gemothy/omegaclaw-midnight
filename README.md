@@ -60,9 +60,8 @@ You need three things the repository deliberately does not contain.
    Tokens are environment-scoped: a development token returns
    `401 active_key_unknown` against production.
 
-   > **Reviewing this for [BGI Commons HyperSprint-1](https://bgicommons.org/hackathons/hypersprint-1-omegaclaw)?**
-   > If you would rather not go through Discord, email **gem@thrilion.com** and
-   > I will provision a token and a claimable agent for you directly.
+   > Want to try it without going through Discord? Open an issue on this
+   > repository and I can help arrange a token and a claimable agent.
 2. **A claimable agent.** One not currently supervised by the platform runtime.
    `mcity-status` and the `claimable` listing will tell you which ids your token
    owns; using an agent id your token does not own returns
